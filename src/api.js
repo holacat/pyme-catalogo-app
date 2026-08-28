@@ -59,6 +59,33 @@ export function actualizarEstadoPedido({ adminKey, pedidoId, nuevoEstado }) {
   return post({ action: 'actualizarEstadoPedido', adminKey, pedidoId, nuevoEstado });
 }
 
-export function crearProducto({ adminKey, nombre, categoria, precio, stock, stockMinimo, fotoUrl, descripcion }) {
-  return post({ action: 'crearProducto', adminKey, nombre, categoria, precio, stock, stockMinimo, fotoUrl, descripcion });
+export function crearProducto({
+  adminKey,
+  nombre,
+  categoria,
+  marca,
+  talla,
+  color,
+  precio,
+  precioCompra,
+  stock,
+  stockMinimo,
+  fotoUrl,
+  descripcion,
+}) {
+  return post({
+    action: 'crearProducto',
+    adminKey,
+    nombre,
+    categoria,
+    marca,
+    talla,
+    color,
+    precio,
+    precioCompra,
+    stock,
+    stockMinimo,
+    fotoUrl,
+    descripcion,
+  });
 }
