@@ -9,7 +9,7 @@ export default function App() {
         <Link to="/" className="brand">🛍️ Mi Comercio</Link>
         <nav>
           <Link to="/" className={location.pathname === '/' ? 'active' : ''}>Catálogo</Link>
-          <Link to="/admin" className={location.pathname === '/admin' ? 'active' : ''}>Admin</Link>
+        
         </nav>
       </header>
       <main>
