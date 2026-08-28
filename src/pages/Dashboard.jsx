@@ -5,6 +5,7 @@ import {
   obtenerAlertas,
   actualizarStock,
   actualizarEstadoPedido,
+  crearProducto,
 } from '../api.js';
 
 const STORAGE_KEY = 'pyme_admin_key';
@@ -108,6 +109,9 @@ export default function Dashboard() {
         <button className={tab === 'alertas' ? 'active' : ''} onClick={() => setTab('alertas')}>
           Alertas ({alertas.length})
         </button>
+        <button className={tab === 'nuevo' ? 'active' : ''} onClick={() => setTab('nuevo')}>
+          + Agregar producto
+        </button>
       </div>
 
       {tab === 'stock' && (
@@ -162,7 +166,122 @@ export default function Dashboard() {
           ))}
         </ul>
       )}
+
+      {tab === 'nuevo' && (
+        <NuevoProductoForm
+          adminKey={adminKey}
+          onCreado={() => {
+            cargarTodo(adminKey);
+            setTab('stock');
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+const FORM_INICIAL = {
+  nombre: '',
+  categoria: '',
+  marca: '',
+  talla: '',
+  color: '',
+  precio: '',
+  precioCompra: '',
+  stock: '',
+  stockMinimo: '',
+  fotoUrl: '',
+  descripcion: '',
+};
+
+function NuevoProductoForm({ adminKey, onCreado }) {
+  const [form, setForm] = useState(FORM_INICIAL);
+  const [enviando, setEnviando] = useState(false);
+  const [mensaje, setMensaje] = useState('');
+
+  function handleChange(campo) {
+    return (e) => setForm((f) => ({ ...f, [campo]: e.target.value }));
+  }
+
+  function handleSubmit(e) {
+    e.preventDefault();
+    if (!form.nombre.trim() || !form.precio) {
+      setMensaje('Error: el nombre y el precio de venta son obligatorios.');
+      return;
+    }
+    setEnviando(true);
+    setMensaje('');
+    crearProducto({ adminKey, ...form })
+      .then(() => {
+        setForm(FORM_INICIAL);
+        setMensaje('Producto agregado correctamente ✅');
+        onCreado();
+      })
+      .catch((err) => setMensaje(`Error: ${err.message}`))
+      .finally(() => setEnviando(false));
+  }
+
+  return (
+    <form className="new-product-form" onSubmit={handleSubmit}>
+      <div className="form-grid">
+        <label>
+          Nombre*
+          <input value={form.nombre} onChange={handleChange('nombre')} required />
+        </label>
+        <label>
+          Categoría
+          <input value={form.categoria} onChange={handleChange('categoria')} />
+        </label>
+        <label>
+          Marca
+          <input value={form.marca} onChange={handleChange('marca')} />
+        </label>
+        <label>
+          Talla / Medida
+          <input value={form.talla} onChange={handleChange('talla')} />
+        </label>
+        <label>
+          Color
+          <input value={form.color} onChange={handleChange('color')} />
+        </label>
+        <label>
+          Precio de venta*
+          <input type="number" min="0" value={form.precio} onChange={handleChange('precio')} required />
+        </label>
+        <label>
+          Precio de compra
+          <input type="number" min="0" value={form.precioCompra} onChange={handleChange('precioCompra')} />
+        </label>
+        <label>
+          Stock inicial
+          <input type="number" min="0" value={form.stock} onChange={handleChange('stock')} />
+        </label>
+        <label>
+          Stock mínimo
+          <input type="number" min="0" value={form.stockMinimo} onChange={handleChange('stockMinimo')} />
+        </label>
+        <label className="form-grid-wide">
+          URL de la foto
+          <input
+            value={form.fotoUrl}
+            onChange={handleChange('fotoUrl')}
+            placeholder="https://i.imgur.com/..."
+          />
+        </label>
+        <label className="form-grid-wide">
+          Descripción
+          <input value={form.descripcion} onChange={handleChange('descripcion')} />
+        </label>
+      </div>
+
+      {mensaje && (
+        <p className={`info-msg ${mensaje.startsWith('Error') ? 'error' : ''}`}>{mensaje}</p>
+      )}
+
+      <button type="submit" className="btn btn-primary" disabled={enviando}>
+        {enviando ? 'Guardando…' : 'Agregar producto'}
+      </button>
+    </form>
   );
 }
 
