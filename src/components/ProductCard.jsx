@@ -1,21 +1,51 @@
-function buildWhatsAppLink(producto) {
-  const phone = import.meta.env.VITE_WHATSAPP_NUMBER;
-  const mensaje =
-    `Hola, me interesa este producto:\n` +
-    `🛍️ ${producto.Nombre}\n` +
-    `💲 $${producto.Precio}\n` +
-    `¿Sigue disponible?`;
-  return `https://wa.me/${phone}?text=${encodeURIComponent(mensaje)}`;
+import { useState } from 'react';
+
+// Un producto puede tener varias fotos guardadas en una sola celda de
+// Sheets, separadas por "|". Aquí las separamos para armar el carrusel.
+function obtenerFotos(fotoUrl) {
+  return String(fotoUrl || '')
+    .split('|')
+    .map((url) => url.trim())
+    .filter(Boolean);
 }
 
 export default function ProductCard({ producto, onSolicitar }) {
   const sinStock = Number(producto.Stock) <= 0;
+  const fotos = obtenerFotos(producto.FotoURL);
+  const [indice, setIndice] = useState(0);
+
+  function fotoAnterior(e) {
+    e.stopPropagation();
+    setIndice((i) => (i === 0 ? fotos.length - 1 : i - 1));
+  }
+
+  function fotoSiguiente(e) {
+    e.stopPropagation();
+    setIndice((i) => (i === fotos.length - 1 ? 0 : i + 1));
+  }
 
   return (
     <article className="product-card">
       <div className="product-photo">
-        {producto.FotoURL ? (
-          <img src={producto.FotoURL} alt={producto.Nombre} loading="lazy" />
+        {fotos.length > 0 ? (
+          <>
+            <img src={fotos[indice]} alt={producto.Nombre} loading="lazy" />
+            {fotos.length > 1 && (
+              <>
+                <button type="button" className="carousel-btn carousel-prev" onClick={fotoAnterior} aria-label="Foto anterior">
+                  ‹
+                </button>
+                <button type="button" className="carousel-btn carousel-next" onClick={fotoSiguiente} aria-label="Foto siguiente">
+                  ›
+                </button>
+                <div className="carousel-dots">
+                  {fotos.map((_, i) => (
+                    <span key={i} className={`carousel-dot ${i === indice ? 'activo' : ''}`} />
+                  ))}
+                </div>
+              </>
+            )}
+          </>
         ) : (
           <div className="product-photo-placeholder">Sin foto</div>
         )}
@@ -30,19 +60,14 @@ export default function ProductCard({ producto, onSolicitar }) {
         {producto.Descripcion && <p className="description">{producto.Descripcion}</p>}
 
         <div className="product-actions">
-          <a
+          <button
+            type="button"
             className="btn btn-whatsapp"
-            href={buildWhatsAppLink(producto)}
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-disabled={sinStock}
-            onClick={(e) => {
-              if (sinStock) e.preventDefault();
-              else onSolicitar?.(producto);
-            }}
+            disabled={sinStock}
+            onClick={() => onSolicitar?.(producto)}
           >
             📲 Solicitar por WhatsApp
-          </a>
+          </button>
         </div>
       </div>
     </article>
