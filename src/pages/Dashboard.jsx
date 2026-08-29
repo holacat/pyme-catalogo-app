@@ -7,8 +7,21 @@ import {
   actualizarPedido,
   crearProducto,
   actualizarProducto,
+  cambiarDisponibilidad,
+  eliminarProducto,
 } from '../api.js';
 import ImageUploader from '../components/ImageUploader.jsx';
+
+// Un producto puede tener Disponible guardado como booleano real (true/false)
+// o como texto ("TRUE"/"SI") si alguien lo escribió a mano en el Sheet. Esta
+// función lo normaliza, igual que hace el backend para el catálogo público.
+function esProductoVisible(producto) {
+  return (
+    producto.Disponible === true ||
+    String(producto.Disponible).toUpperCase() === 'TRUE' ||
+    String(producto.Disponible).toUpperCase() === 'SI'
+  );
+}
 
 const STORAGE_KEY = 'pyme_admin_key';
 
@@ -108,6 +121,23 @@ export default function Dashboard() {
       .catch((err) => setMensaje(`Error al actualizar pedido: ${err.message}`));
   }
 
+  function handleCambiarDisponibilidad(producto) {
+    const nuevoValor = !esProductoVisible(producto);
+    cambiarDisponibilidad({ adminKey, productoId: producto.ID, disponible: nuevoValor })
+      .then(() => cargarTodo(adminKey))
+      .catch((err) => setMensaje(`Error al cambiar visibilidad: ${err.message}`));
+  }
+
+  function handleEliminarProducto(producto) {
+    const confirmar = window.confirm(
+      `¿Seguro que quieres eliminar "${producto.Nombre}" para siempre? Esta acción no se puede deshacer desde la app.`
+    );
+    if (!confirmar) return;
+    eliminarProducto({ adminKey, productoId: producto.ID })
+      .then(() => cargarTodo(adminKey))
+      .catch((err) => setMensaje(`Error al eliminar producto: ${err.message}`));
+  }
+
   if (!autenticado) {
     return (
       <form className="login-box" onSubmit={handleLogin}>
@@ -165,22 +195,26 @@ export default function Dashboard() {
               antes de salir de esta pestaña.
             </p>
           )}
-          <table className="data-table">
-            <thead>
-              <tr><th>Producto</th><th>Precio</th><th>Stock</th><th>Mínimo</th><th>Actualizar</th><th>Editar</th></tr>
-            </thead>
-            <tbody>
-              {productos.map((p) => (
-                <StockRow
-                  key={p.ID}
-                  producto={p}
-                  onActualizar={handleActualizarStock}
-                  onDirtyChange={marcarSucio}
-                  onEditar={setProductoEditando}
-                />
-              ))}
-            </tbody>
-          </table>
+          <div className="table-scroll">
+            <table className="data-table">
+              <thead>
+                <tr><th>Producto</th><th>Precio</th><th>Stock</th><th>Mínimo</th><th>Actualizar</th><th>Acciones</th></tr>
+              </thead>
+              <tbody>
+                {productos.map((p) => (
+                  <StockRow
+                    key={p.ID}
+                    producto={p}
+                    onActualizar={handleActualizarStock}
+                    onDirtyChange={marcarSucio}
+                    onEditar={setProductoEditando}
+                    onCambiarDisponibilidad={handleCambiarDisponibilidad}
+                    onEliminar={handleEliminarProducto}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
         </>
       )}
 
@@ -192,24 +226,26 @@ export default function Dashboard() {
               antes de salir de esta pestaña.
             </p>
           )}
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Fecha</th><th>Cliente</th><th>Teléfono</th><th>Producto</th>
-                <th>Cant.</th><th>Notas</th><th>Estado</th><th>Guardar</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pedidos.slice().reverse().map((ped) => (
-                <PedidoRow
-                  key={ped.ID}
-                  pedido={ped}
-                  onGuardar={handleGuardarPedido}
-                  onDirtyChange={marcarSucio}
-                />
-              ))}
-            </tbody>
-          </table>
+          <div className="table-scroll">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Fecha</th><th>Cliente</th><th>Teléfono</th><th>Producto</th>
+                  <th>Cant.</th><th>Notas</th><th>Estado</th><th>Guardar</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pedidos.slice().reverse().map((ped) => (
+                  <PedidoRow
+                    key={ped.ID}
+                    pedido={ped}
+                    onGuardar={handleGuardarPedido}
+                    onDirtyChange={marcarSucio}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
         </>
       )}
 
@@ -398,10 +434,11 @@ function ProductoForm({ adminKey, productoExistente, onGuardado, onCancelar }) {
   );
 }
 
-function StockRow({ producto, onActualizar, onDirtyChange, onEditar }) {
+function StockRow({ producto, onActualizar, onDirtyChange, onEditar, onCambiarDisponibilidad, onEliminar }) {
   const [valor, setValor] = useState(producto.Stock);
   const sinGuardar = Number(valor) !== Number(producto.Stock);
   const llave = `stock:${producto.ID}`;
+  const visible = esProductoVisible(producto);
 
   // Avisa al Dashboard si esta fila tiene un cambio pendiente de guardar.
   useEffect(() => {
@@ -411,8 +448,11 @@ function StockRow({ producto, onActualizar, onDirtyChange, onEditar }) {
   }, [sinGuardar, llave]);
 
   return (
-    <tr>
-      <td>{producto.Nombre}</td>
+    <tr className={visible ? '' : 'fila-oculta'}>
+      <td>
+        {producto.Nombre}
+        {!visible && <span className="badge badge-oculto">Oculto</span>}
+      </td>
       <td>${Number(producto.Precio).toLocaleString('es-MX')}</td>
       <td>{producto.Stock}</td>
       <td>{producto.StockMinimo}</td>
@@ -431,9 +471,15 @@ function StockRow({ producto, onActualizar, onDirtyChange, onEditar }) {
           Guardar
         </button>
       </td>
-      <td>
+      <td className="acciones-producto">
         <button type="button" className="btn btn-secondary btn-small" onClick={() => onEditar(producto)}>
           Editar
+        </button>
+        <button type="button" className="btn btn-secondary btn-small" onClick={() => onCambiarDisponibilidad(producto)}>
+          {visible ? 'Ocultar' : 'Mostrar'}
+        </button>
+        <button type="button" className="btn btn-danger btn-small" onClick={() => onEliminar(producto)}>
+          Eliminar
         </button>
       </td>
     </tr>
