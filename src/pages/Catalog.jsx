@@ -52,15 +52,25 @@ export default function Catalog() {
   const [clienteGuardado, setClienteGuardado] = useState(() => leerClienteGuardado());
 
   useEffect(() => {
-    listarProductos()
-      .then((data) => {
-        setProductos(data.productos);
-        setEstado('listo');
-      })
-      .catch((err) => {
-        setError(err.message);
-        setEstado('error');
-      });
+    function cargarProductos() {
+      listarProductos()
+        .then((data) => {
+          setProductos(data.productos);
+          setEstado('listo');
+        })
+        .catch((err) => {
+          setError(err.message);
+          setEstado('error');
+        });
+    }
+
+    cargarProductos();
+
+    // Vuelve a pedir el catálogo cada 20 segundos, en segundo plano, para
+    // que si el administrador cambia el stock, oculta o edita un producto,
+    // los clientes lo vean reflejado solos sin tener que recargar la página.
+    const intervalo = setInterval(cargarProductos, 20000);
+    return () => clearInterval(intervalo);
   }, []);
 
   // Registra el pedido y abre WhatsApp. Se usa tanto si el cliente acaba
