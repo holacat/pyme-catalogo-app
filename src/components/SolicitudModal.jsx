@@ -4,16 +4,40 @@ import { useState } from 'react';
 // Así el pedido queda registrado con datos reales en el Sheet, y no como
 // "Cliente WhatsApp" genérico — te permite identificar quién solicita qué,
 // y detectar si la misma persona repite una solicitud.
+//
+// Flujo: 1) el cliente llena el formulario, 2) ve un mensaje de
+// confirmación aquí mismo por un momento, 3) recién ahí lo mandamos a
+// WhatsApp. Así siempre alcanza a ver la confirmación antes de que el
+// navegador cambie de pestaña.
 export default function SolicitudModal({ producto, onClose, onConfirm }) {
   const [nombre, setNombre] = useState('');
   const [telefono, setTelefono] = useState('');
-  const [enviando, setEnviando] = useState(false);
+  const [confirmado, setConfirmado] = useState(false);
 
   function handleSubmit(e) {
     e.preventDefault();
     if (!nombre.trim() || !telefono.trim()) return;
-    setEnviando(true);
-    onConfirm({ nombre: nombre.trim(), telefono: telefono.trim() });
+    setConfirmado(true);
+    // Pequeña pausa para que la persona alcance a leer el mensaje de
+    // confirmación antes de que se abra la pestaña de WhatsApp.
+    setTimeout(() => {
+      onConfirm({ nombre: nombre.trim(), telefono: telefono.trim() });
+    }, 1100);
+  }
+
+  if (confirmado) {
+    return (
+      <div className="modal-overlay">
+        <div className="modal-box modal-confirmacion">
+          <p className="modal-check">✅</p>
+          <h3>¡Listo, {nombre.trim()}!</h3>
+          <p className="muted">
+            Registramos tu solicitud de <strong>{producto.Nombre}</strong>.
+            Te estamos redirigiendo a WhatsApp…
+          </p>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -54,7 +78,7 @@ export default function SolicitudModal({ producto, onClose, onConfirm }) {
             <button type="button" className="btn btn-secondary" onClick={onClose}>
               Cancelar
             </button>
-            <button type="submit" className="btn btn-whatsapp" disabled={enviando}>
+            <button type="submit" className="btn btn-whatsapp">
               📲 Continuar a WhatsApp
             </button>
           </div>
