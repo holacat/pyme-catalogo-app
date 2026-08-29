@@ -107,6 +107,7 @@ export function actualizarProducto({
   stockMinimo,
   fotoUrl,
   descripcion,
+  disponible,
 }) {
   return post({
     action: 'actualizarProducto',
@@ -123,7 +124,20 @@ export function actualizarProducto({
     stockMinimo,
     fotoUrl,
     descripcion,
+    disponible,
   });
+}
+
+// Muestra/oculta un producto del catálogo público sin borrar nada (se
+// puede revertir en cualquier momento).
+export function cambiarDisponibilidad({ adminKey, productoId, disponible }) {
+  return post({ action: 'actualizarProducto', adminKey, productoId, disponible });
+}
+
+// Borra la fila del producto de forma permanente. No se puede deshacer
+// desde la app.
+export function eliminarProducto({ adminKey, productoId }) {
+  return post({ action: 'eliminarProducto', adminKey, productoId });
 }
 
 // Sube una foto (como base64) a la carpeta de Google Drive del negocio y
