@@ -55,8 +55,10 @@ export function actualizarStock({ adminKey, productoId, nuevoStock }) {
   return post({ action: 'actualizarStock', adminKey, productoId, nuevoStock });
 }
 
-export function actualizarEstadoPedido({ adminKey, pedidoId, nuevoEstado }) {
-  return post({ action: 'actualizarEstadoPedido', adminKey, pedidoId, nuevoEstado });
+// Actualiza cualquier combinación de estado/cantidad/teléfono/notas de un
+// pedido. Solo manda los campos que le pases; los que omitas no se tocan.
+export function actualizarPedido({ adminKey, pedidoId, estado, cantidad, telefono, notas }) {
+  return post({ action: 'actualizarPedido', adminKey, pedidoId, estado, cantidad, telefono, notas });
 }
 
 export function crearProducto({
@@ -88,4 +90,44 @@ export function crearProducto({
     fotoUrl,
     descripcion,
   });
+}
+
+// Igual que crearProducto, pero para editar uno que ya existe.
+export function actualizarProducto({
+  adminKey,
+  productoId,
+  nombre,
+  categoria,
+  marca,
+  talla,
+  color,
+  precio,
+  precioCompra,
+  stock,
+  stockMinimo,
+  fotoUrl,
+  descripcion,
+}) {
+  return post({
+    action: 'actualizarProducto',
+    adminKey,
+    productoId,
+    nombre,
+    categoria,
+    marca,
+    talla,
+    color,
+    precio,
+    precioCompra,
+    stock,
+    stockMinimo,
+    fotoUrl,
+    descripcion,
+  });
+}
+
+// Sube una foto (como base64) a la carpeta de Google Drive del negocio y
+// devuelve la URL pública para guardarla en el producto.
+export function subirFoto({ adminKey, nombreArchivo, tipoMime, datosBase64 }) {
+  return post({ action: 'subirFoto', adminKey, nombreArchivo, tipoMime, datosBase64 });
 }
