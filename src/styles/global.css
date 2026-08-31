@@ -218,7 +218,12 @@ main { flex: 1; padding: 1.5rem; max-width: 1100px; margin: 0 auto; width: 100%;
 .stock-editor input { width: 70px; padding: 0.3rem; border: 1px solid var(--border); border-radius: 6px; }
 
 /* Botones de Editar / Ocultar-Mostrar / Eliminar: acomodados uno debajo del
-   otro dentro de su propia columna, cada uno bien separado y del mismo ancho. */
+   otro dentro de su propia columna, cada uno bien separado y del mismo ancho.
+   OJO: el flex va en un <div> DENTRO de la celda, no en la celda <td> misma
+   — ponerle "display:flex" directo a un <td> confunde al navegador y hace
+   que los botones se salgan de su columna y aparezcan pegados abajo de la fila. */
+.celda-acciones { vertical-align: top; }
+
 .acciones-producto {
   display: flex;
   flex-direction: column;
@@ -227,14 +232,23 @@ main { flex: 1; padding: 1.5rem; max-width: 1100px; margin: 0 auto; width: 100%;
 }
 
 .btn-chip { padding: 0.35rem 0.6rem; font-size: 0.78rem; border-radius: 6px; width: 100%; }
-.btn-editar { background: #2563eb; color: white; }
-.btn-toggle { background: #d97706; color: white; }
+.btn-editar { background: #3d6a94; color: white; }
+.btn-toggle { background: #b8763f; color: white; }
+.btn-eliminar { background: #a3403f; color: white; }
 
 /* Fila de un producto oculto: se ve atenuada (para distinguirla a simple
-   vista), PERO los botones de Acciones se quedan a opacidad normal, para
-   que "Mostrar" no dé la impresión de estar deshabilitado. */
-.fila-oculta td { opacity: 0.55; }
-.fila-oculta .acciones-producto { opacity: 1; }
+   vista), PERO la columna de Acciones se queda a opacidad normal, para que
+   "Mostrar" no dé la impresión de estar deshabilitado. */
+.fila-oculta td:not(.celda-acciones) { opacity: 0.55; }
+
+/* Fila con un cambio sin guardar: fondo tenue + una barra de color a la
+   izquierda, para verla de un vistazo en toda la tabla. */
+.fila-sin-guardar td {
+  background-color: #fff7e0;
+}
+.fila-sin-guardar td:first-child {
+  box-shadow: inset 4px 0 0 #d97706;
+}
 
 .badge-oculto {
   background: #fee2e2;
@@ -494,8 +508,9 @@ main { flex: 1; padding: 1.5rem; max-width: 1100px; margin: 0 auto; width: 100%;
 
 .aviso-flotante-nota { margin: 0; font-size: 0.75rem; }
 
-/* Resalta el campo específico que se cambió y todavía no se ha guardado. */
+/* Resalta el campo específico que se cambió y todavía no se ha guardado.
+   Un amarillo más intenso que antes, para que se note de inmediato. */
 .campo-modificado {
-  background: #fef9c3 !important;
-  border-color: #d97706 !important;
+  background: #fde68a !important;
+  border: 2px solid #b45309 !important;
 }
