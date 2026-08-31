@@ -74,6 +74,7 @@ export function crearProducto({
   stockMinimo,
   fotoUrl,
   descripcion,
+  codigoPropio,
 }) {
   return post({
     action: 'crearProducto',
@@ -89,6 +90,7 @@ export function crearProducto({
     stockMinimo,
     fotoUrl,
     descripcion,
+    codigoPropio,
   });
 }
 
@@ -108,6 +110,7 @@ export function actualizarProducto({
   fotoUrl,
   descripcion,
   disponible,
+  codigoPropio,
 }) {
   return post({
     action: 'actualizarProducto',
@@ -125,6 +128,7 @@ export function actualizarProducto({
     fotoUrl,
     descripcion,
     disponible,
+    codigoPropio,
   });
 }
 
