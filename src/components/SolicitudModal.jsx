@@ -1,5 +1,12 @@
 import { useState } from 'react';
 
+// Deja solo dígitos y corta a un máximo de caracteres, para que no se pueda
+// escribir un "teléfono" con decenas de ceros (eso rompía la tabla de
+// Pedidos en el Dashboard).
+function limitarTelefono(valorTexto) {
+  return String(valorTexto).replace(/[^0-9]/g, '').slice(0, 13);
+}
+
 // Modal que pide nombre y teléfono ANTES de mandar al cliente a WhatsApp.
 // Así el pedido queda registrado con datos reales en el Sheet, y no como
 // "Cliente WhatsApp" genérico — te permite identificar quién solicita qué,
@@ -68,8 +75,10 @@ export default function SolicitudModal({ producto, onClose, onConfirm }) {
             Tu teléfono
             <input
               type="tel"
+              inputMode="numeric"
+              maxLength={13}
               value={telefono}
-              onChange={(e) => setTelefono(e.target.value)}
+              onChange={(e) => setTelefono(limitarTelefono(e.target.value))}
               placeholder="Ej. 2271234567"
               required
             />
