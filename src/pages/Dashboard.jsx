@@ -23,6 +23,31 @@ function esProductoVisible(producto) {
   );
 }
 
+// Toma solo la primera foto de la lista (separada por "|") para mostrarla
+// como miniatura chiquita en la tabla de Stock.
+function primeraFoto(fotoUrl) {
+  return String(fotoUrl || '').split('|').map((u) => u.trim()).filter(Boolean)[0] || '';
+}
+
+// Evita que se puedan escribir números absurdamente grandes en los campos
+// de precio/stock/cantidad (por ejemplo, llenar el cuadro de puros ceros y
+// que la app se rompa). Corta el texto a una cantidad máxima de dígitos,
+// dejando escribir el punto decimal para precios.
+function limitarDigitos(valorTexto, maxDigitos) {
+  const texto = String(valorTexto);
+  const partes = texto.split('.');
+  const entero = partes[0].replace(/[^0-9]/g, '').slice(0, maxDigitos);
+  const decimal = partes.length > 1 ? '.' + partes[1].replace(/[^0-9]/g, '').slice(0, 2) : '';
+  return entero + decimal;
+}
+
+const MAX_DIGITOS_STOCK = 6; // hasta 999,999 piezas
+const MAX_DIGITOS_PRECIO = 7; // hasta 9,999,999 (con hasta 2 decimales)
+const MAX_DIGITOS_CANTIDAD = 4; // hasta 9,999 piezas por pedido
+
+// Cada cuánto se refresca solo el Dashboard en segundo plano (milisegundos).
+const INTERVALO_REFRESCO_MS = 5000;
+
 const STORAGE_KEY = 'pyme_admin_key';
 
 export default function Dashboard() {
@@ -37,16 +62,17 @@ export default function Dashboard() {
   const [mensaje, setMensaje] = useState('');
   const [productoEditando, setProductoEditando] = useState(null);
 
-  // Llaves (con prefijo "stock:" o "pedido:") de filas que tienen un cambio
-  // escrito pero todavía no guardado. Mientras este set no esté vacío,
-  // avisamos antes de cambiar de pestaña o cerrar la página, para no
-  // perder el cambio por un descuido.
-  const [sinGuardar, setSinGuardar] = useState(() => new Set());
+  // Mapa de llaves (con prefijo "stock:" o "pedido:") -> descripción del
+  // cambio pendiente de guardar. Mientras este mapa no esté vacío, avisamos
+  // antes de cambiar de pestaña o cerrar la página, para no perder el
+  // cambio por un descuido. La descripción es lo que se le muestra a
+  // Claudia para que sepa EXACTAMENTE qué dato movió.
+  const [sinGuardar, setSinGuardar] = useState(() => new Map());
 
-  function marcarSucio(llave, sucio) {
+  function marcarSucio(llave, sucio, descripcion) {
     setSinGuardar((prev) => {
-      const next = new Set(prev);
-      if (sucio) next.add(llave);
+      const next = new Map(prev);
+      if (sucio) next.set(llave, descripcion || 'Un campo cambió');
       else next.delete(llave);
       return next;
     });
@@ -58,7 +84,7 @@ export default function Dashboard() {
         'Tienes cambios sin guardar. Si continúas se van a perder. ¿Quieres salir de todas formas?'
       );
       if (!salir) return;
-      setSinGuardar(new Set());
+      setSinGuardar(new Map());
     }
     setTab(nuevaTab);
   }
@@ -77,23 +103,47 @@ export default function Dashboard() {
     return () => window.removeEventListener('beforeunload', avisarAntesDeSalir);
   }, [sinGuardar]);
 
-  function cargarTodo(key) {
-    setCargando(true);
+  // `silencioso: true` se usa para los refrescos automáticos de fondo: no
+  // muestra "Actualizando…" ni mensajes de error a cada rato, para no ser
+  // molesto. Los refrescos que sí pide Claudia directamente (guardar algo,
+  // iniciar sesión) siguen mostrando el aviso normal.
+  function cargarTodo(key, opciones = {}) {
+    const silencioso = !!opciones.silencioso;
+    if (!silencioso) setCargando(true);
     Promise.all([listarProductosAdmin(key), listarPedidos(key), obtenerAlertas(key)])
       .then(([p, o, a]) => {
         setProductos(p.productos);
         setPedidos(o.pedidos);
         setAlertas(a.alertas);
-        setMensaje('');
+        if (!silencioso) setMensaje('');
       })
-      .catch((err) => setMensaje(`Error al cargar datos: ${err.message}`))
-      .finally(() => setCargando(false));
+      .catch((err) => {
+        if (!silencioso) setMensaje(`Error al cargar datos: ${err.message}`);
+      })
+      .finally(() => {
+        if (!silencioso) setCargando(false);
+      });
   }
 
   useEffect(() => {
     if (autenticado) cargarTodo(adminKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autenticado]);
+
+  // Refresco automático en segundo plano: así los pedidos nuevos y los
+  // cambios de stock se ven casi al instante, sin tener que darle
+  // "Actualizar" a mano. Se pausa si hay cambios sin guardar o si está
+  // abierto el formulario de agregar/editar producto, para no interrumpir.
+  useEffect(() => {
+    if (!autenticado) return;
+    const intervalo = setInterval(() => {
+      if (sinGuardar.size === 0 && !productoEditando && tab !== 'nuevo') {
+        cargarTodo(adminKey, { silencioso: true });
+      }
+    }, INTERVALO_REFRESCO_MS);
+    return () => clearInterval(intervalo);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autenticado, adminKey, sinGuardar, productoEditando, tab]);
 
   function handleLogin(e) {
     e.preventDefault();
@@ -174,6 +224,24 @@ export default function Dashboard() {
       {mensaje && <p className="info-msg error">{mensaje}</p>}
       {cargando && <p className="info-msg">Actualizando…</p>}
 
+      {/* Aviso flotante: se queda pegado abajo de la pantalla aunque hagas
+          scroll, y lista EXACTAMENTE qué dato(s) cambiaste sin guardar. */}
+      {sinGuardar.size > 0 && (
+        <div className="aviso-flotante">
+          <p className="aviso-flotante-titulo">
+            ⚠️ Tienes {sinGuardar.size} cambio(s) sin guardar:
+          </p>
+          <ul>
+            {Array.from(sinGuardar.values()).map((descripcion, i) => (
+              <li key={i}>{descripcion}</li>
+            ))}
+          </ul>
+          <p className="aviso-flotante-nota">
+            Dale clic a "Guardar" en cada fila antes de salir de esta pestaña.
+          </p>
+        </div>
+      )}
+
       <div className="tabs">
         <button className={tab === 'stock' ? 'active' : ''} onClick={() => cambiarTab('stock')}>Stock</button>
         <button className={tab === 'pedidos' ? 'active' : ''} onClick={() => cambiarTab('pedidos')}>
@@ -188,65 +256,52 @@ export default function Dashboard() {
       </div>
 
       {tab === 'stock' && (
-        <>
-          {sinGuardar.size > 0 && (
-            <p className="alert-banner">
-              ⚠️ Tienes {sinGuardar.size} cambio(s) sin guardar. Dale clic a "Guardar" en cada fila
-              antes de salir de esta pestaña.
-            </p>
-          )}
-          <div className="table-scroll">
-            <table className="data-table">
-              <thead>
-                <tr><th>Producto</th><th>Precio</th><th>Stock</th><th>Mínimo</th><th>Actualizar</th><th>Acciones</th></tr>
-              </thead>
-              <tbody>
-                {productos.map((p) => (
-                  <StockRow
-                    key={p.ID}
-                    producto={p}
-                    onActualizar={handleActualizarStock}
-                    onDirtyChange={marcarSucio}
-                    onEditar={setProductoEditando}
-                    onCambiarDisponibilidad={handleCambiarDisponibilidad}
-                    onEliminar={handleEliminarProducto}
-                  />
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </>
+        <div className="table-scroll">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Producto</th><th>Código</th><th>Precio</th><th>Stock</th>
+                <th>Mínimo</th><th>Actualizar</th><th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {productos.map((p) => (
+                <StockRow
+                  key={p.ID}
+                  producto={p}
+                  onActualizar={handleActualizarStock}
+                  onDirtyChange={marcarSucio}
+                  onEditar={setProductoEditando}
+                  onCambiarDisponibilidad={handleCambiarDisponibilidad}
+                  onEliminar={handleEliminarProducto}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
       {tab === 'pedidos' && (
-        <>
-          {sinGuardar.size > 0 && (
-            <p className="alert-banner">
-              ⚠️ Tienes {sinGuardar.size} cambio(s) sin guardar. Dale clic a "Guardar" en cada fila
-              antes de salir de esta pestaña.
-            </p>
-          )}
-          <div className="table-scroll">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Fecha</th><th>Cliente</th><th>Teléfono</th><th>Producto</th>
-                  <th>Cant.</th><th>Notas</th><th>Estado</th><th>Guardar</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pedidos.slice().reverse().map((ped) => (
-                  <PedidoRow
-                    key={ped.ID}
-                    pedido={ped}
-                    onGuardar={handleGuardarPedido}
-                    onDirtyChange={marcarSucio}
-                  />
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </>
+        <div className="table-scroll">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Fecha</th><th>Cliente</th><th>Teléfono</th><th>Producto</th>
+                <th>Cant.</th><th>Notas</th><th>Estado</th><th>Guardar</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pedidos.slice().reverse().map((ped) => (
+                <PedidoRow
+                  key={ped.ID}
+                  pedido={ped}
+                  onGuardar={handleGuardarPedido}
+                  onDirtyChange={marcarSucio}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
       {tab === 'alertas' && (
@@ -301,6 +356,7 @@ const FORM_INICIAL = {
   stock: '',
   stockMinimo: '',
   descripcion: '',
+  codigoPropio: '',
 };
 
 function formDesdeProducto(producto) {
@@ -315,6 +371,7 @@ function formDesdeProducto(producto) {
     stock: producto.Stock ?? '',
     stockMinimo: producto.StockMinimo ?? '',
     descripcion: producto.Descripcion || '',
+    codigoPropio: producto.CodigoPropio || '',
   };
 }
 
@@ -337,6 +394,13 @@ function ProductoForm({ adminKey, productoExistente, onGuardado, onCancelar }) {
 
   function handleChange(campo) {
     return (e) => setForm((f) => ({ ...f, [campo]: e.target.value }));
+  }
+
+  // Para campos numéricos (precio, stock, etc.): igual que handleChange,
+  // pero corta el texto a una cantidad máxima de dígitos para que no se
+  // puedan escribir números absurdamente grandes.
+  function handleChangeNumero(campo, maxDigitos) {
+    return (e) => setForm((f) => ({ ...f, [campo]: limitarDigitos(e.target.value, maxDigitos) }));
   }
 
   function handleSubmit(e) {
@@ -374,6 +438,14 @@ function ProductoForm({ adminKey, productoExistente, onGuardado, onCancelar }) {
           <input value={form.nombre} onChange={handleChange('nombre')} required />
         </label>
         <label>
+          Código propio (opcional)
+          <input
+            value={form.codigoPropio}
+            onChange={handleChange('codigoPropio')}
+            placeholder="Ej. PLY-001"
+          />
+        </label>
+        <label>
           Categoría
           <input value={form.categoria} onChange={handleChange('categoria')} />
         </label>
@@ -391,19 +463,44 @@ function ProductoForm({ adminKey, productoExistente, onGuardado, onCancelar }) {
         </label>
         <label>
           Precio de venta*
-          <input type="number" min="0" value={form.precio} onChange={handleChange('precio')} required />
+          <input
+            type="text"
+            inputMode="decimal"
+            maxLength={10}
+            value={form.precio}
+            onChange={handleChangeNumero('precio', MAX_DIGITOS_PRECIO)}
+            required
+          />
         </label>
         <label>
           Precio de compra
-          <input type="number" min="0" value={form.precioCompra} onChange={handleChange('precioCompra')} />
+          <input
+            type="text"
+            inputMode="decimal"
+            maxLength={10}
+            value={form.precioCompra}
+            onChange={handleChangeNumero('precioCompra', MAX_DIGITOS_PRECIO)}
+          />
         </label>
         <label>
           Stock {esEdicion ? '' : 'inicial'}
-          <input type="number" min="0" value={form.stock} onChange={handleChange('stock')} />
+          <input
+            type="text"
+            inputMode="numeric"
+            maxLength={MAX_DIGITOS_STOCK}
+            value={form.stock}
+            onChange={handleChangeNumero('stock', MAX_DIGITOS_STOCK)}
+          />
         </label>
         <label>
           Stock mínimo
-          <input type="number" min="0" value={form.stockMinimo} onChange={handleChange('stockMinimo')} />
+          <input
+            type="text"
+            inputMode="numeric"
+            maxLength={MAX_DIGITOS_STOCK}
+            value={form.stockMinimo}
+            onChange={handleChangeNumero('stockMinimo', MAX_DIGITOS_STOCK)}
+          />
         </label>
         <label className="form-grid-wide">
           Descripción
@@ -439,29 +536,46 @@ function StockRow({ producto, onActualizar, onDirtyChange, onEditar, onCambiarDi
   const sinGuardar = Number(valor) !== Number(producto.Stock);
   const llave = `stock:${producto.ID}`;
   const visible = esProductoVisible(producto);
+  const foto = primeraFoto(producto.FotoURL);
 
-  // Avisa al Dashboard si esta fila tiene un cambio pendiente de guardar.
+  // Avisa al Dashboard si esta fila tiene un cambio pendiente de guardar,
+  // y con qué texto describirlo en el aviso flotante.
   useEffect(() => {
-    onDirtyChange(llave, sinGuardar);
-    return () => onDirtyChange(llave, false);
+    const descripcion = sinGuardar
+      ? `Stock de "${producto.Nombre}": ${producto.Stock} → ${valor || 0}`
+      : '';
+    onDirtyChange(llave, sinGuardar, descripcion);
+    return () => onDirtyChange(llave, false, '');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sinGuardar, llave]);
+  }, [sinGuardar, llave, valor]);
 
   return (
     <tr className={visible ? '' : 'fila-oculta'}>
       <td>
-        {producto.Nombre}
-        {!visible && <span className="badge badge-oculto">Oculto</span>}
+        <div className="stock-nombre-con-foto">
+          {foto ? (
+            <img src={foto} alt={producto.Nombre} className="stock-thumb" />
+          ) : (
+            <div className="stock-thumb stock-thumb-vacia">Sin foto</div>
+          )}
+          <span>
+            {producto.Nombre}
+            {!visible && <span className="badge badge-oculto">Oculto</span>}
+          </span>
+        </div>
       </td>
+      <td>{producto.CodigoPropio || '—'}</td>
       <td>${Number(producto.Precio).toLocaleString('es-MX')}</td>
       <td>{producto.Stock}</td>
       <td>{producto.StockMinimo}</td>
       <td className="stock-editor">
         <input
-          type="number"
-          min="0"
+          type="text"
+          inputMode="numeric"
+          maxLength={MAX_DIGITOS_STOCK}
+          className={sinGuardar ? 'campo-modificado' : ''}
           value={valor}
-          onChange={(e) => setValor(e.target.value)}
+          onChange={(e) => setValor(limitarDigitos(e.target.value, MAX_DIGITOS_STOCK))}
         />
         <button
           className="btn btn-small"
@@ -472,13 +586,13 @@ function StockRow({ producto, onActualizar, onDirtyChange, onEditar, onCambiarDi
         </button>
       </td>
       <td className="acciones-producto">
-        <button type="button" className="btn btn-secondary btn-small" onClick={() => onEditar(producto)}>
+        <button type="button" className="btn btn-editar btn-chip" onClick={() => onEditar(producto)}>
           Editar
         </button>
-        <button type="button" className="btn btn-secondary btn-small" onClick={() => onCambiarDisponibilidad(producto)}>
+        <button type="button" className="btn btn-toggle btn-chip" onClick={() => onCambiarDisponibilidad(producto)}>
           {visible ? 'Ocultar' : 'Mostrar'}
         </button>
-        <button type="button" className="btn btn-danger btn-small" onClick={() => onEliminar(producto)}>
+        <button type="button" className="btn btn-danger btn-chip" onClick={() => onEliminar(producto)}>
           Eliminar
         </button>
       </td>
@@ -494,17 +608,23 @@ function PedidoRow({ pedido, onGuardar, onDirtyChange }) {
   const [guardando, setGuardando] = useState(false);
   const llave = `pedido:${pedido.ID}`;
 
-  const sinGuardar =
-    String(cantidad) !== String(pedido.Cantidad) ||
-    telefono !== (pedido.Telefono || '') ||
-    notas !== (pedido.Notas || '') ||
-    estado !== pedido.Estado;
+  const cambioCantidad = String(cantidad) !== String(pedido.Cantidad);
+  const cambioTelefono = telefono !== (pedido.Telefono || '');
+  const cambioNotas = notas !== (pedido.Notas || '');
+  const cambioEstado = estado !== pedido.Estado;
+  const sinGuardar = cambioCantidad || cambioTelefono || cambioNotas || cambioEstado;
 
   useEffect(() => {
-    onDirtyChange(llave, sinGuardar);
-    return () => onDirtyChange(llave, false);
+    const cambios = [];
+    if (cambioCantidad) cambios.push(`Cantidad: ${pedido.Cantidad} → ${cantidad || 0}`);
+    if (cambioTelefono) cambios.push(`Teléfono: "${pedido.Telefono || ''}" → "${telefono}"`);
+    if (cambioNotas) cambios.push(`Notas: "${pedido.Notas || 'sin nota'}" → "${notas || 'sin nota'}"`);
+    if (cambioEstado) cambios.push(`Estado: ${pedido.Estado} → ${estado}`);
+    const descripcion = cambios.length > 0 ? `Pedido de ${pedido.Cliente} — ${cambios.join(' · ')}` : '';
+    onDirtyChange(llave, sinGuardar, descripcion);
+    return () => onDirtyChange(llave, false, '');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sinGuardar, llave]);
+  }, [sinGuardar, cambioCantidad, cambioTelefono, cambioNotas, cambioEstado, llave]);
 
   function handleGuardar() {
     setGuardando(true);
@@ -517,7 +637,7 @@ function PedidoRow({ pedido, onGuardar, onDirtyChange }) {
       <td>{pedido.Cliente}</td>
       <td>
         <input
-          className="pedido-input-tel"
+          className={`pedido-input-tel ${cambioTelefono ? 'campo-modificado' : ''}`}
           value={telefono}
           onChange={(e) => setTelefono(e.target.value)}
         />
@@ -525,23 +645,28 @@ function PedidoRow({ pedido, onGuardar, onDirtyChange }) {
       <td>{pedido.Producto}</td>
       <td>
         <input
-          type="number"
-          min="1"
-          className="pedido-input-cant"
+          type="text"
+          inputMode="numeric"
+          maxLength={MAX_DIGITOS_CANTIDAD}
+          className={`pedido-input-cant ${cambioCantidad ? 'campo-modificado' : ''}`}
           value={cantidad}
-          onChange={(e) => setCantidad(e.target.value)}
+          onChange={(e) => setCantidad(limitarDigitos(e.target.value, MAX_DIGITOS_CANTIDAD))}
         />
       </td>
       <td>
         <input
-          className="pedido-input-notas"
+          className={`pedido-input-notas ${cambioNotas ? 'campo-modificado' : ''}`}
           value={notas}
           onChange={(e) => setNotas(e.target.value)}
-          placeholder="Notas…"
+          placeholder="Sin notas"
         />
       </td>
       <td>
-        <select value={estado} onChange={(e) => setEstado(e.target.value)}>
+        <select
+          className={cambioEstado ? 'campo-modificado' : ''}
+          value={estado}
+          onChange={(e) => setEstado(e.target.value)}
+        >
           <option>Pendiente</option>
           <option>Confirmado</option>
           <option>Entregado</option>
