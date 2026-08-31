@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   listarProductosAdmin,
   listarPedidos,
@@ -39,6 +39,11 @@ function limitarDigitos(valorTexto, maxDigitos) {
   const entero = partes[0].replace(/[^0-9]/g, '').slice(0, maxDigitos);
   const decimal = partes.length > 1 ? '.' + partes[1].replace(/[^0-9]/g, '').slice(0, 2) : '';
   return entero + decimal;
+}
+
+// Igual, pero para teléfonos: solo dígitos, sin punto decimal.
+function limitarTelefono(valorTexto) {
+  return String(valorTexto).replace(/[^0-9]/g, '').slice(0, 13);
 }
 
 const MAX_DIGITOS_STOCK = 6; // hasta 999,999 piezas
@@ -261,7 +266,7 @@ export default function Dashboard() {
             <thead>
               <tr>
                 <th>Producto</th><th>Código</th><th>Precio</th><th>Stock</th>
-                <th>Mínimo</th><th>Actualizar</th><th>Acciones</th>
+                <th>Mínimo</th><th>Actualizar stock</th><th>Acciones</th>
               </tr>
             </thead>
             <tbody>
@@ -286,7 +291,7 @@ export default function Dashboard() {
           <table className="data-table">
             <thead>
               <tr>
-                <th>Fecha</th><th>Cliente</th><th>Teléfono</th><th>Producto</th>
+                <th>Fecha</th><th>Hora</th><th>Cliente</th><th>Teléfono</th><th>Producto</th>
                 <th>Cant.</th><th>Notas</th><th>Estado</th><th>Guardar</th>
               </tr>
             </thead>
@@ -398,7 +403,8 @@ function ProductoForm({ adminKey, productoExistente, onGuardado, onCancelar }) {
 
   // Para campos numéricos (precio, stock, etc.): igual que handleChange,
   // pero corta el texto a una cantidad máxima de dígitos para que no se
-  // puedan escribir números absurdamente grandes.
+  // puedan escribir números absurdamente grandes. Sigue usando <input
+  // type="number"> para no perder las flechitas de subir/bajar.
   function handleChangeNumero(campo, maxDigitos) {
     return (e) => setForm((f) => ({ ...f, [campo]: limitarDigitos(e.target.value, maxDigitos) }));
   }
@@ -464,9 +470,8 @@ function ProductoForm({ adminKey, productoExistente, onGuardado, onCancelar }) {
         <label>
           Precio de venta*
           <input
-            type="text"
-            inputMode="decimal"
-            maxLength={10}
+            type="number"
+            min="0"
             value={form.precio}
             onChange={handleChangeNumero('precio', MAX_DIGITOS_PRECIO)}
             required
@@ -475,9 +480,8 @@ function ProductoForm({ adminKey, productoExistente, onGuardado, onCancelar }) {
         <label>
           Precio de compra
           <input
-            type="text"
-            inputMode="decimal"
-            maxLength={10}
+            type="number"
+            min="0"
             value={form.precioCompra}
             onChange={handleChangeNumero('precioCompra', MAX_DIGITOS_PRECIO)}
           />
@@ -485,9 +489,8 @@ function ProductoForm({ adminKey, productoExistente, onGuardado, onCancelar }) {
         <label>
           Stock {esEdicion ? '' : 'inicial'}
           <input
-            type="text"
-            inputMode="numeric"
-            maxLength={MAX_DIGITOS_STOCK}
+            type="number"
+            min="0"
             value={form.stock}
             onChange={handleChangeNumero('stock', MAX_DIGITOS_STOCK)}
           />
@@ -495,9 +498,8 @@ function ProductoForm({ adminKey, productoExistente, onGuardado, onCancelar }) {
         <label>
           Stock mínimo
           <input
-            type="text"
-            inputMode="numeric"
-            maxLength={MAX_DIGITOS_STOCK}
+            type="number"
+            min="0"
             value={form.stockMinimo}
             onChange={handleChangeNumero('stockMinimo', MAX_DIGITOS_STOCK)}
           />
@@ -533,10 +535,23 @@ function ProductoForm({ adminKey, productoExistente, onGuardado, onCancelar }) {
 
 function StockRow({ producto, onActualizar, onDirtyChange, onEditar, onCambiarDisponibilidad, onEliminar }) {
   const [valor, setValor] = useState(producto.Stock);
+  const stockConocido = useRef(producto.Stock);
   const sinGuardar = Number(valor) !== Number(producto.Stock);
   const llave = `stock:${producto.ID}`;
   const visible = esProductoVisible(producto);
   const foto = primeraFoto(producto.FotoURL);
+
+  // Si el Stock del producto cambió por FUERA de este cuadrito (por ejemplo,
+  // lo editaste desde el formulario de "Editar" y se guardó ahí), sincroniza
+  // el cuadro de "Actualizar stock" con el valor nuevo. Sin esto, el cuadro
+  // se quedaba pegado con el número viejo y marcaba un falso "cambio sin
+  // guardar" aunque ya lo hubieras guardado desde Editar.
+  useEffect(() => {
+    if (producto.Stock !== stockConocido.current) {
+      stockConocido.current = producto.Stock;
+      setValor(producto.Stock);
+    }
+  }, [producto.Stock]);
 
   // Avisa al Dashboard si esta fila tiene un cambio pendiente de guardar,
   // y con qué texto describirlo en el aviso flotante.
@@ -549,8 +564,10 @@ function StockRow({ producto, onActualizar, onDirtyChange, onEditar, onCambiarDi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sinGuardar, llave, valor]);
 
+  const clasesFila = [!visible && 'fila-oculta', sinGuardar && 'fila-sin-guardar'].filter(Boolean).join(' ');
+
   return (
-    <tr className={visible ? '' : 'fila-oculta'}>
+    <tr className={clasesFila}>
       <td>
         <div className="stock-nombre-con-foto">
           {foto ? (
@@ -570,9 +587,8 @@ function StockRow({ producto, onActualizar, onDirtyChange, onEditar, onCambiarDi
       <td>{producto.StockMinimo}</td>
       <td className="stock-editor">
         <input
-          type="text"
-          inputMode="numeric"
-          maxLength={MAX_DIGITOS_STOCK}
+          type="number"
+          min="0"
           className={sinGuardar ? 'campo-modificado' : ''}
           value={valor}
           onChange={(e) => setValor(limitarDigitos(e.target.value, MAX_DIGITOS_STOCK))}
@@ -585,16 +601,18 @@ function StockRow({ producto, onActualizar, onDirtyChange, onEditar, onCambiarDi
           Guardar
         </button>
       </td>
-      <td className="acciones-producto">
-        <button type="button" className="btn btn-editar btn-chip" onClick={() => onEditar(producto)}>
-          Editar
-        </button>
-        <button type="button" className="btn btn-toggle btn-chip" onClick={() => onCambiarDisponibilidad(producto)}>
-          {visible ? 'Ocultar' : 'Mostrar'}
-        </button>
-        <button type="button" className="btn btn-danger btn-chip" onClick={() => onEliminar(producto)}>
-          Eliminar
-        </button>
+      <td className="celda-acciones">
+        <div className="acciones-producto">
+          <button type="button" className="btn btn-editar btn-chip" onClick={() => onEditar(producto)}>
+            Editar
+          </button>
+          <button type="button" className="btn btn-toggle btn-chip" onClick={() => onCambiarDisponibilidad(producto)}>
+            {visible ? 'Ocultar' : 'Mostrar'}
+          </button>
+          <button type="button" className="btn btn-eliminar btn-chip" onClick={() => onEliminar(producto)}>
+            Eliminar
+          </button>
+        </div>
       </td>
     </tr>
   );
@@ -631,23 +649,27 @@ function PedidoRow({ pedido, onGuardar, onDirtyChange }) {
     onGuardar(pedido.ID, { cantidad, telefono, notas, estado }).finally(() => setGuardando(false));
   }
 
+  const fecha = new Date(pedido.Fecha);
+
   return (
-    <tr>
-      <td>{new Date(pedido.Fecha).toLocaleString('es-MX')}</td>
+    <tr className={sinGuardar ? 'fila-sin-guardar' : ''}>
+      <td>{fecha.toLocaleDateString('es-MX')}</td>
+      <td>{fecha.toLocaleTimeString('es-MX')}</td>
       <td>{pedido.Cliente}</td>
       <td>
         <input
+          type="tel"
+          inputMode="numeric"
           className={`pedido-input-tel ${cambioTelefono ? 'campo-modificado' : ''}`}
           value={telefono}
-          onChange={(e) => setTelefono(e.target.value)}
+          onChange={(e) => setTelefono(limitarTelefono(e.target.value))}
         />
       </td>
       <td>{pedido.Producto}</td>
       <td>
         <input
-          type="text"
-          inputMode="numeric"
-          maxLength={MAX_DIGITOS_CANTIDAD}
+          type="number"
+          min="1"
           className={`pedido-input-cant ${cambioCantidad ? 'campo-modificado' : ''}`}
           value={cantidad}
           onChange={(e) => setCantidad(limitarDigitos(e.target.value, MAX_DIGITOS_CANTIDAD))}
@@ -658,7 +680,6 @@ function PedidoRow({ pedido, onGuardar, onDirtyChange }) {
           className={`pedido-input-notas ${cambioNotas ? 'campo-modificado' : ''}`}
           value={notas}
           onChange={(e) => setNotas(e.target.value)}
-          placeholder="Sin notas"
         />
       </td>
       <td>
