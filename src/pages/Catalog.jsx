@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import ProductCard from '../components/ProductCard.jsx';
 import SolicitudModal from '../components/SolicitudModal.jsx';
+import CarritoModal from '../components/CarritoModal.jsx';
 import { listarProductos, crearPedido } from '../api.js';
 
 const CLIENTE_STORAGE_KEY = 'pyme_cliente_info';
@@ -33,14 +34,38 @@ function borrarClienteGuardado() {
   }
 }
 
-function buildWhatsAppLink(producto, nombre) {
+// Mensaje de WhatsApp para pedir UN solo producto al instante.
+function buildWhatsAppLink(producto, nombre, cantidad) {
   const phone = import.meta.env.VITE_WHATSAPP_NUMBER;
+  const subtotal = Number(producto.Precio) * cantidad;
+  const lineaCantidad =
+    cantidad > 1 ? `Cantidad: ${cantidad}\n💲 Subtotal: $${subtotal.toLocaleString('es-MX')}\n` : '';
   const mensaje =
     `Hola, soy ${nombre}.\n` +
     `Me interesa este producto:\n` +
     `🛍️ ${producto.Nombre}\n` +
-    `💲 $${producto.Precio}\n` +
+    `💲 $${Number(producto.Precio).toLocaleString('es-MX')}\n` +
+    lineaCantidad +
     `¿Sigue disponible?`;
+  return `https://wa.me/${phone}?text=${encodeURIComponent(mensaje)}`;
+}
+
+// Mensaje de WhatsApp para pedir VARIOS productos juntos (carrito).
+function buildWhatsAppLinkCarrito(items, nombre) {
+  const phone = import.meta.env.VITE_WHATSAPP_NUMBER;
+  const lineas = items
+    .map(
+      ({ producto, cantidad }) =>
+        `🛍️ ${producto.Nombre} x${cantidad} — $${(Number(producto.Precio) * cantidad).toLocaleString('es-MX')}`
+    )
+    .join('\n');
+  const total = items.reduce((acc, { producto, cantidad }) => acc + Number(producto.Precio) * cantidad, 0);
+  const mensaje =
+    `Hola, soy ${nombre}.\n` +
+    `Me interesan estos productos:\n` +
+    `${lineas}\n` +
+    `💲 Total aproximado: $${total.toLocaleString('es-MX')}\n` +
+    `¿Siguen disponibles?`;
   return `https://wa.me/${phone}?text=${encodeURIComponent(mensaje)}`;
 }
 
@@ -48,7 +73,16 @@ export default function Catalog() {
   const [productos, setProductos] = useState([]);
   const [estado, setEstado] = useState('cargando'); // cargando | listo | error
   const [error, setError] = useState('');
-  const [productoSeleccionado, setProductoSeleccionado] = useState(null);
+
+  // Pedido de UN producto al instante: { producto, cantidad } o null.
+  const [solicitudActual, setSolicitudActual] = useState(null);
+
+  // Carrito con VARIOS productos: lista de { producto, cantidad }.
+  const [carrito, setCarrito] = useState([]);
+  const [carritoAbierto, setCarritoAbierto] = useState(false);
+  // true cuando el cliente ya revisó el carrito y le falta dar nombre/teléfono.
+  const [pidiendoDatosCarrito, setPidiendoDatosCarrito] = useState(false);
+
   const [clienteGuardado, setClienteGuardado] = useState(() => leerClienteGuardado());
 
   useEffect(() => {
@@ -73,18 +107,17 @@ export default function Catalog() {
     return () => clearInterval(intervalo);
   }, []);
 
-  // Registra el pedido y abre WhatsApp. Se usa tanto si el cliente acaba
-  // de escribir sus datos en el modal, como si ya los teníamos guardados
-  // de una visita anterior en este mismo navegador.
-  function registrarYAbrirWhatsApp(producto, { nombre, telefono }) {
-    window.open(buildWhatsAppLink(producto, nombre), '_blank', 'noopener,noreferrer');
+  // ---- Pedido instantáneo de UN producto ----
+
+  function registrarYAbrirWhatsApp(producto, cantidad, { nombre, telefono }) {
+    window.open(buildWhatsAppLink(producto, nombre, cantidad), '_blank', 'noopener,noreferrer');
 
     crearPedido({
       cliente: nombre,
       telefono,
       producto: producto.Nombre,
       productoId: producto.ID,
-      cantidad: 1,
+      cantidad,
       notas: '',
     }).catch((err) => console.warn('No se pudo registrar el pedido:', err.message));
   }
@@ -93,23 +126,100 @@ export default function Catalog() {
   // Si ya tenemos sus datos guardados en este navegador, NO le volvemos a
   // preguntar: vamos directo a WhatsApp. Si es su primera vez, mostramos
   // el modal para pedirle nombre y teléfono una sola vez.
-  function handleSolicitar(producto) {
+  function handleSolicitar(producto, cantidad) {
     if (clienteGuardado) {
-      registrarYAbrirWhatsApp(producto, clienteGuardado);
+      registrarYAbrirWhatsApp(producto, cantidad, clienteGuardado);
     } else {
-      setProductoSeleccionado(producto);
+      setSolicitudActual({ producto, cantidad });
     }
   }
 
-  // Se llama cuando el cliente confirma el modal (primera vez).
+  // Se llama cuando el cliente confirma el modal (primera vez) del pedido
+  // instantáneo de un solo producto.
   function handleConfirmarSolicitud({ nombre, telefono }) {
-    const producto = productoSeleccionado;
-    setProductoSeleccionado(null);
+    const actual = solicitudActual;
+    setSolicitudActual(null);
+    if (!actual) return;
 
     guardarCliente({ nombre, telefono });
     setClienteGuardado({ nombre, telefono });
 
-    registrarYAbrirWhatsApp(producto, { nombre, telefono });
+    registrarYAbrirWhatsApp(actual.producto, actual.cantidad, { nombre, telefono });
+  }
+
+  // ---- Carrito con varios productos ----
+
+  // Agrega un producto al carrito. Si ya estaba, le suma la cantidad
+  // (sin pasarse del stock disponible).
+  function handleAgregarCarrito(producto, cantidad) {
+    setCarrito((prev) => {
+      const stockDisponible = Number(producto.Stock) || 0;
+      const idx = prev.findIndex((it) => it.producto.ID === producto.ID);
+      if (idx === -1) {
+        return [...prev, { producto, cantidad: Math.min(cantidad, stockDisponible) }];
+      }
+      const copia = [...prev];
+      copia[idx] = {
+        ...copia[idx],
+        cantidad: Math.min(stockDisponible, copia[idx].cantidad + cantidad),
+      };
+      return copia;
+    });
+  }
+
+  function handleQuitarDelCarrito(productoId) {
+    setCarrito((prev) => prev.filter((it) => it.producto.ID !== productoId));
+  }
+
+  function handleCambiarCantidadCarrito(productoId, nuevaCantidad) {
+    setCarrito((prev) =>
+      prev.map((it) => {
+        if (it.producto.ID !== productoId) return it;
+        const stockDisponible = Number(it.producto.Stock) || 0;
+        const cantidad = Math.max(1, Math.min(stockDisponible, nuevaCantidad));
+        return { ...it, cantidad };
+      })
+    );
+  }
+
+  function registrarYAbrirWhatsAppCarrito(items, { nombre, telefono }) {
+    window.open(buildWhatsAppLinkCarrito(items, nombre), '_blank', 'noopener,noreferrer');
+
+    // Cada producto queda como su propia fila en la hoja de Pedidos (mismo
+    // cliente y teléfono), para que se vean igual que los demás pedidos.
+    items.forEach(({ producto, cantidad }) => {
+      crearPedido({
+        cliente: nombre,
+        telefono,
+        producto: producto.Nombre,
+        productoId: producto.ID,
+        cantidad,
+        notas: '',
+      }).catch((err) => console.warn('No se pudo registrar el pedido:', err.message));
+    });
+  }
+
+  // Se llama al darle "Continuar" dentro del modal del carrito.
+  function handleContinuarCarrito() {
+    setCarritoAbierto(false);
+    if (clienteGuardado) {
+      registrarYAbrirWhatsAppCarrito(carrito, clienteGuardado);
+      setCarrito([]);
+    } else {
+      setPidiendoDatosCarrito(true);
+    }
+  }
+
+  // Se llama cuando el cliente confirma nombre/teléfono para el carrito
+  // (primera vez que pide algo en este navegador).
+  function handleConfirmarCarritoDatos({ nombre, telefono }) {
+    setPidiendoDatosCarrito(false);
+
+    guardarCliente({ nombre, telefono });
+    setClienteGuardado({ nombre, telefono });
+
+    registrarYAbrirWhatsAppCarrito(carrito, { nombre, telefono });
+    setCarrito([]);
   }
 
   function handleCambiarDatos() {
@@ -120,6 +230,8 @@ export default function Catalog() {
   if (estado === 'cargando') return <p className="info-msg">Cargando catálogo…</p>;
   if (estado === 'error') return <p className="info-msg error">No se pudo cargar el catálogo: {error}</p>;
   if (productos.length === 0) return <p className="info-msg">Aún no hay productos disponibles.</p>;
+
+  const totalProductosEnCarrito = carrito.length;
 
   return (
     <>
@@ -137,15 +249,45 @@ export default function Catalog() {
           .slice()
           .reverse()
           .map((p) => (
-            <ProductCard key={p.ID} producto={p} onSolicitar={handleSolicitar} />
+            <ProductCard
+              key={p.ID}
+              producto={p}
+              onSolicitar={handleSolicitar}
+              onAgregarCarrito={handleAgregarCarrito}
+            />
           ))}
       </div>
 
-      {productoSeleccionado && (
+      {totalProductosEnCarrito > 0 && (
+        <button type="button" className="carrito-flotante" onClick={() => setCarritoAbierto(true)}>
+          🛒 {totalProductosEnCarrito} producto{totalProductosEnCarrito === 1 ? '' : 's'} — Ver pedido
+        </button>
+      )}
+
+      {carritoAbierto && (
+        <CarritoModal
+          items={carrito}
+          onQuitar={handleQuitarDelCarrito}
+          onCambiarCantidad={handleCambiarCantidadCarrito}
+          onClose={() => setCarritoAbierto(false)}
+          onContinuar={handleContinuarCarrito}
+        />
+      )}
+
+      {solicitudActual && (
         <SolicitudModal
-          producto={productoSeleccionado}
-          onClose={() => setProductoSeleccionado(null)}
+          producto={solicitudActual.producto}
+          cantidad={solicitudActual.cantidad}
+          onClose={() => setSolicitudActual(null)}
           onConfirm={handleConfirmarSolicitud}
+        />
+      )}
+
+      {pidiendoDatosCarrito && (
+        <SolicitudModal
+          items={carrito}
+          onClose={() => setPidiendoDatosCarrito(false)}
+          onConfirm={handleConfirmarCarritoDatos}
         />
       )}
     </>
