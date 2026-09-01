@@ -133,9 +133,12 @@ export default function Catalog() {
       )}
 
       <div className="catalog-grid">
-        {productos.map((p) => (
-          <ProductCard key={p.ID} producto={p} onSolicitar={handleSolicitar} />
-        ))}
+        {productos
+          .slice()
+          .reverse()
+          .map((p) => (
+            <ProductCard key={p.ID} producto={p} onSolicitar={handleSolicitar} />
+          ))}
       </div>
 
       {productoSeleccionado && (
