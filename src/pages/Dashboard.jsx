@@ -1,8 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   listarProductosAdmin,
   listarPedidos,
   obtenerAlertas,
+  listarOpciones,
+  agregarOpcion,
+  eliminarOpcion,
   actualizarStock,
   actualizarPedido,
   crearProducto,
@@ -107,6 +110,12 @@ export default function Dashboard() {
   const [productos, setProductos] = useState([]);
   const [pedidos, setPedidos] = useState([]);
   const [alertas, setAlertas] = useState([]);
+  // Opciones predeterminadas para los campos de "+ Agregar producto"
+  // (Nombre, Código propio, Categoría, Marca, Talla, Color). Se guarda como
+  // { categoria: ['Bolsas', 'Zapatos'], color: ['Rojo'], ... }. A propósito
+  // NO se llena sola con el historial de productos: solo tiene lo que se
+  // agregó a mano desde "Administrar opciones predeterminadas".
+  const [opciones, setOpciones] = useState({});
   const [cargando, setCargando] = useState(false);
   const [mensaje, setMensaje] = useState('');
   const [productoEditando, setProductoEditando] = useState(null);
@@ -195,11 +204,12 @@ export default function Dashboard() {
   function cargarTodo(key, opciones = {}) {
     const silencioso = !!opciones.silencioso;
     if (!silencioso) setCargando(true);
-    return Promise.all([listarProductosAdmin(key), listarPedidos(key), obtenerAlertas(key)])
-      .then(([p, o, a]) => {
+    return Promise.all([listarProductosAdmin(key), listarPedidos(key), obtenerAlertas(key), listarOpciones(key)])
+      .then(([p, o, a, op]) => {
         setProductos(p.productos);
         setPedidos(o.pedidos);
         setAlertas(a.alertas);
+        setOpciones(op.opciones || {});
         if (!silencioso) setMensaje('');
       })
       .catch((err) => {
@@ -558,7 +568,8 @@ export default function Dashboard() {
       {tab === 'nuevo' && (
         <ProductoForm
           adminKey={adminKey}
-          productos={productos}
+          opciones={opciones}
+          onOpcionesActualizadas={() => cargarTodo(adminKey, { silencioso: true })}
           onGuardado={() => {
             cargarTodo(adminKey);
             setTab('stock');
@@ -572,7 +583,8 @@ export default function Dashboard() {
             <h3>Editar producto</h3>
             <ProductoForm
               adminKey={adminKey}
-              productos={productos}
+              opciones={opciones}
+              onOpcionesActualizadas={() => cargarTodo(adminKey, { silencioso: true })}
               productoExistente={productoEditando}
               onGuardado={() => {
                 setProductoEditando(null);
@@ -651,44 +663,88 @@ function fotosDesdeProducto(producto) {
     .filter(Boolean);
 }
 
-// Saca la lista de valores distintos que ya se han usado antes en un campo
-// (por ejemplo, todas las Categorías diferentes que ya existen en el Stock),
-// para poder sugerirlos en el formulario y así escribir siempre igual (por
-// ejemplo "Bolsas" y no a veces "bolsas" y a veces "Bolsa"). Se ignoran los
-// valores vacíos y no se repite ninguno.
-function valoresUnicos(productos, campo) {
-  const vistos = new Set();
-  productos.forEach((p) => {
-    const valor = textoSeguro(p[campo]).trim();
-    if (valor) vistos.add(valor);
-  });
-  return Array.from(vistos).sort((a, b) => a.localeCompare(b, 'es'));
-}
+// Los 6 campos del formulario que tienen "opciones predeterminadas"
+// administrables (Claudia las agrega/edita/quita a mano desde el botón ⚙️
+// de cada uno). La llave (`campo`) es la que se usa para guardarlas en la
+// hoja "Opciones" del Sheet.
+const CAMPOS_CON_OPCIONES = [
+  { campo: 'nombre', etiqueta: 'Nombre' },
+  { campo: 'codigoPropio', etiqueta: 'Código propio' },
+  { campo: 'categoria', etiqueta: 'Categoría' },
+  { campo: 'marca', etiqueta: 'Marca' },
+  { campo: 'talla', etiqueta: 'Talla / Medida' },
+  { campo: 'color', etiqueta: 'Color' },
+];
 
 // Sirve tanto para dar de alta un producto nuevo como para editar uno que
 // ya existe: si le pasas `productoExistente`, precarga sus datos y guarda
 // con "actualizarProducto" en vez de "crearProducto".
-function ProductoForm({ adminKey, productos = [], productoExistente, onGuardado, onCancelar }) {
+function ProductoForm({ adminKey, opciones = {}, productoExistente, onGuardado, onOpcionesActualizadas, onCancelar }) {
   const esEdicion = !!productoExistente;
   const [form, setForm] = useState(() => (esEdicion ? formDesdeProducto(productoExistente) : FORM_INICIAL));
   const [fotos, setFotos] = useState(() => (esEdicion ? fotosDesdeProducto(productoExistente) : []));
   const [enviando, setEnviando] = useState(false);
   const [mensaje, setMensaje] = useState('');
 
-  // Listas de sugerencias para cada campo, calculadas a partir de los
-  // productos que ya existen. Se recalculan solo cuando cambia la lista de
-  // productos, no en cada letra que se escribe.
-  const sugerencias = useMemo(
-    () => ({
-      nombre: valoresUnicos(productos, 'Nombre'),
-      codigoPropio: valoresUnicos(productos, 'CodigoPropio'),
-      categoria: valoresUnicos(productos, 'Categoria'),
-      marca: valoresUnicos(productos, 'Marca'),
-      talla: valoresUnicos(productos, 'Talla'),
-      color: valoresUnicos(productos, 'Color'),
-    }),
-    [productos]
-  );
+  // ---- Ventana de "Administrar opciones predeterminadas" ----
+  // Es UNA sola ventana compartida por los 6 campos: el botón ⚙️ de cada
+  // campo la abre ya elegido en ese campo (`campoGestion`). Las opciones
+  // NUNCA se llenan solas: solo tienen lo que se agrega aquí a propósito.
+  const [gestorAbierto, setGestorAbierto] = useState(false);
+  const [campoGestion, setCampoGestion] = useState('categoria');
+  const [valorOpcion, setValorOpcion] = useState('');
+  const [editandoValorOriginal, setEditandoValorOriginal] = useState(null);
+  const [guardandoOpcion, setGuardandoOpcion] = useState(false);
+
+  function abrirGestor(campo) {
+    setCampoGestion(campo);
+    setValorOpcion('');
+    setEditandoValorOriginal(null);
+    setGestorAbierto(true);
+  }
+
+  function cerrarGestor() {
+    setGestorAbierto(false);
+    setValorOpcion('');
+    setEditandoValorOriginal(null);
+  }
+
+  function handleEmpezarEditarOpcion(valor) {
+    setEditandoValorOriginal(valor);
+    setValorOpcion(valor);
+  }
+
+  // Agrega la opción nueva o, si se estaba editando una ya existente,
+  // primero quita la vieja y luego agrega la nueva (así "renombramos" un
+  // valor sin necesitar un botón especial de "editar" en el backend).
+  function handleGuardarOpcion() {
+    const valor = valorOpcion.trim();
+    if (!valor) return;
+    setGuardandoOpcion(true);
+    const promesa =
+      editandoValorOriginal && editandoValorOriginal !== valor
+        ? eliminarOpcion({ adminKey, campo: campoGestion, valor: editandoValorOriginal }).then(() =>
+            agregarOpcion({ adminKey, campo: campoGestion, valor })
+          )
+        : agregarOpcion({ adminKey, campo: campoGestion, valor });
+
+    promesa
+      .then(() => {
+        setValorOpcion('');
+        setEditandoValorOriginal(null);
+        onOpcionesActualizadas?.();
+      })
+      .catch((err) => setMensaje(`Error al guardar la opción: ${err.message}`))
+      .finally(() => setGuardandoOpcion(false));
+  }
+
+  function handleEliminarOpcion(valor) {
+    const confirmar = window.confirm(`¿Quitar "${valor}" de las opciones predeterminadas?`);
+    if (!confirmar) return;
+    eliminarOpcion({ adminKey, campo: campoGestion, valor })
+      .then(() => onOpcionesActualizadas?.())
+      .catch((err) => setMensaje(`Error al quitar la opción: ${err.message}`));
+  }
 
   function handleChange(campo) {
     return (e) => setForm((f) => ({ ...f, [campo]: e.target.value }));
@@ -732,66 +788,96 @@ function ProductoForm({ adminKey, productos = [], productoExistente, onGuardado,
   return (
     <form className="new-product-form" onSubmit={handleSubmit}>
       {/* En cada uno de estos campos puedes escribir libremente lo que
-          quieras, O darle clic a la flechita del cuadro para elegir de una
-          lista con los valores que ya has usado antes en otros productos —
-          lo que sea más rápido. Esa lista se va llenando sola conforme
-          agregas productos. */}
+          quieras, O darle clic a la flechita del cuadro para elegir una de
+          tus opciones predeterminadas. Dale clic al ⚙️ de cada campo para
+          agregar, editar o quitar esas opciones — la lista NUNCA se llena
+          sola, solo tiene lo que agregues ahí a propósito. */}
       <div className="form-grid">
         <label>
-          Nombre*
-          <input value={form.nombre} onChange={handleChange('nombre')} required list="lista-nombres" />
-          <datalist id="lista-nombres">
-            {sugerencias.nombre.map((v) => (
+          <span className="form-label-fila">
+            Nombre*
+            <button type="button" className="gestor-opciones-btn" onClick={() => abrirGestor('nombre')} title="Administrar opciones predeterminadas de Nombre">
+              ⚙️
+            </button>
+          </span>
+          <input value={form.nombre} onChange={handleChange('nombre')} required list="lista-nombre" />
+          <datalist id="lista-nombre">
+            {(opciones.nombre || []).map((v) => (
               <option key={v} value={v} />
             ))}
           </datalist>
         </label>
         <label>
-          Código propio
+          <span className="form-label-fila">
+            Código propio
+            <button type="button" className="gestor-opciones-btn" onClick={() => abrirGestor('codigoPropio')} title="Administrar opciones predeterminadas de Código propio">
+              ⚙️
+            </button>
+          </span>
           <input
             value={form.codigoPropio}
             onChange={handleChange('codigoPropio')}
             placeholder="Ej. PLY-001"
-            list="lista-codigos"
+            list="lista-codigoPropio"
           />
-          <datalist id="lista-codigos">
-            {sugerencias.codigoPropio.map((v) => (
+          <datalist id="lista-codigoPropio">
+            {(opciones.codigoPropio || []).map((v) => (
               <option key={v} value={v} />
             ))}
           </datalist>
         </label>
         <label>
-          Categoría
-          <input value={form.categoria} onChange={handleChange('categoria')} list="lista-categorias" />
-          <datalist id="lista-categorias">
-            {sugerencias.categoria.map((v) => (
+          <span className="form-label-fila">
+            Categoría
+            <button type="button" className="gestor-opciones-btn" onClick={() => abrirGestor('categoria')} title="Administrar opciones predeterminadas de Categoría">
+              ⚙️
+            </button>
+          </span>
+          <input value={form.categoria} onChange={handleChange('categoria')} list="lista-categoria" />
+          <datalist id="lista-categoria">
+            {(opciones.categoria || []).map((v) => (
               <option key={v} value={v} />
             ))}
           </datalist>
         </label>
         <label>
-          Marca
-          <input value={form.marca} onChange={handleChange('marca')} list="lista-marcas" />
-          <datalist id="lista-marcas">
-            {sugerencias.marca.map((v) => (
+          <span className="form-label-fila">
+            Marca
+            <button type="button" className="gestor-opciones-btn" onClick={() => abrirGestor('marca')} title="Administrar opciones predeterminadas de Marca">
+              ⚙️
+            </button>
+          </span>
+          <input value={form.marca} onChange={handleChange('marca')} list="lista-marca" />
+          <datalist id="lista-marca">
+            {(opciones.marca || []).map((v) => (
               <option key={v} value={v} />
             ))}
           </datalist>
         </label>
         <label>
-          Talla / Medida
-          <input value={form.talla} onChange={handleChange('talla')} list="lista-tallas" />
-          <datalist id="lista-tallas">
-            {sugerencias.talla.map((v) => (
+          <span className="form-label-fila">
+            Talla / Medida
+            <button type="button" className="gestor-opciones-btn" onClick={() => abrirGestor('talla')} title="Administrar opciones predeterminadas de Talla / Medida">
+              ⚙️
+            </button>
+          </span>
+          <input value={form.talla} onChange={handleChange('talla')} list="lista-talla" />
+          <datalist id="lista-talla">
+            {(opciones.talla || []).map((v) => (
               <option key={v} value={v} />
             ))}
           </datalist>
         </label>
         <label>
-          Color
-          <input value={form.color} onChange={handleChange('color')} list="lista-colores" />
-          <datalist id="lista-colores">
-            {sugerencias.color.map((v) => (
+          <span className="form-label-fila">
+            Color
+            <button type="button" className="gestor-opciones-btn" onClick={() => abrirGestor('color')} title="Administrar opciones predeterminadas de Color">
+              ⚙️
+            </button>
+          </span>
+          <input value={form.color} onChange={handleChange('color')} list="lista-color" />
+          <datalist id="lista-color">
+            {(opciones.color || []).map((v) => (
               <option key={v} value={v} />
             ))}
           </datalist>
@@ -858,6 +944,101 @@ function ProductoForm({ adminKey, productos = [], productoExistente, onGuardado,
           </button>
         )}
       </div>
+
+      {gestorAbierto && (
+        <div className="modal-overlay" onClick={cerrarGestor}>
+          <div className="modal-box" onClick={(e) => e.stopPropagation()}>
+            <h3>Opciones predeterminadas</h3>
+            <p className="muted">
+              Estas son TUS opciones para este campo — no se llenan solas, solo
+              aparecen aquí las que tú agregas. Puedes cambiar de campo con el
+              siguiente menú.
+            </p>
+
+            <label className="modal-field">
+              Campo
+              <select
+                value={campoGestion}
+                onChange={(e) => {
+                  setCampoGestion(e.target.value);
+                  setValorOpcion('');
+                  setEditandoValorOriginal(null);
+                }}
+              >
+                {CAMPOS_CON_OPCIONES.map((c) => (
+                  <option key={c.campo} value={c.campo}>
+                    {c.etiqueta}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <div className="opciones-lista">
+              {(opciones[campoGestion] || []).length === 0 && (
+                <p className="muted">Todavía no hay opciones guardadas para este campo.</p>
+              )}
+              {(opciones[campoGestion] || []).map((valor) => (
+                <div key={valor} className="opciones-item">
+                  <span>{valor}</span>
+                  <div className="opciones-item-botones">
+                    <button
+                      type="button"
+                      className="opciones-item-btn"
+                      onClick={() => handleEmpezarEditarOpcion(valor)}
+                      title="Editar"
+                    >
+                      ✏️
+                    </button>
+                    <button
+                      type="button"
+                      className="opciones-item-btn"
+                      onClick={() => handleEliminarOpcion(valor)}
+                      title="Quitar"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <label className="modal-field">
+              {editandoValorOriginal ? `Editando "${editandoValorOriginal}"` : 'Agregar una opción nueva'}
+              <input
+                value={valorOpcion}
+                onChange={(e) => setValorOpcion(e.target.value)}
+                placeholder="Escribe el valor"
+              />
+            </label>
+
+            <div className="form-actions">
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={guardandoOpcion || !valorOpcion.trim()}
+                onClick={handleGuardarOpcion}
+              >
+                {editandoValorOriginal ? 'Guardar cambio' : 'Agregar'}
+              </button>
+              {editandoValorOriginal && (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    setEditandoValorOriginal(null);
+                    setValorOpcion('');
+                  }}
+                >
+                  Cancelar edición
+                </button>
+              )}
+              <button type="button" className="btn btn-secondary" onClick={cerrarGestor}>
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </form>
   );
 }
