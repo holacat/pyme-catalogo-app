@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import ImageLightbox from './ImageLightbox.jsx';
 
 // Un producto puede tener varias fotos guardadas en una sola celda de
 // Sheets, separadas por "|". Aquí las separamos para armar el carrusel.
@@ -13,6 +14,7 @@ export default function ProductCard({ producto, onSolicitar }) {
   const sinStock = Number(producto.Stock) <= 0;
   const fotos = obtenerFotos(producto.FotoURL);
   const [indice, setIndice] = useState(0);
+  const [zoomAbierto, setZoomAbierto] = useState(false);
 
   function fotoAnterior(e) {
     e.stopPropagation();
@@ -29,7 +31,12 @@ export default function ProductCard({ producto, onSolicitar }) {
       <div className="product-photo">
         {fotos.length > 0 ? (
           <>
-            <img src={fotos[indice]} alt={producto.Nombre} loading="lazy" />
+            <img
+              src={fotos[indice]}
+              alt={producto.Nombre}
+              loading="lazy"
+              onClick={() => setZoomAbierto(true)}
+            />
             {fotos.length > 1 && (
               <>
                 <button type="button" className="carousel-btn carousel-prev" onClick={fotoAnterior} aria-label="Foto anterior">
@@ -70,6 +77,14 @@ export default function ProductCard({ producto, onSolicitar }) {
           </button>
         </div>
       </div>
+
+      {zoomAbierto && (
+        <ImageLightbox
+          src={fotos[indice]}
+          alt={producto.Nombre}
+          onClose={() => setZoomAbierto(false)}
+        />
+      )}
     </article>
   );
 }
