@@ -9,13 +9,12 @@ export default function App() {
         <Link to="/" className="brand">🛍️ Mi Comercio</Link>
         <nav>
           <Link to="/" className={location.pathname === '/' ? 'active' : ''}>Catálogo</Link>
-        
         </nav>
       </header>
       <main>
         <Outlet />
       </main>
-      <footer className="app-footer">Versión de prueba — sin pagos en línea</footer>
+      <footer className="app-footer">Aún no se procesan pagos en línea</footer>
     </div>
   );
 }
