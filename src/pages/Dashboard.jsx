@@ -65,14 +65,20 @@ function limitarTelefono(valorTexto) {
   return String(valorTexto).replace(/[^0-9]/g, '').slice(0, 13);
 }
 
-// Fecha Y hora en la que se dio de alta un producto (columna "Agregado").
-function formatearFechaHora(valor) {
+// Fecha y hora en la que se dio de alta un producto. Van en dos columnas
+// separadas ("Fecha agregado" / "Hora agregado"), por eso son dos funciones.
+function formatearFechaSolo(valor) {
   if (!valor) return '—';
   const fecha = new Date(valor);
   if (Number.isNaN(fecha.getTime())) return '—';
-  const fechaCorta = fecha.toLocaleDateString('es-MX');
-  const horaCorta = fecha.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
-  return `${fechaCorta} ${horaCorta}`;
+  return fecha.toLocaleDateString('es-MX');
+}
+
+function formatearHoraSolo(valor) {
+  if (!valor) return '—';
+  const fecha = new Date(valor);
+  if (Number.isNaN(fecha.getTime())) return '—';
+  return fecha.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
 }
 
 const MAX_DIGITOS_STOCK = 6; // hasta 999,999 piezas
@@ -108,6 +114,11 @@ export default function Dashboard() {
   const [filtroHasta, setFiltroHasta] = useState('');
   const [filtroEstado, setFiltroEstado] = useState('');
   const [fotoAmpliada, setFotoAmpliada] = useState('');
+  // Nota de un pedido abierta "en grande" (ver/editar completa). Null cuando
+  // no hay ninguna abierta. Guarda también `onChange`, que es el `setNotas`
+  // de esa fila de Pedidos en particular, para que editar aquí actualice
+  // exactamente esa misma fila.
+  const [notaEnZoom, setNotaEnZoom] = useState(null);
 
   // Mapa de llaves (con prefijo "stock:" o "pedido:") -> descripción del
   // cambio pendiente de guardar. Mientras este mapa no esté vacío, avisamos
@@ -163,19 +174,19 @@ export default function Dashboard() {
   }, [sinGuardar]);
 
   // La tecla Escape cancela los cambios sin guardar, igual que el botón del
-  // aviso amarillo — pero NO si hay una foto ampliada abierta en ese
-  // momento (ahí Escape solo debe cerrar la foto, para no perder un cambio
-  // sin querer solo por cerrar una imagen).
+  // aviso amarillo — pero NO si hay una foto ampliada o una nota ampliada
+  // abierta en ese momento (ahí Escape, o simplemente cerrar esa ventana,
+  // no debe perder un cambio sin querer).
   useEffect(() => {
     function onKeyDown(e) {
-      if (e.key === 'Escape' && !fotoAmpliada && sinGuardar.size > 0) {
+      if (e.key === 'Escape' && !fotoAmpliada && !notaEnZoom && sinGuardar.size > 0) {
         cancelarCambios();
       }
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sinGuardar, fotoAmpliada]);
+  }, [sinGuardar, fotoAmpliada, notaEnZoom]);
 
   // `silencioso: true` se usa para los refrescos automáticos de fondo: no
   // muestra "Actualizando…" ni mensajes de error a cada rato, para no ser
@@ -297,8 +308,7 @@ export default function Dashboard() {
       <form className="login-box" onSubmit={handleLogin}>
         <h2>Acceso administrador</h2>
         <p className="muted">
-          Ingresa la clave de administrador (la misma que configuraste como
-          <code> ADMIN_KEY</code> en Apps Script).
+          Ingresa la clave de administrador (la misma que configuraste como ADMIN_KEY en Apps Script).
         </p>
         {errorLogin && <p className="info-msg error">{errorLogin}</p>}
         <input
@@ -453,7 +463,7 @@ export default function Dashboard() {
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Agregado</th><th>Producto</th><th>Código</th><th>Precio</th><th>Stock</th>
+                  <th>Fecha agregado</th><th>Hora agregado</th><th>Producto</th><th>Código</th><th>Precio</th><th>Stock</th>
                   <th>Mínimo</th><th>Actualizar stock</th><th>Acciones</th>
                 </tr>
               </thead>
@@ -480,33 +490,12 @@ export default function Dashboard() {
       )}
 
       {tab === 'pedidos' && (
-        <div className="pedidos-layout">
-          <div className="table-scroll">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Fecha</th><th>Hora</th><th>Cliente</th><th>Teléfono</th><th>Producto</th>
-                  <th>Cant.</th><th>Notas</th><th>Estado</th><th>Guardar</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pedidosFiltrados.map((ped) => (
-                  <PedidoRow
-                    key={`${ped.ID}-${resetToken}`}
-                    pedido={ped}
-                    onGuardar={handleGuardarPedido}
-                    onDirtyChange={marcarSucio}
-                  />
-                ))}
-              </tbody>
-            </table>
-            {pedidosFiltrados.length === 0 && (
-              <p className="info-msg">No hay pedidos con ese estado.</p>
-            )}
-          </div>
-
-          <div className="pedidos-resumen">
-            <h4>Pedidos por estado</h4>
+        <>
+          {/* Tablita de conteo por estado, ARRIBA de la tabla (no al lado),
+              para no quitarle ancho a la tabla y así evitar que tenga que
+              hacer scroll hacia los lados. */}
+          <div className="pedidos-resumen-fila">
+            <span className="pedidos-resumen-titulo">Pedidos por estado:</span>
             <button
               type="button"
               className={`resumen-btn ${filtroEstado === '' ? 'activo' : ''}`}
@@ -527,7 +516,32 @@ export default function Dashboard() {
               </button>
             ))}
           </div>
-        </div>
+
+          <div className="table-scroll">
+            <table className="data-table pedidos-table">
+              <thead>
+                <tr>
+                  <th>Fecha</th><th>Hora</th><th>Cliente</th><th>Teléfono</th><th>Producto</th>
+                  <th>Cant.</th><th>Notas</th><th>Estado</th><th>Guardar</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pedidosFiltrados.map((ped) => (
+                  <PedidoRow
+                    key={`${ped.ID}-${resetToken}`}
+                    pedido={ped}
+                    onGuardar={handleGuardarPedido}
+                    onDirtyChange={marcarSucio}
+                    onAbrirNota={(cliente, valor, onChange) => setNotaEnZoom({ cliente, valor, onChange })}
+                  />
+                ))}
+              </tbody>
+            </table>
+            {pedidosFiltrados.length === 0 && (
+              <p className="info-msg">No hay pedidos con ese estado.</p>
+            )}
+          </div>
+        </>
       )}
 
       {tab === 'alertas' && (
@@ -570,6 +584,29 @@ export default function Dashboard() {
 
       {fotoAmpliada && (
         <ImageLightbox src={fotoAmpliada} onClose={() => setFotoAmpliada('')} />
+      )}
+
+      {notaEnZoom && (
+        <div className="modal-overlay" onClick={() => setNotaEnZoom(null)}>
+          <div className="modal-box modal-box-ancho" onClick={(e) => e.stopPropagation()}>
+            <h3>Nota de {notaEnZoom.cliente}</h3>
+            <textarea
+              className="nota-modal-textarea"
+              value={notaEnZoom.valor}
+              onChange={(e) => {
+                notaEnZoom.onChange(e.target.value);
+                setNotaEnZoom((prev) => (prev ? { ...prev, valor: e.target.value } : prev));
+              }}
+              placeholder="Sin notas"
+              autoFocus
+            />
+            <div className="form-actions">
+              <button type="button" className="btn btn-primary" onClick={() => setNotaEnZoom(null)}>
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -793,7 +830,8 @@ function StockRow({ producto, onActualizar, onDirtyChange, onEditar, onCambiarDi
 
   return (
     <tr className={clasesFila}>
-      <td>{formatearFechaHora(producto.FechaCreacion)}</td>
+      <td>{formatearFechaSolo(producto.FechaCreacion)}</td>
+      <td>{formatearHoraSolo(producto.FechaCreacion)}</td>
       <td>
         <div className="stock-nombre-con-foto">
           {foto ? (
@@ -851,7 +889,7 @@ function StockRow({ producto, onActualizar, onDirtyChange, onEditar, onCambiarDi
   );
 }
 
-function PedidoRow({ pedido, onGuardar, onDirtyChange }) {
+function PedidoRow({ pedido, onGuardar, onDirtyChange, onAbrirNota }) {
   const [cantidad, setCantidad] = useState(pedido.Cantidad);
   const [telefono, setTelefono] = useState(() => textoSeguro(pedido.Telefono));
   const [notas, setNotas] = useState(() => notasIniciales(pedido));
@@ -919,17 +957,26 @@ function PedidoRow({ pedido, onGuardar, onDirtyChange }) {
         />
       </td>
       <td>
-        {/* Textarea (no un input de una sola línea) para que las notas
-            largas no se corten: el texto se acomoda en varias líneas, y con
-            la esquina de abajo a la derecha se puede agrandar el cuadro si
-            hace falta ver más de golpe. */}
-        <textarea
-          className={`pedido-textarea-notas ${cambioNotas ? 'campo-modificado' : ''}`}
-          value={notas}
-          onChange={(e) => setNotas(e.target.value)}
-          placeholder="Sin notas"
-          rows={2}
-        />
+        {/* Cuadro compacto de siempre + un botón de lupa para ver/editar la
+            nota completa en grande cuando haga falta (nota larga). Los dos
+            comparten el mismo valor, así que lo que escribas en uno se ve
+            reflejado en el otro. */}
+        <div className="pedido-notas-celda">
+          <input
+            className={`pedido-input-notas ${cambioNotas ? 'campo-modificado' : ''}`}
+            value={notas}
+            onChange={(e) => setNotas(e.target.value)}
+            placeholder="Sin notas"
+          />
+          <button
+            type="button"
+            className="pedido-notas-zoom-btn"
+            onClick={() => onAbrirNota(pedido.Cliente, notas, setNotas)}
+            title="Ver nota completa"
+          >
+            🔍
+          </button>
+        </div>
       </td>
       <td>
         <select
