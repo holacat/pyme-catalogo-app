@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   listarProductosAdmin,
   listarPedidos,
@@ -308,7 +308,7 @@ export default function Dashboard() {
       <form className="login-box" onSubmit={handleLogin}>
         <h2>Acceso administrador</h2>
         <p className="muted">
-          Ingresa la clave de administrador (la misma que configuraste como ADMIN_KEY en Apps Script).
+          Ingresa la clave de administrador para entrar al panel de control.
         </p>
         {errorLogin && <p className="info-msg error">{errorLogin}</p>}
         <input
@@ -460,7 +460,7 @@ export default function Dashboard() {
           </div>
 
           <div className="table-scroll">
-            <table className="data-table">
+            <table className="data-table stock-table">
               <thead>
                 <tr>
                   <th>Fecha agregado</th><th>Hora agregado</th><th>Producto</th><th>Código</th><th>Precio</th><th>Stock</th>
@@ -558,6 +558,7 @@ export default function Dashboard() {
       {tab === 'nuevo' && (
         <ProductoForm
           adminKey={adminKey}
+          productos={productos}
           onGuardado={() => {
             cargarTodo(adminKey);
             setTab('stock');
@@ -571,6 +572,7 @@ export default function Dashboard() {
             <h3>Editar producto</h3>
             <ProductoForm
               adminKey={adminKey}
+              productos={productos}
               productoExistente={productoEditando}
               onGuardado={() => {
                 setProductoEditando(null);
@@ -649,15 +651,44 @@ function fotosDesdeProducto(producto) {
     .filter(Boolean);
 }
 
+// Saca la lista de valores distintos que ya se han usado antes en un campo
+// (por ejemplo, todas las Categorías diferentes que ya existen en el Stock),
+// para poder sugerirlos en el formulario y así escribir siempre igual (por
+// ejemplo "Bolsas" y no a veces "bolsas" y a veces "Bolsa"). Se ignoran los
+// valores vacíos y no se repite ninguno.
+function valoresUnicos(productos, campo) {
+  const vistos = new Set();
+  productos.forEach((p) => {
+    const valor = textoSeguro(p[campo]).trim();
+    if (valor) vistos.add(valor);
+  });
+  return Array.from(vistos).sort((a, b) => a.localeCompare(b, 'es'));
+}
+
 // Sirve tanto para dar de alta un producto nuevo como para editar uno que
 // ya existe: si le pasas `productoExistente`, precarga sus datos y guarda
 // con "actualizarProducto" en vez de "crearProducto".
-function ProductoForm({ adminKey, productoExistente, onGuardado, onCancelar }) {
+function ProductoForm({ adminKey, productos = [], productoExistente, onGuardado, onCancelar }) {
   const esEdicion = !!productoExistente;
   const [form, setForm] = useState(() => (esEdicion ? formDesdeProducto(productoExistente) : FORM_INICIAL));
   const [fotos, setFotos] = useState(() => (esEdicion ? fotosDesdeProducto(productoExistente) : []));
   const [enviando, setEnviando] = useState(false);
   const [mensaje, setMensaje] = useState('');
+
+  // Listas de sugerencias para cada campo, calculadas a partir de los
+  // productos que ya existen. Se recalculan solo cuando cambia la lista de
+  // productos, no en cada letra que se escribe.
+  const sugerencias = useMemo(
+    () => ({
+      nombre: valoresUnicos(productos, 'Nombre'),
+      codigoPropio: valoresUnicos(productos, 'CodigoPropio'),
+      categoria: valoresUnicos(productos, 'Categoria'),
+      marca: valoresUnicos(productos, 'Marca'),
+      talla: valoresUnicos(productos, 'Talla'),
+      color: valoresUnicos(productos, 'Color'),
+    }),
+    [productos]
+  );
 
   function handleChange(campo) {
     return (e) => setForm((f) => ({ ...f, [campo]: e.target.value }));
@@ -700,34 +731,70 @@ function ProductoForm({ adminKey, productoExistente, onGuardado, onCancelar }) {
 
   return (
     <form className="new-product-form" onSubmit={handleSubmit}>
+      {/* En cada uno de estos campos puedes escribir libremente lo que
+          quieras, O darle clic a la flechita del cuadro para elegir de una
+          lista con los valores que ya has usado antes en otros productos —
+          lo que sea más rápido. Esa lista se va llenando sola conforme
+          agregas productos. */}
       <div className="form-grid">
         <label>
           Nombre*
-          <input value={form.nombre} onChange={handleChange('nombre')} required />
+          <input value={form.nombre} onChange={handleChange('nombre')} required list="lista-nombres" />
+          <datalist id="lista-nombres">
+            {sugerencias.nombre.map((v) => (
+              <option key={v} value={v} />
+            ))}
+          </datalist>
         </label>
         <label>
-          Código propio (opcional)
+          Código propio
           <input
             value={form.codigoPropio}
             onChange={handleChange('codigoPropio')}
             placeholder="Ej. PLY-001"
+            list="lista-codigos"
           />
+          <datalist id="lista-codigos">
+            {sugerencias.codigoPropio.map((v) => (
+              <option key={v} value={v} />
+            ))}
+          </datalist>
         </label>
         <label>
           Categoría
-          <input value={form.categoria} onChange={handleChange('categoria')} />
+          <input value={form.categoria} onChange={handleChange('categoria')} list="lista-categorias" />
+          <datalist id="lista-categorias">
+            {sugerencias.categoria.map((v) => (
+              <option key={v} value={v} />
+            ))}
+          </datalist>
         </label>
         <label>
           Marca
-          <input value={form.marca} onChange={handleChange('marca')} />
+          <input value={form.marca} onChange={handleChange('marca')} list="lista-marcas" />
+          <datalist id="lista-marcas">
+            {sugerencias.marca.map((v) => (
+              <option key={v} value={v} />
+            ))}
+          </datalist>
         </label>
         <label>
           Talla / Medida
-          <input value={form.talla} onChange={handleChange('talla')} />
+          <input value={form.talla} onChange={handleChange('talla')} list="lista-tallas" />
+          <datalist id="lista-tallas">
+            {sugerencias.talla.map((v) => (
+              <option key={v} value={v} />
+            ))}
+          </datalist>
         </label>
         <label>
           Color
-          <input value={form.color} onChange={handleChange('color')} />
+          <input value={form.color} onChange={handleChange('color')} list="lista-colores" />
+          <datalist id="lista-colores">
+            {sugerencias.color.map((v) => (
+              <option key={v} value={v} />
+            ))}
+          </datalist>
         </label>
         <label>
           Precio de venta*
