@@ -11,6 +11,7 @@ import {
   eliminarProducto,
 } from '../api.js';
 import ImageUploader from '../components/ImageUploader.jsx';
+import ImageLightbox from '../components/ImageLightbox.jsx';
 
 // Un producto puede tener Disponible guardado como booleano real (true/false)
 // o como texto ("TRUE"/"SI") si alguien lo escribió a mano en el Sheet. Esta
@@ -64,11 +65,14 @@ function limitarTelefono(valorTexto) {
   return String(valorTexto).replace(/[^0-9]/g, '').slice(0, 13);
 }
 
-function formatearFechaCorta(valor) {
+// Fecha Y hora en la que se dio de alta un producto (columna "Agregado").
+function formatearFechaHora(valor) {
   if (!valor) return '—';
   const fecha = new Date(valor);
   if (Number.isNaN(fecha.getTime())) return '—';
-  return fecha.toLocaleDateString('es-MX');
+  const fechaCorta = fecha.toLocaleDateString('es-MX');
+  const horaCorta = fecha.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
+  return `${fechaCorta} ${horaCorta}`;
 }
 
 const MAX_DIGITOS_STOCK = 6; // hasta 999,999 piezas
@@ -78,12 +82,21 @@ const MAX_DIGITOS_CANTIDAD = 4; // hasta 9,999 piezas por pedido
 // Cada cuánto se refresca solo el Dashboard en segundo plano (milisegundos).
 const INTERVALO_REFRESCO_MS = 5000;
 
+const ESTADOS_PEDIDO = ['Pendiente', 'Confirmado', 'Entregado', 'Cancelado'];
+
 const STORAGE_KEY = 'pyme_admin_key';
 
 export default function Dashboard() {
   const [adminKey, setAdminKey] = useState(() => sessionStorage.getItem(STORAGE_KEY) || '');
   const [autenticado, setAutenticado] = useState(!!sessionStorage.getItem(STORAGE_KEY));
+  // Mientras esto sea true, NO mostramos el panel: estamos comprobando (o
+  // volviendo a comprobar) que la clave guardada todavía sea válida contra
+  // el servidor, para no dejar ver la estructura del Dashboard a alguien
+  // que en realidad no tiene una clave correcta.
+  const [verificandoSesion, setVerificandoSesion] = useState(() => !!sessionStorage.getItem(STORAGE_KEY));
   const [inputKey, setInputKey] = useState('');
+  const [verificandoLogin, setVerificandoLogin] = useState(false);
+  const [errorLogin, setErrorLogin] = useState('');
   const [tab, setTab] = useState('stock'); // stock | pedidos | alertas | nuevo
   const [productos, setProductos] = useState([]);
   const [pedidos, setPedidos] = useState([]);
@@ -93,6 +106,8 @@ export default function Dashboard() {
   const [productoEditando, setProductoEditando] = useState(null);
   const [filtroDesde, setFiltroDesde] = useState('');
   const [filtroHasta, setFiltroHasta] = useState('');
+  const [filtroEstado, setFiltroEstado] = useState('');
+  const [fotoAmpliada, setFotoAmpliada] = useState('');
 
   // Mapa de llaves (con prefijo "stock:" o "pedido:") -> descripción del
   // cambio pendiente de guardar. Mientras este mapa no esté vacío, avisamos
@@ -100,6 +115,13 @@ export default function Dashboard() {
   // cambio por un descuido. La descripción es lo que se le muestra a
   // Claudia para que sepa EXACTAMENTE qué dato movió.
   const [sinGuardar, setSinGuardar] = useState(() => new Map());
+
+  // Se incrementa cada vez que Claudia cancela los cambios sin guardar (con
+  // el botón o con Escape). Lo usamos como parte del "key" de cada fila de
+  // Stock/Pedidos: al cambiar el key, React destruye y vuelve a crear esa
+  // fila desde cero, así que sus casillas regresan a mostrar el valor
+  // original (el que tiene el servidor), no el que Claudia había escrito.
+  const [resetToken, setResetToken] = useState(0);
 
   function marcarSucio(llave, sucio, descripcion) {
     setSinGuardar((prev) => {
@@ -110,13 +132,18 @@ export default function Dashboard() {
     });
   }
 
+  function cancelarCambios() {
+    setResetToken((t) => t + 1);
+    setSinGuardar(new Map());
+  }
+
   function cambiarTab(nuevaTab) {
     if (sinGuardar.size > 0) {
       const salir = window.confirm(
         'Tienes cambios sin guardar. Si continúas se van a perder. ¿Quieres salir de todas formas?'
       );
       if (!salir) return;
-      setSinGuardar(new Map());
+      cancelarCambios();
     }
     setTab(nuevaTab);
   }
@@ -135,6 +162,21 @@ export default function Dashboard() {
     return () => window.removeEventListener('beforeunload', avisarAntesDeSalir);
   }, [sinGuardar]);
 
+  // La tecla Escape cancela los cambios sin guardar, igual que el botón del
+  // aviso amarillo — pero NO si hay una foto ampliada abierta en ese
+  // momento (ahí Escape solo debe cerrar la foto, para no perder un cambio
+  // sin querer solo por cerrar una imagen).
+  useEffect(() => {
+    function onKeyDown(e) {
+      if (e.key === 'Escape' && !fotoAmpliada && sinGuardar.size > 0) {
+        cancelarCambios();
+      }
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sinGuardar, fotoAmpliada]);
+
   // `silencioso: true` se usa para los refrescos automáticos de fondo: no
   // muestra "Actualizando…" ni mensajes de error a cada rato, para no ser
   // molesto. Los refrescos que sí pide Claudia directamente (guardar algo,
@@ -142,7 +184,7 @@ export default function Dashboard() {
   function cargarTodo(key, opciones = {}) {
     const silencioso = !!opciones.silencioso;
     if (!silencioso) setCargando(true);
-    Promise.all([listarProductosAdmin(key), listarPedidos(key), obtenerAlertas(key)])
+    return Promise.all([listarProductosAdmin(key), listarPedidos(key), obtenerAlertas(key)])
       .then(([p, o, a]) => {
         setProductos(p.productos);
         setPedidos(o.pedidos);
@@ -150,10 +192,20 @@ export default function Dashboard() {
         if (!silencioso) setMensaje('');
       })
       .catch((err) => {
+        // Si el servidor dice que la clave no es válida (se cambió el
+        // ADMIN_KEY, o quedó guardada una vieja de otra sesión), cerramos
+        // sesión automáticamente en vez de dejar el panel abierto sin
+        // poder cargar ni guardar nada — eso sí sería un hueco de seguridad.
+        if (err.message === 'No autorizado') {
+          handleLogout();
+          setErrorLogin('Tu clave ya no es válida. Vuelve a iniciar sesión.');
+          return;
+        }
         if (!silencioso) setMensaje(`Error al cargar datos: ${err.message}`);
       })
       .finally(() => {
         if (!silencioso) setCargando(false);
+        setVerificandoSesion(false);
       });
   }
 
@@ -177,11 +229,31 @@ export default function Dashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autenticado, adminKey, sinGuardar, productoEditando, tab]);
 
+  // Antes de dejar entrar al panel, comprobamos la clave contra el
+  // servidor. Si está mal, NUNCA se activa `autenticado` — así nadie que
+  // escriba una clave equivocada llega a ver la estructura del Dashboard
+  // (pestañas, formulario de agregar producto, etc.), aunque sea sin datos.
   function handleLogin(e) {
     e.preventDefault();
-    sessionStorage.setItem(STORAGE_KEY, inputKey);
-    setAdminKey(inputKey);
-    setAutenticado(true);
+    const clave = inputKey.trim();
+    if (!clave) return;
+    setVerificandoLogin(true);
+    setErrorLogin('');
+    listarProductosAdmin(clave)
+      .then(() => {
+        sessionStorage.setItem(STORAGE_KEY, clave);
+        setAdminKey(clave);
+        setAutenticado(true);
+        setVerificandoSesion(false);
+      })
+      .catch((err) => {
+        setErrorLogin(
+          err.message === 'No autorizado'
+            ? 'Clave incorrecta. Verifica que la hayas escrito bien (cópiala y pégala para evitar errores de dedo) e intenta de nuevo.'
+            : `No se pudo verificar la clave: ${err.message}`
+        );
+      })
+      .finally(() => setVerificandoLogin(false));
   }
 
   function handleLogout() {
@@ -228,6 +300,7 @@ export default function Dashboard() {
           Ingresa la clave de administrador (la misma que configuraste como
           <code> ADMIN_KEY</code> en Apps Script).
         </p>
+        {errorLogin && <p className="info-msg error">{errorLogin}</p>}
         <input
           type="password"
           placeholder="Clave de administrador"
@@ -235,9 +308,18 @@ export default function Dashboard() {
           onChange={(e) => setInputKey(e.target.value)}
           required
         />
-        <button type="submit" className="btn btn-primary">Entrar</button>
+        <button type="submit" className="btn btn-primary" disabled={verificandoLogin}>
+          {verificandoLogin ? 'Verificando…' : 'Entrar'}
+        </button>
       </form>
     );
+  }
+
+  // Todavía no confirmamos con el servidor que la clave guardada sea
+  // válida (esto pasa justo después de recargar la página) — mostramos un
+  // mensaje neutro en vez del panel completo, por seguridad.
+  if (verificandoSesion) {
+    return <p className="info-msg">Verificando sesión…</p>;
   }
 
   // Más recientes primero: los productos y pedidos se guardan agregándolos
@@ -262,6 +344,17 @@ export default function Dashboard() {
 
   const productosFiltrados = productosOrdenados.filter(productoEnRangoDeFecha);
   const filtroFechaActivo = !!(filtroDesde || filtroHasta);
+
+  // Pedidos: igual que los productos, más recientes primero. Además se
+  // pueden filtrar por Estado con la tablita de conteos de la derecha.
+  const pedidosOrdenados = pedidos.slice().reverse();
+  const conteoPorEstado = pedidosOrdenados.reduce((acc, p) => {
+    acc[p.Estado] = (acc[p.Estado] || 0) + 1;
+    return acc;
+  }, {});
+  const pedidosFiltrados = filtroEstado
+    ? pedidosOrdenados.filter((p) => p.Estado === filtroEstado)
+    : pedidosOrdenados;
 
   return (
     <div className="dashboard">
@@ -291,6 +384,11 @@ export default function Dashboard() {
               <li key={i}>{descripcion}</li>
             ))}
           </ul>
+          <div className="aviso-flotante-acciones">
+            <button type="button" className="btn btn-secondary btn-small" onClick={cancelarCambios}>
+              Cancelar cambios (Esc)
+            </button>
+          </div>
           <p className="aviso-flotante-nota">
             Dale clic a "Guardar" en cada fila antes de salir de esta pestaña.
           </p>
@@ -329,6 +427,9 @@ export default function Dashboard() {
                 onChange={(e) => setFiltroHasta(e.target.value)}
               />
             </label>
+            <span className="stock-conteo-total">
+              📦 <strong>{productos.length}</strong> producto{productos.length === 1 ? '' : 's'} en total
+            </span>
             {filtroFechaActivo && (
               <button
                 type="button"
@@ -359,13 +460,14 @@ export default function Dashboard() {
               <tbody>
                 {productosFiltrados.map((p) => (
                   <StockRow
-                    key={p.ID}
+                    key={`${p.ID}-${resetToken}`}
                     producto={p}
                     onActualizar={handleActualizarStock}
                     onDirtyChange={marcarSucio}
                     onEditar={setProductoEditando}
                     onCambiarDisponibilidad={handleCambiarDisponibilidad}
                     onEliminar={handleEliminarProducto}
+                    onVerFoto={setFotoAmpliada}
                   />
                 ))}
               </tbody>
@@ -378,25 +480,53 @@ export default function Dashboard() {
       )}
 
       {tab === 'pedidos' && (
-        <div className="table-scroll">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Fecha</th><th>Hora</th><th>Cliente</th><th>Teléfono</th><th>Producto</th>
-                <th>Cant.</th><th>Notas</th><th>Estado</th><th>Guardar</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pedidos.slice().reverse().map((ped) => (
-                <PedidoRow
-                  key={ped.ID}
-                  pedido={ped}
-                  onGuardar={handleGuardarPedido}
-                  onDirtyChange={marcarSucio}
-                />
-              ))}
-            </tbody>
-          </table>
+        <div className="pedidos-layout">
+          <div className="table-scroll">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Fecha</th><th>Hora</th><th>Cliente</th><th>Teléfono</th><th>Producto</th>
+                  <th>Cant.</th><th>Notas</th><th>Estado</th><th>Guardar</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pedidosFiltrados.map((ped) => (
+                  <PedidoRow
+                    key={`${ped.ID}-${resetToken}`}
+                    pedido={ped}
+                    onGuardar={handleGuardarPedido}
+                    onDirtyChange={marcarSucio}
+                  />
+                ))}
+              </tbody>
+            </table>
+            {pedidosFiltrados.length === 0 && (
+              <p className="info-msg">No hay pedidos con ese estado.</p>
+            )}
+          </div>
+
+          <div className="pedidos-resumen">
+            <h4>Pedidos por estado</h4>
+            <button
+              type="button"
+              className={`resumen-btn ${filtroEstado === '' ? 'activo' : ''}`}
+              onClick={() => setFiltroEstado('')}
+            >
+              <span>Todos</span>
+              <strong>{pedidosOrdenados.length}</strong>
+            </button>
+            {ESTADOS_PEDIDO.map((estadoOpcion) => (
+              <button
+                key={estadoOpcion}
+                type="button"
+                className={`resumen-btn ${filtroEstado === estadoOpcion ? 'activo' : ''}`}
+                onClick={() => setFiltroEstado(estadoOpcion)}
+              >
+                <span>{estadoOpcion}</span>
+                <strong>{conteoPorEstado[estadoOpcion] || 0}</strong>
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
@@ -436,6 +566,10 @@ export default function Dashboard() {
             />
           </div>
         </div>
+      )}
+
+      {fotoAmpliada && (
+        <ImageLightbox src={fotoAmpliada} onClose={() => setFotoAmpliada('')} />
       )}
     </div>
   );
@@ -624,7 +758,7 @@ function ProductoForm({ adminKey, productoExistente, onGuardado, onCancelar }) {
   );
 }
 
-function StockRow({ producto, onActualizar, onDirtyChange, onEditar, onCambiarDisponibilidad, onEliminar }) {
+function StockRow({ producto, onActualizar, onDirtyChange, onEditar, onCambiarDisponibilidad, onEliminar, onVerFoto }) {
   const [valor, setValor] = useState(producto.Stock);
   const stockConocido = useRef(producto.Stock);
   const sinGuardar = Number(valor) !== Number(producto.Stock);
@@ -659,11 +793,16 @@ function StockRow({ producto, onActualizar, onDirtyChange, onEditar, onCambiarDi
 
   return (
     <tr className={clasesFila}>
-      <td>{formatearFechaCorta(producto.FechaCreacion)}</td>
+      <td>{formatearFechaHora(producto.FechaCreacion)}</td>
       <td>
         <div className="stock-nombre-con-foto">
           {foto ? (
-            <img src={foto} alt={producto.Nombre} className="stock-thumb" />
+            <img
+              src={foto}
+              alt={producto.Nombre}
+              className="stock-thumb"
+              onClick={() => onVerFoto(foto)}
+            />
           ) : (
             <div className="stock-thumb stock-thumb-vacia">Sin foto</div>
           )}
@@ -780,11 +919,16 @@ function PedidoRow({ pedido, onGuardar, onDirtyChange }) {
         />
       </td>
       <td>
-        <input
-          className={`pedido-input-notas ${cambioNotas ? 'campo-modificado' : ''}`}
+        {/* Textarea (no un input de una sola línea) para que las notas
+            largas no se corten: el texto se acomoda en varias líneas, y con
+            la esquina de abajo a la derecha se puede agrandar el cuadro si
+            hace falta ver más de golpe. */}
+        <textarea
+          className={`pedido-textarea-notas ${cambioNotas ? 'campo-modificado' : ''}`}
           value={notas}
           onChange={(e) => setNotas(e.target.value)}
           placeholder="Sin notas"
+          rows={2}
         />
       </td>
       <td>
