@@ -10,11 +10,17 @@ function obtenerFotos(fotoUrl) {
     .filter(Boolean);
 }
 
-export default function ProductCard({ producto, onSolicitar }) {
-  const sinStock = Number(producto.Stock) <= 0;
+// onSolicitar: pide ESTE producto de inmediato (abre WhatsApp ya).
+// onAgregarCarrito: lo agrega al "pedido" (carrito) para juntarlo con
+// otros productos y mandar un solo WhatsApp al final. Los dos reciben
+// la cantidad que el cliente eligió con el selector +/-.
+export default function ProductCard({ producto, onSolicitar, onAgregarCarrito }) {
+  const stockDisponible = Number(producto.Stock) || 0;
+  const sinStock = stockDisponible <= 0;
   const fotos = obtenerFotos(producto.FotoURL);
   const [indice, setIndice] = useState(0);
   const [zoomAbierto, setZoomAbierto] = useState(false);
+  const [cantidad, setCantidad] = useState(1);
 
   function fotoAnterior(e) {
     e.stopPropagation();
@@ -24,6 +30,21 @@ export default function ProductCard({ producto, onSolicitar }) {
   function fotoSiguiente(e) {
     e.stopPropagation();
     setIndice((i) => (i === fotos.length - 1 ? 0 : i + 1));
+  }
+
+  function bajarCantidad() {
+    setCantidad((c) => Math.max(1, c - 1));
+  }
+
+  function subirCantidad() {
+    setCantidad((c) => Math.min(stockDisponible, c + 1));
+  }
+
+  // Al agregar al carrito reiniciamos la cantidad a 1, para que si el
+  // cliente quiere agregar el mismo producto otra vez empiece de cero.
+  function handleAgregarCarrito() {
+    onAgregarCarrito?.(producto, cantidad);
+    setCantidad(1);
   }
 
   return (
@@ -66,14 +87,35 @@ export default function ProductCard({ producto, onSolicitar }) {
         </p>
         {producto.Descripcion && <p className="description">{producto.Descripcion}</p>}
 
+        {!sinStock && (
+          <div className="cantidad-selector">
+            <span className="cantidad-selector-label">Cantidad:</span>
+            <button type="button" onClick={bajarCantidad} disabled={cantidad <= 1} aria-label="Quitar uno">
+              −
+            </button>
+            <span className="cantidad-selector-valor">{cantidad}</span>
+            <button type="button" onClick={subirCantidad} disabled={cantidad >= stockDisponible} aria-label="Agregar uno">
+              +
+            </button>
+          </div>
+        )}
+
         <div className="product-actions">
           <button
             type="button"
             className="btn btn-whatsapp"
             disabled={sinStock}
-            onClick={() => onSolicitar?.(producto)}
+            onClick={() => onSolicitar?.(producto, cantidad)}
           >
             📲 Solicitar por WhatsApp
+          </button>
+          <button
+            type="button"
+            className="btn btn-carrito"
+            disabled={sinStock}
+            onClick={handleAgregarCarrito}
+          >
+            🛒 Agregar al pedido
           </button>
         </div>
       </div>
