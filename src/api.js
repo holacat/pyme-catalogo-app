@@ -149,3 +149,19 @@ export function eliminarProducto({ adminKey, productoId }) {
 export function subirFoto({ adminKey, nombreArchivo, tipoMime, datosBase64 }) {
   return post({ action: 'subirFoto', adminKey, nombreArchivo, tipoMime, datosBase64 });
 }
+
+// ---- Opciones predeterminadas (Nombre, Categoría, Marca, Talla, Color,
+// Código propio) que se muestran como sugerencia en "+ Agregar producto".
+// A diferencia del Stock/Pedidos, esta lista NUNCA se llena sola: solo
+// tiene los valores que se agregaron a propósito desde el Dashboard.
+export function listarOpciones(adminKey) {
+  return get('listarOpciones', { adminKey });
+}
+
+export function agregarOpcion({ adminKey, campo, valor }) {
+  return post({ action: 'agregarOpcion', adminKey, campo, valor });
+}
+
+export function eliminarOpcion({ adminKey, campo, valor }) {
+  return post({ action: 'eliminarOpcion', adminKey, campo, valor });
+}
