@@ -91,6 +91,8 @@ export default function Dashboard() {
   const [cargando, setCargando] = useState(false);
   const [mensaje, setMensaje] = useState('');
   const [productoEditando, setProductoEditando] = useState(null);
+  const [filtroDesde, setFiltroDesde] = useState('');
+  const [filtroHasta, setFiltroHasta] = useState('');
 
   // Mapa de llaves (con prefijo "stock:" o "pedido:") -> descripción del
   // cambio pendiente de guardar. Mientras este mapa no esté vacío, avisamos
@@ -243,6 +245,24 @@ export default function Dashboard() {
   // simplemente invertimos el orden en el que llegaron.
   const productosOrdenados = productos.slice().reverse();
 
+  // Filtro por fecha de alta: si Claudia elige "Desde" y/o "Hasta", solo se
+  // muestran los productos cuya FechaCreacion cae dentro de ese rango. Los
+  // productos que no tienen fecha guardada (los que existían antes de esta
+  // función) se ocultan mientras el filtro esté activo, porque no hay forma
+  // de saber si entran o no en el rango.
+  function productoEnRangoDeFecha(producto) {
+    if (!filtroDesde && !filtroHasta) return true;
+    if (!producto.FechaCreacion) return false;
+    const fecha = new Date(producto.FechaCreacion);
+    if (Number.isNaN(fecha.getTime())) return false;
+    if (filtroDesde && fecha < new Date(`${filtroDesde}T00:00:00`)) return false;
+    if (filtroHasta && fecha > new Date(`${filtroHasta}T23:59:59`)) return false;
+    return true;
+  }
+
+  const productosFiltrados = productosOrdenados.filter(productoEnRangoDeFecha);
+  const filtroFechaActivo = !!(filtroDesde || filtroHasta);
+
   return (
     <div className="dashboard">
       <div className="dashboard-header">
@@ -291,29 +311,70 @@ export default function Dashboard() {
       </div>
 
       {tab === 'stock' && (
-        <div className="table-scroll">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Producto</th><th>Código</th><th>Agregado</th><th>Precio</th><th>Stock</th>
-                <th>Mínimo</th><th>Actualizar stock</th><th>Acciones</th>
-              </tr>
-            </thead>
-            <tbody>
-              {productosOrdenados.map((p) => (
-                <StockRow
-                  key={p.ID}
-                  producto={p}
-                  onActualizar={handleActualizarStock}
-                  onDirtyChange={marcarSucio}
-                  onEditar={setProductoEditando}
-                  onCambiarDisponibilidad={handleCambiarDisponibilidad}
-                  onEliminar={handleEliminarProducto}
-                />
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <>
+          <div className="filtro-fechas">
+            <label>
+              Agregados desde
+              <input
+                type="date"
+                value={filtroDesde}
+                onChange={(e) => setFiltroDesde(e.target.value)}
+              />
+            </label>
+            <label>
+              Hasta
+              <input
+                type="date"
+                value={filtroHasta}
+                onChange={(e) => setFiltroHasta(e.target.value)}
+              />
+            </label>
+            {filtroFechaActivo && (
+              <button
+                type="button"
+                className="btn btn-secondary btn-small"
+                onClick={() => {
+                  setFiltroDesde('');
+                  setFiltroHasta('');
+                }}
+              >
+                Quitar filtro
+              </button>
+            )}
+            {filtroFechaActivo && (
+              <span className="filtro-fechas-conteo">
+                Mostrando {productosFiltrados.length} de {productosOrdenados.length} productos
+              </span>
+            )}
+          </div>
+
+          <div className="table-scroll">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Agregado</th><th>Producto</th><th>Código</th><th>Precio</th><th>Stock</th>
+                  <th>Mínimo</th><th>Actualizar stock</th><th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {productosFiltrados.map((p) => (
+                  <StockRow
+                    key={p.ID}
+                    producto={p}
+                    onActualizar={handleActualizarStock}
+                    onDirtyChange={marcarSucio}
+                    onEditar={setProductoEditando}
+                    onCambiarDisponibilidad={handleCambiarDisponibilidad}
+                    onEliminar={handleEliminarProducto}
+                  />
+                ))}
+              </tbody>
+            </table>
+            {productosFiltrados.length === 0 && (
+              <p className="info-msg">Ningún producto fue agregado en ese rango de fechas.</p>
+            )}
+          </div>
+        </>
       )}
 
       {tab === 'pedidos' && (
@@ -598,6 +659,7 @@ function StockRow({ producto, onActualizar, onDirtyChange, onEditar, onCambiarDi
 
   return (
     <tr className={clasesFila}>
+      <td>{formatearFechaCorta(producto.FechaCreacion)}</td>
       <td>
         <div className="stock-nombre-con-foto">
           {foto ? (
@@ -612,7 +674,6 @@ function StockRow({ producto, onActualizar, onDirtyChange, onEditar, onCambiarDi
         </div>
       </td>
       <td>{producto.CodigoPropio || '—'}</td>
-      <td>{formatearFechaCorta(producto.FechaCreacion)}</td>
       <td>${Number(producto.Precio).toLocaleString('es-MX')}</td>
       <td>{producto.Stock}</td>
       <td>{producto.StockMinimo}</td>
