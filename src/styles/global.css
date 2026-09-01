@@ -66,7 +66,7 @@ main { flex: 1; padding: 1.5rem; max-width: 1100px; margin: 0 auto; width: 100%;
 }
 
 .product-photo { aspect-ratio: 4 / 3; background: #f0f0f0; position: relative; }
-.product-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.product-photo img { width: 100%; height: 100%; object-fit: cover; display: block; cursor: zoom-in; }
 .product-photo-placeholder {
   width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
   color: var(--muted); font-size: 0.85rem;
@@ -201,6 +201,7 @@ main { flex: 1; padding: 1.5rem; max-width: 1100px; margin: 0 auto; width: 100%;
   font-weight: 500;
 }
 .tabs button.active { background: var(--brand); color: white; border-color: var(--brand); }
+
 /* ---- Filtro por fecha de alta (pestaña Stock) ---- */
 .filtro-fechas {
   display: flex;
@@ -230,7 +231,62 @@ main { flex: 1; padding: 1.5rem; max-width: 1100px; margin: 0 auto; width: 100%;
   font-size: 0.82rem;
   color: var(--muted);
 }
+
+/* Recuadro con el total de productos, junto a los filtros de fecha. */
+.stock-conteo-total {
+  background: #ecfdf5;
+  color: var(--brand-dark);
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  padding: 0.4rem 0.7rem;
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
 .table-scroll { width: 100%; overflow-x: auto; }
+
+/* ---- Pestaña Pedidos: tabla + tablita de conteo por estado a la derecha ---- */
+.pedidos-layout {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.pedidos-layout .table-scroll { flex: 1 1 480px; min-width: 0; }
+
+.pedidos-resumen {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.9rem;
+  min-width: 190px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.pedidos-resumen h4 { margin: 0 0 0.3rem; font-size: 0.85rem; }
+
+.resumen-btn {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  background: #f9fafb;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.resumen-btn.activo {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: white;
+}
 
 .data-table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; }
 .data-table th, .data-table td {
@@ -293,6 +349,7 @@ main { flex: 1; padding: 1.5rem; max-width: 1100px; margin: 0 auto; width: 100%;
   border-radius: 6px;
   object-fit: cover;
   flex-shrink: 0;
+  cursor: zoom-in;
 }
 
 .stock-thumb-vacia {
@@ -473,7 +530,7 @@ main { flex: 1; padding: 1.5rem; max-width: 1100px; margin: 0 auto; width: 100%;
 }
 
 /* ---- Campos editables en la tabla de Pedidos ---- */
-.pedido-input-tel, .pedido-input-cant, .pedido-input-notas {
+.pedido-input-tel, .pedido-input-cant {
   padding: 0.35rem 0.5rem;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -482,7 +539,20 @@ main { flex: 1; padding: 1.5rem; max-width: 1100px; margin: 0 auto; width: 100%;
 
 .pedido-input-cant { width: 60px; }
 .pedido-input-tel { width: 110px; }
-.pedido-input-notas { width: 140px; }
+
+/* Cuadro de Notas: textarea en vez de una sola línea, para que una nota
+   larga no se corte — se acomoda en varias líneas, y se puede agrandar
+   arrastrando la esquina de abajo a la derecha. */
+.pedido-textarea-notas {
+  width: 160px;
+  min-height: 2.6em;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-family: inherit;
+  resize: vertical;
+}
 
 /* ---- Aviso de "cliente recordado" en el catálogo ---- */
 .cliente-actual {
@@ -526,6 +596,8 @@ main { flex: 1; padding: 1.5rem; max-width: 1100px; margin: 0 auto; width: 100%;
 
 .aviso-flotante-titulo { margin: 0 0 0.35rem; font-weight: 700; font-size: 0.9rem; }
 
+.aviso-flotante-acciones { margin: 0.2rem 0 0.5rem; }
+
 .aviso-flotante ul {
   margin: 0 0 0.4rem;
   padding-left: 1.1rem;
@@ -541,4 +613,41 @@ main { flex: 1; padding: 1.5rem; max-width: 1100px; margin: 0 auto; width: 100%;
 .campo-modificado {
   background: #fde68a !important;
   border: 2px solid #b45309 !important;
+}
+
+/* ---- Foto ampliada (zoom) — Stock admin y catálogo de clientes ----
+   Ocupa casi toda la pantalla, con fondo oscuro alrededor. Se cierra con
+   el botón ✕, con clic afuera de la foto, o con la tecla Escape. */
+.lightbox-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  z-index: 300;
+  cursor: zoom-out;
+}
+
+.lightbox-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 8px;
+  cursor: default;
+}
+
+.lightbox-cerrar {
+  position: fixed;
+  top: 1rem;
+  right: 1.2rem;
+  background: rgba(255, 255, 255, 0.15);
+  color: white;
+  border: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  font-size: 1.2rem;
+  cursor: pointer;
 }
