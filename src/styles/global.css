@@ -129,7 +129,32 @@ main { flex: 1; padding: 1.5rem; max-width: 1100px; margin: 0 auto; width: 100%;
 .stock.out { color: var(--danger); font-weight: 600; }
 .description { font-size: 0.85rem; color: var(--muted); margin: 0.2rem 0 0.4rem; }
 
-.product-actions { margin-top: auto; }
+.product-actions { margin-top: auto; display: flex; flex-direction: column; gap: 0.5rem; }
+
+/* ---- Selector de cantidad (-/+) en cada tarjeta de producto ---- */
+.cantidad-selector {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.2rem 0;
+}
+
+.cantidad-selector-label { font-size: 0.8rem; color: var(--muted); }
+
+.cantidad-selector button {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: white;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.cantidad-selector button:disabled { color: #c1c5cb; cursor: not-allowed; }
+
+.cantidad-selector-valor { min-width: 1.4em; text-align: center; font-weight: 600; }
 
 .btn {
   display: inline-block;
@@ -150,6 +175,8 @@ main { flex: 1; padding: 1.5rem; max-width: 1100px; margin: 0 auto; width: 100%;
 .btn-secondary { background: #e5e7eb; color: #1f2937; }
 .btn-danger { background: var(--danger); color: white; }
 .btn-small { padding: 0.3rem 0.6rem; font-size: 0.8rem; background: var(--brand); color: white; }
+.btn-carrito { background: var(--brand); color: white; width: 100%; }
+.btn-carrito:disabled { background: #9cb8ab; cursor: not-allowed; }
 
 .info-msg { text-align: center; color: var(--muted); padding: 2rem 0; }
 .info-msg.error { color: var(--danger); }
@@ -516,6 +543,58 @@ main { flex: 1; padding: 1.5rem; max-width: 1100px; margin: 0 auto; width: 100%;
 
 .form-grid-wide { grid-column: 1 / -1; }
 
+/* ---- Fila del nombre de un campo + su botón ⚙️ de opciones predeterminadas ---- */
+.form-label-fila {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+
+.gestor-opciones-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.75;
+}
+
+.gestor-opciones-btn:hover { opacity: 1; }
+
+/* ---- Ventana de "Administrar opciones predeterminadas" ---- */
+.opciones-lista {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 220px;
+  overflow-y: auto;
+  margin-bottom: 0.9rem;
+}
+
+.opciones-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  background: #f9fafb;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.85rem;
+}
+
+.opciones-item-botones { display: flex; gap: 0.3rem; }
+
+.opciones-item-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0.1rem 0.3rem;
+}
+
 .form-field-fotos {
   display: flex;
   flex-direction: column;
@@ -728,4 +807,88 @@ main { flex: 1; padding: 1.5rem; max-width: 1100px; margin: 0 auto; width: 100%;
   border-radius: 50%;
   font-size: 1.2rem;
   cursor: pointer;
+}
+
+/* ---- Carrito: barra flotante que aparece en el catálogo cuando hay
+   al menos un producto agregado ---- */
+.carrito-flotante {
+  position: fixed;
+  left: 50%;
+  bottom: 1.2rem;
+  transform: translateX(-50%);
+  background: var(--brand-dark);
+  color: white;
+  border: none;
+  padding: 0.8rem 1.4rem;
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+  z-index: 60;
+}
+
+/* ---- Carrito: modal de revisión ("Tu pedido") ---- */
+.carrito-lista {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  max-height: 45vh;
+  overflow-y: auto;
+  margin-bottom: 0.9rem;
+}
+
+.carrito-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: #f9fafb;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem 0.7rem;
+}
+
+.carrito-item-info {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.carrito-item-info strong {
+  font-size: 0.9rem;
+  overflow-wrap: break-word;
+}
+
+.carrito-item-cantidad {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.carrito-item-cantidad button {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: white;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.carrito-item-cantidad button:disabled { color: #c1c5cb; cursor: not-allowed; }
+
+.carrito-item-quitar {
+  background: none;
+  border: none;
+  color: var(--danger);
+  font-size: 1rem;
+  cursor: pointer;
+  padding: 0.2rem 0.3rem;
+}
+
+.carrito-total {
+  text-align: right;
+  font-size: 0.95rem;
+  margin-bottom: 0.9rem;
 }
