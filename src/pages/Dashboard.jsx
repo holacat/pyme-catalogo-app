@@ -29,6 +29,24 @@ function primeraFoto(fotoUrl) {
   return String(fotoUrl || '').split('|').map((u) => u.trim()).filter(Boolean)[0] || '';
 }
 
+// Convierte a texto de forma segura. OJO: NUNCA usar "valor || ''" para
+// esto — si `valor` es el número 0 (por ejemplo un teléfono guardado sin
+// querer como número 0), "0 || ''" da '' por error, porque 0 cuenta como
+// "falso" en JavaScript. Esta función sí distingue "no hay valor" de "0".
+function textoSeguro(valor) {
+  return valor === undefined || valor === null ? '' : String(valor);
+}
+
+// Texto viejo que se guardaba automáticamente antes en los pedidos hechos
+// desde el catálogo. Ya no se usa, pero pedidos antiguos todavía lo tienen
+// guardado — lo tratamos igual que "sin notas" para que se vean limpios.
+const NOTA_VIEJA_AUTOMATICA = 'Generado desde el catálogo web';
+
+function notasIniciales(pedido) {
+  const valor = textoSeguro(pedido.Notas);
+  return valor === NOTA_VIEJA_AUTOMATICA ? '' : valor;
+}
+
 // Evita que se puedan escribir números absurdamente grandes en los campos
 // de precio/stock/cantidad (por ejemplo, llenar el cuadro de puros ceros y
 // que la app se rompa). Corta el texto a una cantidad máxima de dígitos,
@@ -44,6 +62,13 @@ function limitarDigitos(valorTexto, maxDigitos) {
 // Igual, pero para teléfonos: solo dígitos, sin punto decimal.
 function limitarTelefono(valorTexto) {
   return String(valorTexto).replace(/[^0-9]/g, '').slice(0, 13);
+}
+
+function formatearFechaCorta(valor) {
+  if (!valor) return '—';
+  const fecha = new Date(valor);
+  if (Number.isNaN(fecha.getTime())) return '—';
+  return fecha.toLocaleDateString('es-MX');
 }
 
 const MAX_DIGITOS_STOCK = 6; // hasta 999,999 piezas
@@ -213,6 +238,11 @@ export default function Dashboard() {
     );
   }
 
+  // Más recientes primero: los productos y pedidos se guardan agregándolos
+  // al final del Google Sheet, así que para mostrar los más nuevos arriba
+  // simplemente invertimos el orden en el que llegaron.
+  const productosOrdenados = productos.slice().reverse();
+
   return (
     <div className="dashboard">
       <div className="dashboard-header">
@@ -265,12 +295,12 @@ export default function Dashboard() {
           <table className="data-table">
             <thead>
               <tr>
-                <th>Producto</th><th>Código</th><th>Precio</th><th>Stock</th>
+                <th>Producto</th><th>Código</th><th>Agregado</th><th>Precio</th><th>Stock</th>
                 <th>Mínimo</th><th>Actualizar stock</th><th>Acciones</th>
               </tr>
             </thead>
             <tbody>
-              {productos.map((p) => (
+              {productosOrdenados.map((p) => (
                 <StockRow
                   key={p.ID}
                   producto={p}
@@ -376,7 +406,7 @@ function formDesdeProducto(producto) {
     stock: producto.Stock ?? '',
     stockMinimo: producto.StockMinimo ?? '',
     descripcion: producto.Descripcion || '',
-    codigoPropio: producto.CodigoPropio || '',
+    codigoPropio: textoSeguro(producto.CodigoPropio),
   };
 }
 
@@ -582,24 +612,27 @@ function StockRow({ producto, onActualizar, onDirtyChange, onEditar, onCambiarDi
         </div>
       </td>
       <td>{producto.CodigoPropio || '—'}</td>
+      <td>{formatearFechaCorta(producto.FechaCreacion)}</td>
       <td>${Number(producto.Precio).toLocaleString('es-MX')}</td>
       <td>{producto.Stock}</td>
       <td>{producto.StockMinimo}</td>
-      <td className="stock-editor">
-        <input
-          type="number"
-          min="0"
-          className={sinGuardar ? 'campo-modificado' : ''}
-          value={valor}
-          onChange={(e) => setValor(limitarDigitos(e.target.value, MAX_DIGITOS_STOCK))}
-        />
-        <button
-          className="btn btn-small"
-          onClick={() => onActualizar(producto.ID, valor)}
-          disabled={!sinGuardar}
-        >
-          Guardar
-        </button>
+      <td>
+        <div className="stock-editor">
+          <input
+            type="number"
+            min="0"
+            className={sinGuardar ? 'campo-modificado' : ''}
+            value={valor}
+            onChange={(e) => setValor(limitarDigitos(e.target.value, MAX_DIGITOS_STOCK))}
+          />
+          <button
+            className="btn btn-small"
+            onClick={() => onActualizar(producto.ID, valor)}
+            disabled={!sinGuardar}
+          >
+            Guardar
+          </button>
+        </div>
       </td>
       <td className="celda-acciones">
         <div className="acciones-producto">
@@ -620,29 +653,39 @@ function StockRow({ producto, onActualizar, onDirtyChange, onEditar, onCambiarDi
 
 function PedidoRow({ pedido, onGuardar, onDirtyChange }) {
   const [cantidad, setCantidad] = useState(pedido.Cantidad);
-  const [telefono, setTelefono] = useState(pedido.Telefono || '');
-  const [notas, setNotas] = useState(pedido.Notas || '');
+  const [telefono, setTelefono] = useState(() => textoSeguro(pedido.Telefono));
+  const [notas, setNotas] = useState(() => notasIniciales(pedido));
   const [estado, setEstado] = useState(pedido.Estado);
   const [guardando, setGuardando] = useState(false);
   const llave = `pedido:${pedido.ID}`;
 
+  const telefonoOriginal = textoSeguro(pedido.Telefono);
+  const notasOriginal = notasIniciales(pedido);
+
   const cambioCantidad = String(cantidad) !== String(pedido.Cantidad);
-  const cambioTelefono = telefono !== (pedido.Telefono || '');
-  const cambioNotas = notas !== (pedido.Notas || '');
+  const cambioTelefono = telefono !== telefonoOriginal;
+  const cambioNotas = notas !== notasOriginal;
   const cambioEstado = estado !== pedido.Estado;
   const sinGuardar = cambioCantidad || cambioTelefono || cambioNotas || cambioEstado;
 
+  // OJO: este efecto depende de los VALORES actuales (cantidad, telefono,
+  // notas, estado), no solo de los booleanos "cambió sí/no". Si solo
+  // dependiera de los booleanos, una vez que "cambioTelefono" pasa a true
+  // ya no se vuelve a ejecutar con cada letra que seguías escribiendo, y el
+  // aviso se quedaba pegado mostrando solo el primer caracter que tecleaste
+  // (por ejemplo mostraba "2" en vez del teléfono completo). También por
+  // esto el aviso a veces no se apagaba después de guardar.
   useEffect(() => {
     const cambios = [];
     if (cambioCantidad) cambios.push(`Cantidad: ${pedido.Cantidad} → ${cantidad || 0}`);
-    if (cambioTelefono) cambios.push(`Teléfono: "${pedido.Telefono || ''}" → "${telefono}"`);
-    if (cambioNotas) cambios.push(`Notas: "${pedido.Notas || 'sin nota'}" → "${notas || 'sin nota'}"`);
+    if (cambioTelefono) cambios.push(`Teléfono: "${telefonoOriginal || 'vacío'}" → "${telefono || 'vacío'}"`);
+    if (cambioNotas) cambios.push(`Notas: "${notasOriginal || 'sin nota'}" → "${notas || 'sin nota'}"`);
     if (cambioEstado) cambios.push(`Estado: ${pedido.Estado} → ${estado}`);
     const descripcion = cambios.length > 0 ? `Pedido de ${pedido.Cliente} — ${cambios.join(' · ')}` : '';
     onDirtyChange(llave, sinGuardar, descripcion);
     return () => onDirtyChange(llave, false, '');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sinGuardar, cambioCantidad, cambioTelefono, cambioNotas, cambioEstado, llave]);
+  }, [cantidad, telefono, notas, estado, pedido, llave]);
 
   function handleGuardar() {
     setGuardando(true);
@@ -680,6 +723,7 @@ function PedidoRow({ pedido, onGuardar, onDirtyChange }) {
           className={`pedido-input-notas ${cambioNotas ? 'campo-modificado' : ''}`}
           value={notas}
           onChange={(e) => setNotas(e.target.value)}
+          placeholder="Sin notas"
         />
       </td>
       <td>
