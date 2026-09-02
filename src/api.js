@@ -111,6 +111,7 @@ export function actualizarProducto({
   descripcion,
   disponible,
   codigoPropio,
+  orden,
 }) {
   return post({
     action: 'actualizarProducto',
@@ -129,6 +130,7 @@ export function actualizarProducto({
     descripcion,
     disponible,
     codigoPropio,
+    orden,
   });
 }
 
@@ -148,6 +150,21 @@ export function eliminarProducto({ adminKey, productoId }) {
 // devuelve la URL pública para guardarla en el producto.
 export function subirFoto({ adminKey, nombreArchivo, tipoMime, datosBase64 }) {
   return post({ action: 'subirFoto', adminKey, nombreArchivo, tipoMime, datosBase64 });
+}
+
+// ---- Orden del catálogo (arrastrar y acomodar, por categoría) ----
+
+// Guarda de un jalón el nuevo número de "Orden" de varios productos a la
+// vez (por ejemplo, todos los de una categoría después de arrastrar uno).
+// cambios = [{ productoId, orden }, ...]
+export function actualizarOrdenMultiple({ adminKey, cambios }) {
+  return post({ action: 'actualizarOrdenMultiple', adminKey, cambios });
+}
+
+// Cambia el nombre de una categoría en TODOS los productos que la tengan,
+// de un jalón (por ejemplo, "Bolsas" -> "Bolsos").
+export function renombrarCategoria({ adminKey, categoriaAnterior, categoriaNueva }) {
+  return post({ action: 'renombrarCategoria', adminKey, categoriaAnterior, categoriaNueva });
 }
 
 // ---- Opciones predeterminadas (Nombre, Categoría, Marca, Talla, Color,
