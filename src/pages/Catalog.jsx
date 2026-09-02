@@ -69,10 +69,33 @@ function buildWhatsAppLinkCarrito(items, nombre) {
   return `https://wa.me/${phone}?text=${encodeURIComponent(mensaje)}`;
 }
 
+// Agrupa la lista de productos (que YA viene ordenada por categoría y por
+// "Orden" desde el backend) en bloques por categoría, conservando el orden
+// en que vienen. Los productos sin categoría se juntan bajo "Otros", para
+// que ninguno se quede sin mostrarse.
+function agruparPorCategoria(productos) {
+  const grupos = [];
+  const indicePorCategoria = {};
+  productos.forEach((p) => {
+    const nombreCategoria = String(p.Categoria || '').trim() || 'Otros';
+    if (!(nombreCategoria in indicePorCategoria)) {
+      indicePorCategoria[nombreCategoria] = grupos.length;
+      grupos.push({ nombre: nombreCategoria, productos: [] });
+    }
+    grupos[indicePorCategoria[nombreCategoria]].productos.push(p);
+  });
+  return grupos;
+}
+
 export default function Catalog() {
   const [productos, setProductos] = useState([]);
   const [estado, setEstado] = useState('cargando'); // cargando | listo | error
   const [error, setError] = useState('');
+
+  // Qué se está mostrando ahorita: el catálogo dividido en categorías (lo
+  // normal), una sola categoría abierta completa ("Ver más de esta
+  // categoría"), o el catálogo entero mezclado ("Ver catálogo completo").
+  const [vista, setVista] = useState({ tipo: 'categorias' });
 
   // Pedido de UN producto al instante: { producto, cantidad } o null.
   const [solicitudActual, setSolicitudActual] = useState(null);
@@ -232,6 +255,21 @@ export default function Catalog() {
   if (productos.length === 0) return <p className="info-msg">Aún no hay productos disponibles.</p>;
 
   const totalProductosEnCarrito = carrito.length;
+  const grupos = agruparPorCategoria(productos);
+  const grupoAbierto = vista.tipo === 'categoria' ? grupos.find((g) => g.nombre === vista.nombre) : null;
+
+  // Chiquita función de ayuda para no repetir el mismo bloque de
+  // ProductCard en las tres vistas (categorías, una categoría, todo).
+  function tarjetas(listaProductos) {
+    return listaProductos.map((p) => (
+      <ProductCard
+        key={p.ID}
+        producto={p}
+        onSolicitar={handleSolicitar}
+        onAgregarCarrito={handleAgregarCarrito}
+      />
+    ));
+  }
 
   return (
     <>
@@ -244,19 +282,71 @@ export default function Catalog() {
         </p>
       )}
 
-      <div className="catalog-grid">
-        {productos
-          .slice()
-          .reverse()
-          .map((p) => (
-            <ProductCard
-              key={p.ID}
-              producto={p}
-              onSolicitar={handleSolicitar}
-              onAgregarCarrito={handleAgregarCarrito}
-            />
+      {/* ---- Vista normal: categorías, cada una en su propia cajita con
+          su propio carrusel horizontal ---- */}
+      {vista.tipo === 'categorias' && (
+        <>
+          <div className="catalogo-barra-superior">
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setVista({ tipo: 'todo' })}
+            >
+              🗂️ Ver catálogo completo
+            </button>
+          </div>
+
+          {grupos.map((grupo) => (
+            <section key={grupo.nombre} className="categoria-seccion">
+              <h2 className="categoria-titulo">{grupo.nombre}</h2>
+              <div className="categoria-carrusel">{tarjetas(grupo.productos)}</div>
+              <div className="categoria-pie">
+                <button
+                  type="button"
+                  className="link-button categoria-ver-mas"
+                  onClick={() => setVista({ tipo: 'categoria', nombre: grupo.nombre })}
+                >
+                  Ver más de {grupo.nombre} →
+                </button>
+              </div>
+            </section>
           ))}
-      </div>
+        </>
+      )}
+
+      {/* ---- Vista de UNA categoría abierta completa, en cuadrícula ---- */}
+      {vista.tipo === 'categoria' && (
+        <>
+          <button
+            type="button"
+            className="btn btn-secondary volver-btn"
+            onClick={() => setVista({ tipo: 'categorias' })}
+          >
+            ← Volver a categorías
+          </button>
+          <h2 className="categoria-titulo-completo">{vista.nombre}</h2>
+          {grupoAbierto && grupoAbierto.productos.length > 0 ? (
+            <div className="catalog-grid">{tarjetas(grupoAbierto.productos)}</div>
+          ) : (
+            <p className="info-msg">Ya no hay productos disponibles en esta categoría.</p>
+          )}
+        </>
+      )}
+
+      {/* ---- Vista del catálogo completo, todas las categorías mezcladas ---- */}
+      {vista.tipo === 'todo' && (
+        <>
+          <button
+            type="button"
+            className="btn btn-secondary volver-btn"
+            onClick={() => setVista({ tipo: 'categorias' })}
+          >
+            ← Volver a categorías
+          </button>
+          <h2 className="categoria-titulo-completo">Catálogo completo</h2>
+          <div className="catalog-grid">{tarjetas(productos)}</div>
+        </>
+      )}
 
       {totalProductosEnCarrito > 0 && (
         <button type="button" className="carrito-flotante" onClick={() => setCarritoAbierto(true)}>
