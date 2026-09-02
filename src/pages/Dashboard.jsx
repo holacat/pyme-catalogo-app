@@ -1,745 +1,1678 @@
-/**
- * ============================================================================
- *  BACKEND (Google Apps Script) - App de Catálogo y Control de Comercio
- * ============================================================================
- *  Este script convierte tu Google Sheet en una mini API REST segura.
- *  La app de React NUNCA se conecta directo a Google Sheets: le habla a
- *  este script, y el script es el único que toca la hoja de cálculo (y,
- *  desde esta versión, también tu Google Drive para guardar fotos).
- *
- *  HOJAS REQUERIDAS EN EL SPREADSHEET:
- *   1) "Productos"  -> ID | Nombre | Categoria | Precio | Stock | StockMinimo | FotoURL | Disponible | Descripcion | Marca | Talla | Color | PrecioCompra | CodigoPropio | FechaCreacion | Orden
- *   2) "Pedidos"    -> ID | Fecha | Cliente | Telefono | Producto | ProductoID | Cantidad | Estado | Notas
- *   3) "Opciones"   -> Campo | Valor  (NO la tienes que crear a mano: se crea
- *                      sola la primera vez que agregas una opción predeterminada
- *                      desde el Dashboard, en "+ Agregar producto".)
- *
- *  NOTA sobre FotoURL: un producto puede tener VARIAS fotos. Se guardan en
- *  la misma celda de FotoURL, separadas por el símbolo "|" (por ejemplo:
- *  "https://.../foto1.jpg|https://.../foto2.jpg"). El catálogo las muestra
- *  como carrusel. No necesitas hacer nada especial: el Dashboard arma ese
- *  texto automáticamente cuando subes varias fotos arrastrándolas.
- *
- *  NOTA sobre Marca/Talla/Color/PrecioCompra/CodigoPropio/FechaCreacion: se
- *  agregaron DESPUÉS de las columnas originales (al final) para no romper
- *  hojas ya existentes. CodigoPropio es un código interno OPCIONAL que tú
- *  decides (por ejemplo "PLY-001"), aparte del ID automático de la app.
- *  FechaCreacion se llena SOLA cuando das de alta un producto nuevo — los
- *  productos que ya existían antes de esta versión se quedan sin fecha
- *  (se muestran con "—" en el Dashboard).
- *
- *  NOTA sobre Orden: columna nueva que guarda un número por producto, para
- *  saber en qué orden se debe ver dentro de su categoría en el catálogo
- *  público (y qué categoría se ve primero). Se actualiza sola cuando
- *  arrastras los productos en la pestaña "Orden del catálogo" del
- *  Dashboard — no hace falta llenarla a mano. Si un producto no tiene
- *  número ahí (por ejemplo los que ya existían antes de esta versión), se
- *  trata como si fuera 0 y simplemente se queda en el mismo orden en que
- *  ya estaba en la hoja.
- *
- *  NOTA sobre Telefono y CodigoPropio guardados como TEXTO: estas dos
- *  columnas se fuerzan a formato de texto cada vez que se escriben, para
- *  que Google Sheets no las convierta en números (lo cual rompía números
- *  como "0000000000" o códigos como "007", que perderían los ceros).
- *
- *  CONFIGURACIÓN DE SEGURIDAD (Project Settings > Script Properties):
- *   - PUBLIC_KEY : clave simple que la app pública manda en cada request.
- *                  No es secreta al 100% (viaja en el frontend), pero evita
- *                  que cualquiera en internet descubra la URL y la use.
- *   - ADMIN_KEY  : clave del dashboard de administración. Solo tú la
- *                  conoces. Protege ver pedidos con datos de clientes,
- *                  actualizar stock y subir fotos.
- *   - SPREADSHEET_ID : ID de tu Google Sheet (está en la URL de la hoja).
- *
- *  Cómo poner las Script Properties:
- *   Extensiones > Apps Script > ícono de engrane (Configuración del proyecto)
- *   > "Propiedades del script" > Agregar propiedad.
- *
- *  IMPORTANTE sobre el permiso de Google Drive: esta versión guarda las
- *  fotos que subas en una carpeta de tu Google Drive llamada "Fotos PyME
- *  App" (se crea sola la primera vez). Como es un permiso nuevo que el
- *  script no pedía antes, la PRIMERA VEZ tienes que autorizarlo a mano:
- *  en el editor de Apps Script, en el menú de funciones (junto al botón
- *  "Ejecutar"), elige la función "autorizarDrive" y dale "Ejecutar". Te va
- *  a pedir permiso — acéptalo. Después de eso, crea la nueva versión de
- *  implementación como siempre.
- * ============================================================================
- */
+import { useEffect, useRef, useState } from 'react';
+import {
+  listarProductosAdmin,
+  listarPedidos,
+  obtenerAlertas,
+  listarOpciones,
+  agregarOpcion,
+  eliminarOpcion,
+  actualizarStock,
+  actualizarPedido,
+  crearProducto,
+  actualizarProducto,
+  cambiarDisponibilidad,
+  eliminarProducto,
+  actualizarOrdenMultiple,
+  renombrarCategoria,
+  eliminarCategoria,
+} from '../api.js';
+import ImageUploader from '../components/ImageUploader.jsx';
+import ImageLightbox from '../components/ImageLightbox.jsx';
 
-const SHEET_PRODUCTOS = 'Productos';
-const SHEET_PEDIDOS = 'Pedidos';
-const SHEET_OPCIONES = 'Opciones';
-const CARPETA_FOTOS_PROP = 'DRIVE_FOLDER_ID';
-
-// Columnas que SIEMPRE se guardan como texto plano, nunca como número, para
-// que Google Sheets no les quite ceros a la izquierda ni las convierta en
-// números gigantes/raros (teléfonos y códigos de producto).
-const CAMPOS_TEXTO_FORZADO = ['Telefono', 'CodigoPropio'];
-
-function getProp_(key) {
-  return PropertiesService.getScriptProperties().getProperty(key);
+// Un producto puede tener Disponible guardado como booleano real (true/false)
+// o como texto ("TRUE"/"SI") si alguien lo escribió a mano en el Sheet. Esta
+// función lo normaliza, igual que hace el backend para el catálogo público.
+function esProductoVisible(producto) {
+  return (
+    producto.Disponible === true ||
+    String(producto.Disponible).toUpperCase() === 'TRUE' ||
+    String(producto.Disponible).toUpperCase() === 'SI'
+  );
 }
 
-function getSpreadsheet_() {
-  const id = getProp_('SPREADSHEET_ID');
-  if (!id) throw new Error('Falta configurar SPREADSHEET_ID en Script Properties.');
-  return SpreadsheetApp.openById(id);
+// Toma solo la primera foto de la lista (separada por "|") para mostrarla
+// como miniatura chiquita en la tabla de Stock.
+function primeraFoto(fotoUrl) {
+  return String(fotoUrl || '').split('|').map((u) => u.trim()).filter(Boolean)[0] || '';
 }
 
-function jsonOut_(obj) {
-  return ContentService.createTextOutput(JSON.stringify(obj))
-    .setMimeType(ContentService.MimeType.JSON);
+// Convierte a texto de forma segura. OJO: NUNCA usar "valor || ''" para
+// esto — si `valor` es el número 0 (por ejemplo un teléfono guardado sin
+// querer como número 0), "0 || ''" da '' por error, porque 0 cuenta como
+// "falso" en JavaScript. Esta función sí distingue "no hay valor" de "0".
+function textoSeguro(valor) {
+  return valor === undefined || valor === null ? '' : String(valor);
 }
 
-function isPublicAuthorized_(params) {
-  const expected = getProp_('PUBLIC_KEY');
-  if (!expected) return true; // si no configuraste clave pública, no la exige
-  return params.key === expected;
+// Texto viejo que se guardaba automáticamente antes en los pedidos hechos
+// desde el catálogo. Ya no se usa, pero pedidos antiguos todavía lo tienen
+// guardado — lo tratamos igual que "sin notas" para que se vean limpios.
+const NOTA_VIEJA_AUTOMATICA = 'Generado desde el catálogo web';
+
+function notasIniciales(pedido) {
+  const valor = textoSeguro(pedido.Notas);
+  return valor === NOTA_VIEJA_AUTOMATICA ? '' : valor;
 }
 
-function isAdminAuthorized_(params) {
-  const expected = getProp_('ADMIN_KEY');
-  if (!expected) return false; // sin ADMIN_KEY configurada, nadie es admin
-  return params.adminKey === expected;
+// Evita que se puedan escribir números absurdamente grandes en los campos
+// de precio/stock/cantidad (por ejemplo, llenar el cuadro de puros ceros y
+// que la app se rompa). Corta el texto a una cantidad máxima de dígitos,
+// dejando escribir el punto decimal para precios.
+function limitarDigitos(valorTexto, maxDigitos) {
+  const texto = String(valorTexto);
+  const partes = texto.split('.');
+  const entero = partes[0].replace(/[^0-9]/g, '').slice(0, maxDigitos);
+  const decimal = partes.length > 1 ? '.' + partes[1].replace(/[^0-9]/g, '').slice(0, 2) : '';
+  return entero + decimal;
 }
 
-function sheetToObjects_(sheet) {
-  const values = sheet.getDataRange().getValues();
-  if (values.length < 2) return [];
-  const headers = values[0];
-  const rows = values.slice(1);
-  return rows
-    .filter(row => row.some(cell => cell !== '' && cell !== null))
-    .map(row => {
-      const obj = {};
-      headers.forEach((h, i) => { obj[h] = row[i]; });
-      return obj;
+// Igual, pero para teléfonos: solo dígitos, sin punto decimal.
+function limitarTelefono(valorTexto) {
+  return String(valorTexto).replace(/[^0-9]/g, '').slice(0, 13);
+}
+
+// Fecha y hora en la que se dio de alta un producto. Van en dos columnas
+// separadas ("Fecha agregado" / "Hora agregado"), por eso son dos funciones.
+function formatearFechaSolo(valor) {
+  if (!valor) return '—';
+  const fecha = new Date(valor);
+  if (Number.isNaN(fecha.getTime())) return '—';
+  return fecha.toLocaleDateString('es-MX');
+}
+
+function formatearHoraSolo(valor) {
+  if (!valor) return '—';
+  const fecha = new Date(valor);
+  if (Number.isNaN(fecha.getTime())) return '—';
+  return fecha.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
+}
+
+const MAX_DIGITOS_STOCK = 9; // hasta 999,999,999 piezas
+const MAX_DIGITOS_PRECIO = 9; // hasta 999,999,999 (con hasta 2 decimales)
+const MAX_DIGITOS_CANTIDAD = 4; // hasta 9,999 piezas por pedido
+
+// Cada cuánto se refresca solo el Dashboard en segundo plano (milisegundos).
+const INTERVALO_REFRESCO_MS = 5000;
+
+const ESTADOS_PEDIDO = ['Pendiente', 'Confirmado', 'Entregado', 'Cancelado'];
+
+const STORAGE_KEY = 'pyme_admin_key';
+
+export default function Dashboard() {
+  const [adminKey, setAdminKey] = useState(() => sessionStorage.getItem(STORAGE_KEY) || '');
+  const [autenticado, setAutenticado] = useState(!!sessionStorage.getItem(STORAGE_KEY));
+  // Mientras esto sea true, NO mostramos el panel: estamos comprobando (o
+  // volviendo a comprobar) que la clave guardada todavía sea válida contra
+  // el servidor, para no dejar ver la estructura del Dashboard a alguien
+  // que en realidad no tiene una clave correcta.
+  const [verificandoSesion, setVerificandoSesion] = useState(() => !!sessionStorage.getItem(STORAGE_KEY));
+  const [inputKey, setInputKey] = useState('');
+  const [verificandoLogin, setVerificandoLogin] = useState(false);
+  const [errorLogin, setErrorLogin] = useState('');
+  const [tab, setTab] = useState('stock'); // stock | pedidos | alertas | orden | nuevo
+  const [productos, setProductos] = useState([]);
+  const [pedidos, setPedidos] = useState([]);
+  const [alertas, setAlertas] = useState([]);
+  // Opciones predeterminadas para los campos de "+ Agregar producto"
+  // (Nombre, Código propio, Categoría, Marca, Talla, Color). Se guarda como
+  // { categoria: ['Bolsas', 'Zapatos'], color: ['Rojo'], ... }. A propósito
+  // NO se llena sola con el historial de productos: solo tiene lo que se
+  // agregó a mano desde "Administrar opciones predeterminadas".
+  const [opciones, setOpciones] = useState({});
+  const [cargando, setCargando] = useState(false);
+  const [mensaje, setMensaje] = useState('');
+  const [productoEditando, setProductoEditando] = useState(null);
+  const [filtroDesde, setFiltroDesde] = useState('');
+  const [filtroHasta, setFiltroHasta] = useState('');
+  const [filtroEstado, setFiltroEstado] = useState('');
+  const [fotoAmpliada, setFotoAmpliada] = useState('');
+  // Nota de un pedido abierta "en grande" (ver/editar completa). Null cuando
+  // no hay ninguna abierta. Guarda también `onChange`, que es el `setNotas`
+  // de esa fila de Pedidos en particular, para que editar aquí actualice
+  // exactamente esa misma fila.
+  const [notaEnZoom, setNotaEnZoom] = useState(null);
+
+  // Mapa de llaves (con prefijo "stock:" o "pedido:") -> descripción del
+  // cambio pendiente de guardar. Mientras este mapa no esté vacío, avisamos
+  // antes de cambiar de pestaña o cerrar la página, para no perder el
+  // cambio por un descuido. La descripción es lo que se le muestra a
+  // Claudia para que sepa EXACTAMENTE qué dato movió.
+  const [sinGuardar, setSinGuardar] = useState(() => new Map());
+
+  // Se incrementa cada vez que Claudia cancela los cambios sin guardar (con
+  // el botón o con Escape). Lo usamos como parte del "key" de cada fila de
+  // Stock/Pedidos: al cambiar el key, React destruye y vuelve a crear esa
+  // fila desde cero, así que sus casillas regresan a mostrar el valor
+  // original (el que tiene el servidor), no el que Claudia había escrito.
+  const [resetToken, setResetToken] = useState(0);
+
+  function marcarSucio(llave, sucio, descripcion) {
+    setSinGuardar((prev) => {
+      const next = new Map(prev);
+      if (sucio) next.set(llave, descripcion || 'Un campo cambió');
+      else next.delete(llave);
+      return next;
     });
-}
-
-// Un producto sin categoría (celda vacía) se muestra bajo "Otros" en el
-// catálogo y en el Dashboard. Esta función centraliza esa regla, para que
-// comparar/buscar una categoría por su nombre (por ejemplo al renombrar,
-// ocultar o borrar "Otros") funcione igual en todos lados.
-function nombreCategoriaMostrada_(valorCelda) {
-  return String(valorCelda || '').trim() || 'Otros';
-}
-
-// Lista de nombres de categoría que Claudia marcó como "ocultas" desde la
-// pestaña "Orden del catálogo" (se guardan en la hoja "Opciones", con
-// Campo = "categoriaOculta"). Mientras una categoría esté en esta lista,
-// sus productos NO aparecen en el catálogo público — pero sus datos
-// siguen intactos, y basta con "Mostrar" de nuevo para que reaparezcan.
-function obtenerCategoriasOcultas_(ss) {
-  const sheet = obtenerHojaOpciones_(ss);
-  return sheetToObjects_(sheet)
-    .filter((f) => String(f.Campo) === 'categoriaOculta')
-    .map((f) => String(f.Valor || '').trim());
-}
-
-/**
- * Ordena una lista de productos (ya convertida a objetos) por categoría y,
- * dentro de cada categoría, por la columna "Orden". Así se arma el catálogo
- * público agrupado en "carruseles" por categoría, en el orden que Claudia
- * decidió arrastrando en el Dashboard.
- *
- * Reglas simples:
- *  - Un producto sin número en "Orden" (columna vacía, o la columna todavía
- *    ni existe en la hoja) se trata como si tuviera Orden = 0.
- *  - El orden es "estable": si dos productos empatan en su número de Orden,
- *    se quedan en el mismo orden en que ya estaban en la hoja (no se
- *    revuelven solos).
- *  - Las categorías mismas se acomodan según el menor número de Orden que
- *    tenga cualquiera de sus productos. Así, si arrastras un producto hasta
- *    el número 1 de su categoría, esa categoría completa puede subir en el
- *    catálogo, sin necesitar una columna aparte para "orden de categoría".
- */
-function ordenarProductos_(productos) {
-  // Antes de agrupar, invertimos el orden "natural" de la hoja (que va del
-  // más viejo al más nuevo) para que, mientras un producto no tenga un
-  // número de Orden distinto de otro (por ejemplo, ninguno se ha
-  // arrastrado todavía), el catálogo público muestre primero los productos
-  // más nuevos y hasta abajo los más viejos — igual que ya pasa en la
-  // pestaña de Stock del Dashboard.
-  const productosMasNuevosPrimero = productos.slice().reverse();
-
-  const categorias = [];
-  const porCategoria = {};
-
-  productosMasNuevosPrimero.forEach((p) => {
-    const cat = String(p.Categoria || '').trim();
-    if (!porCategoria[cat]) {
-      porCategoria[cat] = [];
-      categorias.push(cat);
-    }
-    porCategoria[cat].push(p);
-  });
-
-  categorias.forEach((cat) => {
-    porCategoria[cat].sort((a, b) => (Number(a.Orden) || 0) - (Number(b.Orden) || 0));
-  });
-
-  categorias.sort((catA, catB) => {
-    const minA = Math.min.apply(null, porCategoria[catA].map((p) => Number(p.Orden) || 0));
-    const minB = Math.min.apply(null, porCategoria[catB].map((p) => Number(p.Orden) || 0));
-    return minA - minB;
-  });
-
-  const resultado = [];
-  categorias.forEach((cat) => {
-    porCategoria[cat].forEach((p) => resultado.push(p));
-  });
-  return resultado;
-}
-
-function findRowIndexById_(sheet, idColName, id) {
-  const values = sheet.getDataRange().getValues();
-  const headers = values[0];
-  const idCol = headers.indexOf(idColName);
-  for (let i = 1; i < values.length; i++) {
-    if (String(values[i][idCol]) === String(id)) return i + 1; // 1-based row number
   }
-  return -1;
-}
 
-/**
- * Escribe un valor en una celda. Si el nombre de columna está en
- * CAMPOS_TEXTO_FORZADO, primero pone el formato de la celda en "texto
- * plano" para que Sheets no intente adivinar que es un número.
- */
-function escribirCelda_(sheet, fila, colIndex1based, nombreColumna, valor) {
-  const rango = sheet.getRange(fila, colIndex1based);
-  if (CAMPOS_TEXTO_FORZADO.indexOf(nombreColumna) !== -1) {
-    rango.setNumberFormat('@');
+  function cancelarCambios() {
+    setResetToken((t) => t + 1);
+    setSinGuardar(new Map());
   }
-  rango.setValue(valor);
-}
 
-/**
- * Actualiza, en una sola fila (encontrada por ID), solo las columnas cuyo
- * nombre de encabezado aparece como llave en `valores`. Así podemos hacer
- * "actualizar producto" y "actualizar pedido" sin depender del orden de
- * las columnas, solo de los nombres de encabezado.
- */
-function actualizarFilaPorId_(sheet, idColName, id, valores) {
-  const values = sheet.getDataRange().getValues();
-  const headers = values[0];
-  const row = findRowIndexById_(sheet, idColName, id);
-  if (row === -1) return false;
-  Object.keys(valores).forEach((campo) => {
-    const col = headers.indexOf(campo);
-    if (col !== -1) escribirCelda_(sheet, row, col + 1, campo, valores[campo]);
-  });
-  return true;
-}
-
-/**
- * Devuelve (o crea, la primera vez) la hoja "Opciones", donde se guardan
- * las opciones predeterminadas que Claudia arma a mano desde el Dashboard
- * (en "+ Agregar producto" > "Administrar opciones predeterminadas"). A
- * diferencia del historial de productos, esta lista NUNCA se llena sola:
- * solo tiene los valores que se agregaron a propósito con el botón de
- * "Agregar", así no se satura con valores usados una sola vez.
- */
-function obtenerHojaOpciones_(ss) {
-  let sheet = ss.getSheetByName(SHEET_OPCIONES);
-  if (!sheet) {
-    sheet = ss.insertSheet(SHEET_OPCIONES);
-    sheet.appendRow(['Campo', 'Valor']);
-    sheet.setFrozenRows(1);
-  }
-  return sheet;
-}
-
-/**
- * Devuelve (o crea, la primera vez) la carpeta de Drive donde se guardan
- * las fotos subidas desde el Dashboard. El ID de la carpeta se guarda en
- * Script Properties para reusar siempre la misma carpeta.
- */
-function getCarpetaFotos_() {
-  const folderId = getProp_(CARPETA_FOTOS_PROP);
-  if (folderId) {
-    try {
-      return DriveApp.getFolderById(folderId);
-    } catch (e) {
-      // si el ID guardado ya no es válido (se borró la carpeta a mano),
-      // seguimos abajo y creamos una nueva.
-    }
-  }
-  const folder = DriveApp.createFolder('Fotos PyME App');
-  PropertiesService.getScriptProperties().setProperty(CARPETA_FOTOS_PROP, folder.getId());
-  return folder;
-}
-
-/**
- * Ejecuta esta función UNA VEZ a mano desde el editor de Apps Script para
- * autorizar el permiso de Google Drive (necesario para subir fotos). No
- * hace nada más que "tocar" DriveApp para que aparezca el diálogo de
- * autorización.
- */
-function autorizarDrive() {
-  const carpeta = getCarpetaFotos_();
-  Logger.log('Carpeta de fotos lista: ' + carpeta.getUrl());
-}
-
-/** ============ GET: lectura de datos ============ */
-function doGet(e) {
-  try {
-    const params = e.parameter;
-    const action = params.action;
-    const ss = getSpreadsheet_();
-
-    if (action === 'listarProductos') {
-      if (!isPublicAuthorized_(params)) return jsonOut_({ ok: false, error: 'No autorizado' });
-      const sheet = ss.getSheetByName(SHEET_PRODUCTOS);
-      const categoriasOcultas = obtenerCategoriasOcultas_(ss);
-      const productos = ordenarProductos_(
-        sheetToObjects_(sheet)
-          .filter(p => p.Disponible === true || String(p.Disponible).toUpperCase() === 'TRUE' || String(p.Disponible).toUpperCase() === 'SI')
-          .filter(p => categoriasOcultas.indexOf(nombreCategoriaMostrada_(p.Categoria)) === -1)
+  function cambiarTab(nuevaTab) {
+    if (sinGuardar.size > 0) {
+      const salir = window.confirm(
+        'Tienes cambios sin guardar. Si continúas se van a perder. ¿Quieres salir de todas formas?'
       );
-      return jsonOut_({ ok: true, productos: productos });
+      if (!salir) return;
+      cancelarCambios();
     }
+    setTab(nuevaTab);
+  }
 
-    if (action === 'listarPedidos') {
-      if (!isAdminAuthorized_(params)) return jsonOut_({ ok: false, error: 'No autorizado' });
-      const sheet = ss.getSheetByName(SHEET_PEDIDOS);
-      return jsonOut_({ ok: true, pedidos: sheetToObjects_(sheet) });
+  // Si intentan cerrar o recargar la pestaña con cambios sin guardar, el
+  // navegador les muestra su propia advertencia (no podemos personalizar el
+  // texto, pero sí evitar que se vayan sin darse cuenta).
+  useEffect(() => {
+    function avisarAntesDeSalir(e) {
+      if (sinGuardar.size > 0) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
     }
+    window.addEventListener('beforeunload', avisarAntesDeSalir);
+    return () => window.removeEventListener('beforeunload', avisarAntesDeSalir);
+  }, [sinGuardar]);
 
-    if (action === 'listarProductosAdmin') {
-      if (!isAdminAuthorized_(params)) return jsonOut_({ ok: false, error: 'No autorizado' });
-      const sheet = ss.getSheetByName(SHEET_PRODUCTOS);
-      // OJO: aquí NO se usa ordenarProductos_ (el orden por categoría es
-      // solo para el catálogo público). El Dashboard necesita el orden
-      // "natural" de la hoja para poder mostrar los más nuevos arriba con
-      // .reverse() en Stock. La pestaña de "Orden del catálogo" hace su
-      // propio agrupado por categoría solo para esa vista, sin afectar aquí.
-      return jsonOut_({ ok: true, productos: sheetToObjects_(sheet) });
+  // La tecla Escape cancela los cambios sin guardar, igual que el botón del
+  // aviso amarillo — pero NO si hay una foto ampliada o una nota ampliada
+  // abierta en ese momento (ahí Escape, o simplemente cerrar esa ventana,
+  // no debe perder un cambio sin querer).
+  useEffect(() => {
+    function onKeyDown(e) {
+      if (e.key === 'Escape' && !fotoAmpliada && !notaEnZoom && sinGuardar.size > 0) {
+        cancelarCambios();
+      }
     }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sinGuardar, fotoAmpliada, notaEnZoom]);
 
-    if (action === 'alertas') {
-      if (!isAdminAuthorized_(params)) return jsonOut_({ ok: false, error: 'No autorizado' });
-      const sheet = ss.getSheetByName(SHEET_PRODUCTOS);
-      const productos = sheetToObjects_(sheet);
-      const bajoInventario = productos.filter(p => Number(p.Stock) <= Number(p.StockMinimo || 0));
-      return jsonOut_({ ok: true, alertas: bajoInventario });
-    }
-
-    if (action === 'listarOpciones') {
-      if (!isAdminAuthorized_(params)) return jsonOut_({ ok: false, error: 'No autorizado' });
-      const sheet = obtenerHojaOpciones_(ss);
-      const filas = sheetToObjects_(sheet);
-      // Se agrupan por Campo, por ejemplo: { categoria: ['Bolsas', 'Zapatos'], color: ['Rojo'] }
-      const opciones = {};
-      filas.forEach((f) => {
-        const campo = String(f.Campo || '').trim();
-        const valor = String(f.Valor || '').trim();
-        if (!campo || !valor) return;
-        if (!opciones[campo]) opciones[campo] = [];
-        opciones[campo].push(valor);
+  // `silencioso: true` se usa para los refrescos automáticos de fondo: no
+  // muestra "Actualizando…" ni mensajes de error a cada rato, para no ser
+  // molesto. Los refrescos que sí pide Claudia directamente (guardar algo,
+  // iniciar sesión) siguen mostrando el aviso normal.
+  function cargarTodo(key, opciones = {}) {
+    const silencioso = !!opciones.silencioso;
+    if (!silencioso) setCargando(true);
+    return Promise.all([listarProductosAdmin(key), listarPedidos(key), obtenerAlertas(key), listarOpciones(key)])
+      .then(([p, o, a, op]) => {
+        setProductos(p.productos);
+        setPedidos(o.pedidos);
+        setAlertas(a.alertas);
+        setOpciones(op.opciones || {});
+        if (!silencioso) setMensaje('');
+      })
+      .catch((err) => {
+        // Si el servidor dice que la clave no es válida (se cambió el
+        // ADMIN_KEY, o quedó guardada una vieja de otra sesión), cerramos
+        // sesión automáticamente en vez de dejar el panel abierto sin
+        // poder cargar ni guardar nada — eso sí sería un hueco de seguridad.
+        if (err.message === 'No autorizado') {
+          handleLogout();
+          setErrorLogin('Tu clave ya no es válida. Vuelve a iniciar sesión.');
+          return;
+        }
+        if (!silencioso) setMensaje(`Error al cargar datos: ${err.message}`);
+      })
+      .finally(() => {
+        if (!silencioso) setCargando(false);
+        setVerificandoSesion(false);
       });
-      return jsonOut_({ ok: true, opciones: opciones });
-    }
-
-    return jsonOut_({ ok: false, error: 'Acción no reconocida' });
-  } catch (err) {
-    return jsonOut_({ ok: false, error: String(err) });
   }
+
+  useEffect(() => {
+    if (autenticado) cargarTodo(adminKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autenticado]);
+
+  // Refresco automático en segundo plano: así los pedidos nuevos y los
+  // cambios de stock se ven casi al instante, sin tener que darle
+  // "Actualizar" a mano. Se pausa si hay cambios sin guardar o si está
+  // abierto el formulario de agregar/editar producto, para no interrumpir.
+  useEffect(() => {
+    if (!autenticado) return;
+    const intervalo = setInterval(() => {
+      if (sinGuardar.size === 0 && !productoEditando && tab !== 'nuevo') {
+        cargarTodo(adminKey, { silencioso: true });
+      }
+    }, INTERVALO_REFRESCO_MS);
+    return () => clearInterval(intervalo);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autenticado, adminKey, sinGuardar, productoEditando, tab]);
+
+  // Antes de dejar entrar al panel, comprobamos la clave contra el
+  // servidor. Si está mal, NUNCA se activa `autenticado` — así nadie que
+  // escriba una clave equivocada llega a ver la estructura del Dashboard
+  // (pestañas, formulario de agregar producto, etc.), aunque sea sin datos.
+  function handleLogin(e) {
+    e.preventDefault();
+    const clave = inputKey.trim();
+    if (!clave) return;
+    setVerificandoLogin(true);
+    setErrorLogin('');
+    listarProductosAdmin(clave)
+      .then(() => {
+        sessionStorage.setItem(STORAGE_KEY, clave);
+        setAdminKey(clave);
+        setAutenticado(true);
+        setVerificandoSesion(false);
+      })
+      .catch((err) => {
+        setErrorLogin(
+          err.message === 'No autorizado'
+            ? 'Clave incorrecta. Verifica que la hayas escrito bien (cópiala y pégala para evitar errores de dedo) e intenta de nuevo.'
+            : `No se pudo verificar la clave: ${err.message}`
+        );
+      })
+      .finally(() => setVerificandoLogin(false));
+  }
+
+  function handleLogout() {
+    sessionStorage.removeItem(STORAGE_KEY);
+    setAutenticado(false);
+    setAdminKey('');
+    setInputKey('');
+  }
+
+  function handleActualizarStock(productoId, nuevoStock) {
+    actualizarStock({ adminKey, productoId, nuevoStock })
+      .then(() => cargarTodo(adminKey))
+      .catch((err) => setMensaje(`Error al actualizar stock: ${err.message}`));
+  }
+
+  function handleGuardarPedido(pedidoId, { cantidad, telefono, notas, estado }) {
+    return actualizarPedido({ adminKey, pedidoId, cantidad, telefono, notas, estado })
+      .then(() => cargarTodo(adminKey))
+      .catch((err) => setMensaje(`Error al actualizar pedido: ${err.message}`));
+  }
+
+  function handleCambiarDisponibilidad(producto) {
+    const nuevoValor = !esProductoVisible(producto);
+    cambiarDisponibilidad({ adminKey, productoId: producto.ID, disponible: nuevoValor })
+      .then(() => cargarTodo(adminKey))
+      .catch((err) => setMensaje(`Error al cambiar visibilidad: ${err.message}`));
+  }
+
+  function handleEliminarProducto(producto) {
+    const confirmar = window.confirm(
+      `¿Seguro que quieres eliminar "${producto.Nombre}" para siempre? Esta acción no se puede deshacer desde la app.`
+    );
+    if (!confirmar) return;
+    eliminarProducto({ adminKey, productoId: producto.ID })
+      .then(() => cargarTodo(adminKey))
+      .catch((err) => setMensaje(`Error al eliminar producto: ${err.message}`));
+  }
+
+  if (!autenticado) {
+    return (
+      <form className="login-box" onSubmit={handleLogin}>
+        <h2>Acceso administrador</h2>
+        <p className="muted">
+          Ingresa la clave de administrador para entrar al panel de control.
+        </p>
+        {errorLogin && <p className="info-msg error">{errorLogin}</p>}
+        <input
+          type="password"
+          placeholder="Clave de administrador"
+          value={inputKey}
+          onChange={(e) => setInputKey(e.target.value)}
+          required
+        />
+        <button type="submit" className="btn btn-primary" disabled={verificandoLogin}>
+          {verificandoLogin ? 'Verificando…' : 'Entrar'}
+        </button>
+      </form>
+    );
+  }
+
+  // Todavía no confirmamos con el servidor que la clave guardada sea
+  // válida (esto pasa justo después de recargar la página) — mostramos un
+  // mensaje neutro en vez del panel completo, por seguridad.
+  if (verificandoSesion) {
+    return <p className="info-msg">Verificando sesión…</p>;
+  }
+
+  // Más recientes primero: los productos y pedidos se guardan agregándolos
+  // al final del Google Sheet, así que para mostrar los más nuevos arriba
+  // simplemente invertimos el orden en el que llegaron.
+  const productosOrdenados = productos.slice().reverse();
+
+  // Filtro por fecha de alta: si Claudia elige "Desde" y/o "Hasta", solo se
+  // muestran los productos cuya FechaCreacion cae dentro de ese rango. Los
+  // productos que no tienen fecha guardada (los que existían antes de esta
+  // función) se ocultan mientras el filtro esté activo, porque no hay forma
+  // de saber si entran o no en el rango.
+  function productoEnRangoDeFecha(producto) {
+    if (!filtroDesde && !filtroHasta) return true;
+    if (!producto.FechaCreacion) return false;
+    const fecha = new Date(producto.FechaCreacion);
+    if (Number.isNaN(fecha.getTime())) return false;
+    if (filtroDesde && fecha < new Date(`${filtroDesde}T00:00:00`)) return false;
+    if (filtroHasta && fecha > new Date(`${filtroHasta}T23:59:59`)) return false;
+    return true;
+  }
+
+  const productosFiltrados = productosOrdenados.filter(productoEnRangoDeFecha);
+  const filtroFechaActivo = !!(filtroDesde || filtroHasta);
+
+  // Pedidos: igual que los productos, más recientes primero. Además se
+  // pueden filtrar por Estado con la tablita de conteos de la derecha.
+  const pedidosOrdenados = pedidos.slice().reverse();
+  const conteoPorEstado = pedidosOrdenados.reduce((acc, p) => {
+    acc[p.Estado] = (acc[p.Estado] || 0) + 1;
+    return acc;
+  }, {});
+  const pedidosFiltrados = filtroEstado
+    ? pedidosOrdenados.filter((p) => p.Estado === filtroEstado)
+    : pedidosOrdenados;
+
+  return (
+    <div className="dashboard">
+      <div className="dashboard-header">
+        <h2>Panel de administración</h2>
+        <button className="btn btn-secondary" onClick={handleLogout}>Cerrar sesión</button>
+      </div>
+
+      {alertas.length > 0 && (
+        <div className="alert-banner">
+          ⚠️ {alertas.length} producto(s) con bajo inventario: {alertas.map((a) => a.Nombre).join(', ')}
+        </div>
+      )}
+
+      {mensaje && <p className="info-msg error">{mensaje}</p>}
+      {cargando && <p className="info-msg">Actualizando…</p>}
+
+      {/* Aviso flotante: se queda pegado abajo de la pantalla aunque hagas
+          scroll, y lista EXACTAMENTE qué dato(s) cambiaste sin guardar. */}
+      {sinGuardar.size > 0 && (
+        <div className="aviso-flotante">
+          <p className="aviso-flotante-titulo">
+            ⚠️ Tienes {sinGuardar.size} cambio(s) sin guardar:
+          </p>
+          <ul>
+            {Array.from(sinGuardar.values()).map((descripcion, i) => (
+              <li key={i}>{descripcion}</li>
+            ))}
+          </ul>
+          <div className="aviso-flotante-acciones">
+            <button type="button" className="btn btn-secondary btn-small" onClick={cancelarCambios}>
+              Cancelar cambios (Esc)
+            </button>
+          </div>
+          <p className="aviso-flotante-nota">
+            Dale clic a "Guardar" en cada fila antes de salir de esta pestaña.
+          </p>
+        </div>
+      )}
+
+      <div className="tabs">
+        <button className={tab === 'stock' ? 'active' : ''} onClick={() => cambiarTab('stock')}>Stock</button>
+        <button className={tab === 'pedidos' ? 'active' : ''} onClick={() => cambiarTab('pedidos')}>
+          Pedidos ({pedidos.length})
+        </button>
+        <button className={tab === 'alertas' ? 'active' : ''} onClick={() => cambiarTab('alertas')}>
+          Alertas ({alertas.length})
+        </button>
+        <button className={tab === 'orden' ? 'active' : ''} onClick={() => cambiarTab('orden')}>
+          🔀 Orden del catálogo
+        </button>
+        <button className={tab === 'nuevo' ? 'active' : ''} onClick={() => cambiarTab('nuevo')}>
+          + Agregar producto
+        </button>
+      </div>
+
+      {tab === 'stock' && (
+        <>
+          <div className="filtro-fechas">
+            <label>
+              Agregados desde
+              <input
+                type="date"
+                value={filtroDesde}
+                onChange={(e) => setFiltroDesde(e.target.value)}
+              />
+            </label>
+            <label>
+              Hasta
+              <input
+                type="date"
+                value={filtroHasta}
+                onChange={(e) => setFiltroHasta(e.target.value)}
+              />
+            </label>
+            <span className="stock-conteo-total">
+              📦 <strong>{productos.length}</strong> producto{productos.length === 1 ? '' : 's'} en total
+            </span>
+            {filtroFechaActivo && (
+              <button
+                type="button"
+                className="btn btn-secondary btn-small"
+                onClick={() => {
+                  setFiltroDesde('');
+                  setFiltroHasta('');
+                }}
+              >
+                Quitar filtro
+              </button>
+            )}
+            {filtroFechaActivo && (
+              <span className="filtro-fechas-conteo">
+                Mostrando {productosFiltrados.length} de {productosOrdenados.length} productos
+              </span>
+            )}
+          </div>
+
+          <div className="table-scroll">
+            <table className="data-table stock-table">
+              <thead>
+                <tr>
+                  <th>Fecha agregado</th><th>Hora agregado</th><th>Producto</th><th>Código</th><th>Precio</th><th>Stock</th>
+                  <th>Mínimo</th><th>Actualizar stock</th><th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {productosFiltrados.map((p) => (
+                  <StockRow
+                    key={`${p.ID}-${resetToken}`}
+                    producto={p}
+                    onActualizar={handleActualizarStock}
+                    onDirtyChange={marcarSucio}
+                    onEditar={setProductoEditando}
+                    onCambiarDisponibilidad={handleCambiarDisponibilidad}
+                    onEliminar={handleEliminarProducto}
+                    onVerFoto={setFotoAmpliada}
+                  />
+                ))}
+              </tbody>
+            </table>
+            {productosFiltrados.length === 0 && (
+              <p className="info-msg">Ningún producto fue agregado en ese rango de fechas.</p>
+            )}
+          </div>
+        </>
+      )}
+
+      {tab === 'pedidos' && (
+        <>
+          {/* Tablita de conteo por estado, ARRIBA de la tabla (no al lado),
+              para no quitarle ancho a la tabla y así evitar que tenga que
+              hacer scroll hacia los lados. */}
+          <div className="pedidos-resumen-fila">
+            <span className="pedidos-resumen-titulo">Pedidos por estado:</span>
+            <button
+              type="button"
+              className={`resumen-btn ${filtroEstado === '' ? 'activo' : ''}`}
+              onClick={() => setFiltroEstado('')}
+            >
+              <span>Todos</span>
+              <strong>{pedidosOrdenados.length}</strong>
+            </button>
+            {ESTADOS_PEDIDO.map((estadoOpcion) => (
+              <button
+                key={estadoOpcion}
+                type="button"
+                className={`resumen-btn ${filtroEstado === estadoOpcion ? 'activo' : ''}`}
+                onClick={() => setFiltroEstado(estadoOpcion)}
+              >
+                <span>{estadoOpcion}</span>
+                <strong>{conteoPorEstado[estadoOpcion] || 0}</strong>
+              </button>
+            ))}
+          </div>
+
+          <div className="table-scroll">
+            <table className="data-table pedidos-table">
+              <thead>
+                <tr>
+                  <th>Fecha</th><th>Hora</th><th>Cliente</th><th>Teléfono</th><th>Producto</th>
+                  <th>Cant.</th><th>Notas</th><th>Estado</th><th>Guardar</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pedidosFiltrados.map((ped) => (
+                  <PedidoRow
+                    key={`${ped.ID}-${resetToken}`}
+                    pedido={ped}
+                    onGuardar={handleGuardarPedido}
+                    onDirtyChange={marcarSucio}
+                    onAbrirNota={(cliente, valor, onChange) => setNotaEnZoom({ cliente, valor, onChange })}
+                  />
+                ))}
+              </tbody>
+            </table>
+            {pedidosFiltrados.length === 0 && (
+              <p className="info-msg">No hay pedidos con ese estado.</p>
+            )}
+          </div>
+        </>
+      )}
+
+      {tab === 'alertas' && (
+        <ul className="alert-list">
+          {alertas.length === 0 && <li>Sin alertas de bajo inventario 🎉</li>}
+          {alertas.map((a) => (
+            <li key={a.ID}>
+              <strong>{a.Nombre}</strong> — quedan {a.Stock} (mínimo {a.StockMinimo})
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {tab === 'orden' && (
+        <OrdenTab
+          productos={productos}
+          opciones={opciones}
+          adminKey={adminKey}
+          onCambio={() => cargarTodo(adminKey, { silencioso: true })}
+        />
+      )}
+
+      {tab === 'nuevo' && (
+        <ProductoForm
+          adminKey={adminKey}
+          opciones={opciones}
+          onOpcionesActualizadas={() => cargarTodo(adminKey, { silencioso: true })}
+          onGuardado={() => {
+            cargarTodo(adminKey);
+            setTab('stock');
+          }}
+        />
+      )}
+
+      {productoEditando && (
+        <div className="modal-overlay" onClick={() => setProductoEditando(null)}>
+          <div className="modal-box modal-box-ancho" onClick={(e) => e.stopPropagation()}>
+            <h3>Editar producto</h3>
+            <ProductoForm
+              adminKey={adminKey}
+              opciones={opciones}
+              onOpcionesActualizadas={() => cargarTodo(adminKey, { silencioso: true })}
+              productoExistente={productoEditando}
+              onGuardado={() => {
+                setProductoEditando(null);
+                cargarTodo(adminKey);
+              }}
+              onCancelar={() => setProductoEditando(null)}
+            />
+          </div>
+        </div>
+      )}
+
+      {fotoAmpliada && (
+        <ImageLightbox src={fotoAmpliada} onClose={() => setFotoAmpliada('')} />
+      )}
+
+      {notaEnZoom && (
+        <div className="modal-overlay" onClick={() => setNotaEnZoom(null)}>
+          <div className="modal-box modal-box-ancho" onClick={(e) => e.stopPropagation()}>
+            <h3>Nota de {notaEnZoom.cliente}</h3>
+            <textarea
+              className="nota-modal-textarea"
+              value={notaEnZoom.valor}
+              onChange={(e) => {
+                notaEnZoom.onChange(e.target.value);
+                setNotaEnZoom((prev) => (prev ? { ...prev, valor: e.target.value } : prev));
+              }}
+              placeholder="Sin notas"
+              autoFocus
+            />
+            <div className="form-actions">
+              <button type="button" className="btn btn-primary" onClick={() => setNotaEnZoom(null)}>
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
-/** ============ POST: escritura de datos ============ */
-function doPost(e) {
-  try {
-    const body = JSON.parse(e.postData.contents);
-    const action = body.action;
-    const ss = getSpreadsheet_();
+const FORM_INICIAL = {
+  nombre: '',
+  categoria: '',
+  marca: '',
+  talla: '',
+  color: '',
+  precio: '',
+  precioCompra: '',
+  stock: '',
+  stockMinimo: '',
+  descripcion: '',
+  codigoPropio: '',
+};
 
-    if (action === 'crearPedido') {
-      if (!isPublicAuthorized_(body)) return jsonOut_({ ok: false, error: 'No autorizado' });
-
-      // OJO — MUY IMPORTANTE: cuando alguien pide varios productos juntos
-      // (carrito), la app manda una solicitud de "crearPedido" por cada
-      // producto, casi al mismo tiempo. Sin este candado (LockService), dos
-      // de esas solicitudes podían "cruzarse": ambas agregaban su fila, pero
-      // al buscar "cuál fue la última fila que agregué" (getLastRow) para
-      // anotar ahí el teléfono, a veces una solicitud terminaba anotando el
-      // teléfono en la fila que en realidad había agregado LA OTRA
-      // solicitud — por eso a veces un pedido del carrito se quedaba sin
-      // teléfono, o con el teléfono de otro producto. El candado obliga a
-      // que, mientras una solicitud no haya terminado de agregar su fila Y
-      // anotar su teléfono, ninguna otra pueda empezar — así nunca se cruzan.
-      const bloqueo = LockService.getScriptLock();
-      bloqueo.waitLock(30000); // espera hasta 30 segundos su turno, si hace falta
-      try {
-        const sheet = ss.getSheetByName(SHEET_PEDIDOS);
-        const nuevoId = Utilities.getUuid().slice(0, 8);
-        const fecha = new Date();
-
-        // Dejamos el Teléfono vacío en el appendRow y lo escribimos aparte
-        // ya con formato de texto forzado, para que no se convierta en número.
-        sheet.appendRow([
-          nuevoId,
-          fecha,
-          body.cliente || '',
-          '',
-          body.producto || '',
-          body.productoId || '',
-          body.cantidad || 1,
-          'Pendiente',
-          body.notas || ''
-        ]);
-
-        const filaNueva = sheet.getLastRow();
-        const headersPedidos = sheet.getDataRange().getValues()[0];
-        const colTelefono = headersPedidos.indexOf('Telefono') + 1;
-        if (colTelefono > 0) escribirCelda_(sheet, filaNueva, colTelefono, 'Telefono', body.telefono || '');
-
-        return jsonOut_({ ok: true, id: nuevoId });
-      } finally {
-        bloqueo.releaseLock();
-      }
-    }
-
-    if (action === 'actualizarStock') {
-      if (!isAdminAuthorized_(body)) return jsonOut_({ ok: false, error: 'No autorizado' });
-
-      const sheet = ss.getSheetByName(SHEET_PRODUCTOS);
-      const row = findRowIndexById_(sheet, 'ID', body.productoId);
-      if (row === -1) return jsonOut_({ ok: false, error: 'Producto no encontrado' });
-
-      const headers = sheet.getDataRange().getValues()[0];
-      const stockCol = headers.indexOf('Stock') + 1;
-      sheet.getRange(row, stockCol).setValue(Number(body.nuevoStock));
-
-      return jsonOut_({ ok: true });
-    }
-
-    if (action === 'actualizarPedido') {
-      if (!isAdminAuthorized_(body)) return jsonOut_({ ok: false, error: 'No autorizado' });
-
-      const sheet = ss.getSheetByName(SHEET_PEDIDOS);
-      const valores = {};
-      if (body.estado !== undefined) valores['Estado'] = body.estado;
-      if (body.cantidad !== undefined) valores['Cantidad'] = Number(body.cantidad) || 1;
-      if (body.telefono !== undefined) valores['Telefono'] = body.telefono;
-      if (body.notas !== undefined) valores['Notas'] = body.notas;
-
-      const actualizado = actualizarFilaPorId_(sheet, 'ID', body.pedidoId, valores);
-      if (!actualizado) return jsonOut_({ ok: false, error: 'Pedido no encontrado' });
-
-      return jsonOut_({ ok: true });
-    }
-
-    if (action === 'crearProducto') {
-      if (!isAdminAuthorized_(body)) return jsonOut_({ ok: false, error: 'No autorizado' });
-
-      // Mismo candado que en "crearPedido": evita que dos productos
-      // agregados casi al mismo tiempo (por ejemplo, dos pestañas del
-      // Dashboard abiertas) se crucen al calcular el Orden o al anotar el
-      // CodigoPropio en la fila equivocada.
-      const bloqueoProducto = LockService.getScriptLock();
-      bloqueoProducto.waitLock(30000);
-      try {
-        const sheet = ss.getSheetByName(SHEET_PRODUCTOS);
-        const nuevoId = Utilities.getUuid().slice(0, 8);
-
-        // El producto nuevo se manda al FINAL de su categoría por default (o
-        // hasta arriba de todas, si es una categoría que no existía todavía).
-        // Así no se mete sin querer en medio del orden que ya acomodaste a
-        // mano — luego lo puedes arrastrar a donde quieras desde la pestaña
-        // "Orden del catálogo" del Dashboard.
-        const categoriaNueva = String(body.categoria || '').trim();
-        const ordenesDeEsaCategoria = sheetToObjects_(sheet)
-          .filter((p) => String(p.Categoria || '').trim() === categoriaNueva)
-          .map((p) => Number(p.Orden) || 0);
-        const nuevoOrden = ordenesDeEsaCategoria.length > 0 ? Math.max.apply(null, ordenesDeEsaCategoria) + 1 : 1;
-
-        // Dejamos CodigoPropio vacío en el appendRow y lo escribimos aparte
-        // ya con formato de texto forzado (para que "007" no se vuelva "7").
-        // FechaCreacion y Orden sí se pueden meter directo: son un número y
-        // una fecha reales, no un código que deba conservar ceros a la
-        // izquierda.
-        sheet.appendRow([
-          nuevoId,
-          body.nombre || '',
-          body.categoria || '',
-          Number(body.precio) || 0,
-          Number(body.stock) || 0,
-          Number(body.stockMinimo) || 0,
-          body.fotoUrl || '',
-          true,
-          body.descripcion || '',
-          body.marca || '',
-          body.talla || '',
-          body.color || '',
-          Number(body.precioCompra) || 0,
-          '',
-          new Date(),
-          nuevoOrden
-        ]);
-
-        const filaNueva = sheet.getLastRow();
-        const headersProductos = sheet.getDataRange().getValues()[0];
-        const colCodigo = headersProductos.indexOf('CodigoPropio') + 1;
-        if (colCodigo > 0) escribirCelda_(sheet, filaNueva, colCodigo, 'CodigoPropio', body.codigoPropio || '');
-
-        return jsonOut_({ ok: true, id: nuevoId });
-      } finally {
-        bloqueoProducto.releaseLock();
-      }
-    }
-
-    if (action === 'actualizarProducto') {
-      if (!isAdminAuthorized_(body)) return jsonOut_({ ok: false, error: 'No autorizado' });
-
-      const sheet = ss.getSheetByName(SHEET_PRODUCTOS);
-      const valores = {};
-      if (body.nombre !== undefined) valores['Nombre'] = body.nombre;
-      if (body.categoria !== undefined) valores['Categoria'] = body.categoria;
-      if (body.marca !== undefined) valores['Marca'] = body.marca;
-      if (body.talla !== undefined) valores['Talla'] = body.talla;
-      if (body.color !== undefined) valores['Color'] = body.color;
-      if (body.precio !== undefined) valores['Precio'] = Number(body.precio) || 0;
-      if (body.precioCompra !== undefined) valores['PrecioCompra'] = Number(body.precioCompra) || 0;
-      if (body.stock !== undefined) valores['Stock'] = Number(body.stock) || 0;
-      if (body.stockMinimo !== undefined) valores['StockMinimo'] = Number(body.stockMinimo) || 0;
-      if (body.fotoUrl !== undefined) valores['FotoURL'] = body.fotoUrl;
-      if (body.descripcion !== undefined) valores['Descripcion'] = body.descripcion;
-      if (body.disponible !== undefined) valores['Disponible'] = body.disponible;
-      if (body.codigoPropio !== undefined) valores['CodigoPropio'] = body.codigoPropio;
-      if (body.orden !== undefined) valores['Orden'] = Number(body.orden) || 0;
-
-      const actualizado = actualizarFilaPorId_(sheet, 'ID', body.productoId, valores);
-      if (!actualizado) return jsonOut_({ ok: false, error: 'Producto no encontrado' });
-
-      return jsonOut_({ ok: true });
-    }
-
-    if (action === 'actualizarOrdenMultiple') {
-      if (!isAdminAuthorized_(body)) return jsonOut_({ ok: false, error: 'No autorizado' });
-
-      // body.cambios = [{ productoId, orden }, ...]. Se usa cuando Claudia
-      // arrastra productos en el Dashboard: en vez de mandar una llamada
-      // por cada producto que se recorrió, se manda UNA sola llamada con
-      // todos los cambios juntos (más rápido y evita que se vea "trabado").
-      const sheet = ss.getSheetByName(SHEET_PRODUCTOS);
-      const values = sheet.getDataRange().getValues();
-      const headers = values[0];
-      const colId = headers.indexOf('ID');
-      const colOrden = headers.indexOf('Orden');
-      if (colOrden === -1) {
-        return jsonOut_({ ok: false, error: 'Falta la columna "Orden" en la hoja de Productos.' });
-      }
-
-      const cambios = Array.isArray(body.cambios) ? body.cambios : [];
-      const mapaCambios = {};
-      cambios.forEach((c) => { mapaCambios[String(c.productoId)] = Number(c.orden) || 0; });
-
-      for (let i = 1; i < values.length; i++) {
-        const id = String(values[i][colId]);
-        if (Object.prototype.hasOwnProperty.call(mapaCambios, id)) {
-          sheet.getRange(i + 1, colOrden + 1).setValue(mapaCambios[id]);
-        }
-      }
-
-      return jsonOut_({ ok: true });
-    }
-
-    if (action === 'renombrarCategoria') {
-      if (!isAdminAuthorized_(body)) return jsonOut_({ ok: false, error: 'No autorizado' });
-
-      const anterior = String(body.categoriaAnterior || '').trim();
-      const nueva = String(body.categoriaNueva || '').trim();
-      if (!nueva) return jsonOut_({ ok: false, error: 'Falta escribir el nuevo nombre de la categoría' });
-
-      const sheet = ss.getSheetByName(SHEET_PRODUCTOS);
-      const values = sheet.getDataRange().getValues();
-      const headers = values[0];
-      const colCategoria = headers.indexOf('Categoria');
-      let contador = 0;
-      for (let i = 1; i < values.length; i++) {
-        // OJO: usamos nombreCategoriaMostrada_ (no una comparación directa)
-        // para que renombrar "Otros" también funcione — los productos de
-        // "Otros" en realidad tienen la celda de Categoria VACÍA, no el
-        // texto "Otros" (eso es solo cómo se les llama al mostrarlos).
-        if (nombreCategoriaMostrada_(values[i][colCategoria]) === anterior) {
-          sheet.getRange(i + 1, colCategoria + 1).setValue(nueva);
-          contador++;
-        }
-      }
-
-      // También renombramos la entrada en las opciones predeterminadas de
-      // categoría (y en la lista de categorías ocultas, si estaba ahí),
-      // para que una categoría vacía (recién creada, sin productos
-      // todavía) también se pueda renombrar sin problema.
-      const hojaOpciones = obtenerHojaOpciones_(ss);
-      const valoresOpciones = hojaOpciones.getDataRange().getValues();
-      const headersOpciones = valoresOpciones[0];
-      const colCampoOp = headersOpciones.indexOf('Campo');
-      const colValorOp = headersOpciones.indexOf('Valor');
-      for (let i = 1; i < valoresOpciones.length; i++) {
-        const campoOp = String(valoresOpciones[i][colCampoOp]);
-        const valorOp = String(valoresOpciones[i][colValorOp]).trim();
-        if ((campoOp === 'categoria' || campoOp === 'categoriaOculta') && valorOp === anterior) {
-          hojaOpciones.getRange(i + 1, colValorOp + 1).setValue(nueva);
-        }
-      }
-
-      return jsonOut_({ ok: true, actualizados: contador });
-    }
-
-    if (action === 'eliminarCategoria') {
-      if (!isAdminAuthorized_(body)) return jsonOut_({ ok: false, error: 'No autorizado' });
-
-      const categoria = String(body.categoria || '').trim();
-      const borrarProductos = !!body.borrarProductos;
-      if (!categoria) return jsonOut_({ ok: false, error: 'Falta indicar qué categoría quitar o borrar' });
-
-      const sheet = ss.getSheetByName(SHEET_PRODUCTOS);
-      const values = sheet.getDataRange().getValues();
-      const headers = values[0];
-      const colCategoria = headers.indexOf('Categoria');
-      let contador = 0;
-
-      if (borrarProductos) {
-        // "Borrar la categoría CON todo y productos": se recorre de abajo
-        // hacia arriba, porque al borrar una fila las de abajo recorren su
-        // número hacia arriba — si fuéramos de arriba hacia abajo nos
-        // saltaríamos filas sin querer (igual que en "eliminarOpcion").
-        for (let i = values.length - 1; i >= 1; i--) {
-          if (nombreCategoriaMostrada_(values[i][colCategoria]) === categoria) {
-            sheet.deleteRow(i + 1);
-            contador++;
-          }
-        }
-      } else {
-        // "Quitar la categoría SIN borrar productos": los productos se
-        // quedan, solo se les vacía la Categoria (se van a "Otros").
-        for (let i = 1; i < values.length; i++) {
-          if (nombreCategoriaMostrada_(values[i][colCategoria]) === categoria) {
-            sheet.getRange(i + 1, colCategoria + 1).setValue('');
-            contador++;
-          }
-        }
-      }
-
-      // En ambos casos, quitamos esa categoría de las opciones
-      // predeterminadas y de la lista de categorías ocultas (si estaba),
-      // para que no se quede una categoría "fantasma" en esas listas.
-      const hojaOpciones = obtenerHojaOpciones_(ss);
-      const valoresOpciones = hojaOpciones.getDataRange().getValues();
-      const headersOpciones = valoresOpciones[0];
-      const colCampoOp = headersOpciones.indexOf('Campo');
-      const colValorOp = headersOpciones.indexOf('Valor');
-      for (let i = valoresOpciones.length - 1; i >= 1; i--) {
-        const campoOp = String(valoresOpciones[i][colCampoOp]);
-        const valorOp = String(valoresOpciones[i][colValorOp]).trim();
-        if ((campoOp === 'categoria' || campoOp === 'categoriaOculta') && valorOp === categoria) {
-          hojaOpciones.deleteRow(i + 1);
-        }
-      }
-
-      return jsonOut_({ ok: true, afectados: contador, productosBorrados: borrarProductos });
-    }
-
-    if (action === 'eliminarProducto') {
-      if (!isAdminAuthorized_(body)) return jsonOut_({ ok: false, error: 'No autorizado' });
-
-      const sheet = ss.getSheetByName(SHEET_PRODUCTOS);
-      const row = findRowIndexById_(sheet, 'ID', body.productoId);
-      if (row === -1) return jsonOut_({ ok: false, error: 'Producto no encontrado' });
-
-      sheet.deleteRow(row);
-      return jsonOut_({ ok: true });
-    }
-
-    if (action === 'agregarOpcion') {
-      if (!isAdminAuthorized_(body)) return jsonOut_({ ok: false, error: 'No autorizado' });
-      const campo = String(body.campo || '').trim();
-      const valor = String(body.valor || '').trim();
-      if (!campo || !valor) return jsonOut_({ ok: false, error: 'Falta el campo o el valor' });
-
-      const sheet = obtenerHojaOpciones_(ss);
-      const filas = sheetToObjects_(sheet);
-      // No se agrega si ya existe (comparando sin importar mayúsculas/minúsculas),
-      // para no llenar la lista con el mismo valor repetido.
-      const yaExiste = filas.some(
-        (f) => String(f.Campo) === campo && String(f.Valor).trim().toLowerCase() === valor.toLowerCase()
-      );
-      if (!yaExiste) sheet.appendRow([campo, valor]);
-      return jsonOut_({ ok: true });
-    }
-
-    if (action === 'eliminarOpcion') {
-      if (!isAdminAuthorized_(body)) return jsonOut_({ ok: false, error: 'No autorizado' });
-      const campo = String(body.campo || '').trim();
-      const valor = String(body.valor || '').trim();
-
-      const sheet = obtenerHojaOpciones_(ss);
-      const values = sheet.getDataRange().getValues();
-      const headers = values[0];
-      const colCampo = headers.indexOf('Campo');
-      const colValor = headers.indexOf('Valor');
-      // Se recorre de abajo hacia arriba: al borrar una fila, las de abajo
-      // recorren su número hacia arriba, y si fuéramos de arriba hacia abajo
-      // nos saltaríamos filas sin querer.
-      for (let i = values.length - 1; i >= 1; i--) {
-        if (String(values[i][colCampo]) === campo && String(values[i][colValor]) === valor) {
-          sheet.deleteRow(i + 1);
-        }
-      }
-      return jsonOut_({ ok: true });
-    }
-
-    if (action === 'subirFoto') {
-      if (!isAdminAuthorized_(body)) return jsonOut_({ ok: false, error: 'No autorizado' });
-      if (!body.datosBase64) return jsonOut_({ ok: false, error: 'Falta la imagen' });
-
-      const carpeta = getCarpetaFotos_();
-      const datos = Utilities.base64Decode(body.datosBase64);
-      const blob = Utilities.newBlob(datos, body.tipoMime || 'image/jpeg', body.nombreArchivo || 'foto.jpg');
-      const archivo = carpeta.createFile(blob);
-      archivo.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-
-      // OJO: NO usar "drive.google.com/uc?export=view" — Google lo ha ido
-      // restringiendo y muchas veces no se muestra como imagen en sitios
-      // externos. Este formato de "thumbnail" es el que sí funciona de
-      // forma confiable para insertarse como <img> en otra página.
-      const url = 'https://drive.google.com/thumbnail?id=' + archivo.getId() + '&sz=w1000';
-      return jsonOut_({ ok: true, url: url });
-    }
-
-    return jsonOut_({ ok: false, error: 'Acción no reconocida' });
-  } catch (err) {
-    return jsonOut_({ ok: false, error: String(err) });
-  }
+function formDesdeProducto(producto) {
+  return {
+    nombre: producto.Nombre || '',
+    categoria: producto.Categoria || '',
+    marca: producto.Marca || '',
+    talla: producto.Talla || '',
+    color: producto.Color || '',
+    precio: producto.Precio ?? '',
+    precioCompra: producto.PrecioCompra ?? '',
+    stock: producto.Stock ?? '',
+    stockMinimo: producto.StockMinimo ?? '',
+    descripcion: producto.Descripcion || '',
+    codigoPropio: textoSeguro(producto.CodigoPropio),
+  };
 }
 
-/**
- * Función de utilidad: ejecútala UNA VEZ manualmente desde el editor de
- * Apps Script para crear las hojas y encabezados automáticamente si tu
- * Sheet está vacío.
- */
-function inicializarHojas() {
-  const ss = getSpreadsheet_();
+function fotosDesdeProducto(producto) {
+  return String(producto?.FotoURL || '')
+    .split('|')
+    .map((u) => u.trim())
+    .filter(Boolean);
+}
 
-  let productos = ss.getSheetByName(SHEET_PRODUCTOS);
-  if (!productos) productos = ss.insertSheet(SHEET_PRODUCTOS);
-  productos.clear();
-  productos.appendRow(['ID', 'Nombre', 'Categoria', 'Precio', 'Stock', 'StockMinimo', 'FotoURL', 'Disponible', 'Descripcion', 'Marca', 'Talla', 'Color', 'PrecioCompra', 'CodigoPropio', 'FechaCreacion', 'Orden']);
-  productos.setFrozenRows(1);
+// Los 6 campos del formulario que tienen "opciones predeterminadas"
+// administrables (Claudia las agrega/edita/quita a mano desde el botón ⚙️
+// de cada uno). La llave (`campo`) es la que se usa para guardarlas en la
+// hoja "Opciones" del Sheet.
+const CAMPOS_CON_OPCIONES = [
+  { campo: 'nombre', etiqueta: 'Nombre' },
+  { campo: 'codigoPropio', etiqueta: 'Código propio' },
+  { campo: 'categoria', etiqueta: 'Categoría' },
+  { campo: 'marca', etiqueta: 'Marca' },
+  { campo: 'talla', etiqueta: 'Talla / Medida' },
+  { campo: 'color', etiqueta: 'Color' },
+];
 
-  let pedidos = ss.getSheetByName(SHEET_PEDIDOS);
-  if (!pedidos) pedidos = ss.insertSheet(SHEET_PEDIDOS);
-  pedidos.clear();
-  pedidos.appendRow(['ID', 'Fecha', 'Cliente', 'Telefono', 'Producto', 'ProductoID', 'Cantidad', 'Estado', 'Notas']);
-  pedidos.setFrozenRows(1);
+// Sirve tanto para dar de alta un producto nuevo como para editar uno que
+// ya existe: si le pasas `productoExistente`, precarga sus datos y guarda
+// con "actualizarProducto" en vez de "crearProducto".
+function ProductoForm({ adminKey, opciones = {}, productoExistente, onGuardado, onOpcionesActualizadas, onCancelar }) {
+  const esEdicion = !!productoExistente;
+  const [form, setForm] = useState(() => (esEdicion ? formDesdeProducto(productoExistente) : FORM_INICIAL));
+  const [fotos, setFotos] = useState(() => (esEdicion ? fotosDesdeProducto(productoExistente) : []));
+  const [enviando, setEnviando] = useState(false);
+  const [mensaje, setMensaje] = useState('');
 
-  // La hoja de Opciones NO se limpia aquí a propósito: si ya tenías
-  // opciones predeterminadas guardadas, no queremos borrarlas sin querer
-  // cada vez que alguien ejecute esta función a mano.
-  obtenerHojaOpciones_(ss);
+  // ---- Ventana de "Administrar opciones predeterminadas" ----
+  // Es UNA sola ventana compartida por los 6 campos: el botón ⚙️ de cada
+  // campo la abre ya elegido en ese campo (`campoGestion`). Las opciones
+  // NUNCA se llenan solas: solo tienen lo que se agrega aquí a propósito.
+  const [gestorAbierto, setGestorAbierto] = useState(false);
+  const [campoGestion, setCampoGestion] = useState('categoria');
+  const [valorOpcion, setValorOpcion] = useState('');
+  const [editandoValorOriginal, setEditandoValorOriginal] = useState(null);
+  const [guardandoOpcion, setGuardandoOpcion] = useState(false);
 
-  Logger.log('Hojas creadas correctamente.');
+  function abrirGestor(campo) {
+    setCampoGestion(campo);
+    setValorOpcion('');
+    setEditandoValorOriginal(null);
+    setGestorAbierto(true);
+  }
+
+  function cerrarGestor() {
+    setGestorAbierto(false);
+    setValorOpcion('');
+    setEditandoValorOriginal(null);
+  }
+
+  function handleEmpezarEditarOpcion(valor) {
+    setEditandoValorOriginal(valor);
+    setValorOpcion(valor);
+  }
+
+  // Agrega la opción nueva o, si se estaba editando una ya existente,
+  // primero quita la vieja y luego agrega la nueva (así "renombramos" un
+  // valor sin necesitar un botón especial de "editar" en el backend).
+  function handleGuardarOpcion() {
+    const valor = valorOpcion.trim();
+    if (!valor) return;
+    setGuardandoOpcion(true);
+    const promesa =
+      editandoValorOriginal && editandoValorOriginal !== valor
+        ? eliminarOpcion({ adminKey, campo: campoGestion, valor: editandoValorOriginal }).then(() =>
+            agregarOpcion({ adminKey, campo: campoGestion, valor })
+          )
+        : agregarOpcion({ adminKey, campo: campoGestion, valor });
+
+    promesa
+      .then(() => {
+        setValorOpcion('');
+        setEditandoValorOriginal(null);
+        onOpcionesActualizadas?.();
+      })
+      .catch((err) => setMensaje(`Error al guardar la opción: ${err.message}`))
+      .finally(() => setGuardandoOpcion(false));
+  }
+
+  function handleEliminarOpcion(valor) {
+    const confirmar = window.confirm(`¿Quitar "${valor}" de las opciones predeterminadas?`);
+    if (!confirmar) return;
+    eliminarOpcion({ adminKey, campo: campoGestion, valor })
+      .then(() => onOpcionesActualizadas?.())
+      .catch((err) => setMensaje(`Error al quitar la opción: ${err.message}`));
+  }
+
+  function handleChange(campo) {
+    return (e) => setForm((f) => ({ ...f, [campo]: e.target.value }));
+  }
+
+  // Para campos numéricos (precio, stock, etc.): igual que handleChange,
+  // pero corta el texto a una cantidad máxima de dígitos para que no se
+  // puedan escribir números absurdamente grandes. Sigue usando <input
+  // type="number"> para no perder las flechitas de subir/bajar.
+  function handleChangeNumero(campo, maxDigitos) {
+    return (e) => setForm((f) => ({ ...f, [campo]: limitarDigitos(e.target.value, maxDigitos) }));
+  }
+
+  function handleSubmit(e) {
+    e.preventDefault();
+    if (!form.nombre.trim() || !form.precio) {
+      setMensaje('Error: el nombre y el precio de venta son obligatorios.');
+      return;
+    }
+    setEnviando(true);
+    setMensaje('');
+
+    const datos = { adminKey, ...form, fotoUrl: fotos.join('|') };
+    const promesa = esEdicion
+      ? actualizarProducto({ ...datos, productoId: productoExistente.ID })
+      : crearProducto(datos);
+
+    promesa
+      .then(() => {
+        if (!esEdicion) {
+          setForm(FORM_INICIAL);
+          setFotos([]);
+        }
+        setMensaje(esEdicion ? 'Cambios guardados ✅' : 'Producto agregado correctamente ✅');
+        onGuardado();
+      })
+      .catch((err) => setMensaje(`Error: ${err.message}`))
+      .finally(() => setEnviando(false));
+  }
+
+  return (
+    <form className="new-product-form" onSubmit={handleSubmit}>
+      {/* En cada uno de estos campos puedes escribir libremente lo que
+          quieras, O darle clic a la flechita del cuadro para elegir una de
+          tus opciones predeterminadas. Dale clic al ⚙️ de cada campo para
+          agregar, editar o quitar esas opciones — la lista NUNCA se llena
+          sola, solo tiene lo que agregues ahí a propósito. */}
+      <div className="form-grid">
+        <label>
+          <span className="form-label-fila">
+            Nombre*
+            <button type="button" className="gestor-opciones-btn" onClick={() => abrirGestor('nombre')} title="Administrar opciones predeterminadas de Nombre">
+              ⚙️
+            </button>
+          </span>
+          <input value={form.nombre} onChange={handleChange('nombre')} required list="lista-nombre" />
+          <datalist id="lista-nombre">
+            {(opciones.nombre || []).map((v) => (
+              <option key={v} value={v} />
+            ))}
+          </datalist>
+        </label>
+        <label>
+          <span className="form-label-fila">
+            Código propio
+            <button type="button" className="gestor-opciones-btn" onClick={() => abrirGestor('codigoPropio')} title="Administrar opciones predeterminadas de Código propio">
+              ⚙️
+            </button>
+          </span>
+          <input
+            value={form.codigoPropio}
+            onChange={handleChange('codigoPropio')}
+            placeholder="Ej. PLY-001"
+            list="lista-codigoPropio"
+          />
+          <datalist id="lista-codigoPropio">
+            {(opciones.codigoPropio || []).map((v) => (
+              <option key={v} value={v} />
+            ))}
+          </datalist>
+        </label>
+        <label>
+          <span className="form-label-fila">
+            Categoría
+            <button type="button" className="gestor-opciones-btn" onClick={() => abrirGestor('categoria')} title="Administrar opciones predeterminadas de Categoría">
+              ⚙️
+            </button>
+          </span>
+          <input value={form.categoria} onChange={handleChange('categoria')} list="lista-categoria" />
+          <datalist id="lista-categoria">
+            {(opciones.categoria || []).map((v) => (
+              <option key={v} value={v} />
+            ))}
+          </datalist>
+        </label>
+        <label>
+          <span className="form-label-fila">
+            Marca
+            <button type="button" className="gestor-opciones-btn" onClick={() => abrirGestor('marca')} title="Administrar opciones predeterminadas de Marca">
+              ⚙️
+            </button>
+          </span>
+          <input value={form.marca} onChange={handleChange('marca')} list="lista-marca" />
+          <datalist id="lista-marca">
+            {(opciones.marca || []).map((v) => (
+              <option key={v} value={v} />
+            ))}
+          </datalist>
+        </label>
+        <label>
+          <span className="form-label-fila">
+            Talla / Medida
+            <button type="button" className="gestor-opciones-btn" onClick={() => abrirGestor('talla')} title="Administrar opciones predeterminadas de Talla / Medida">
+              ⚙️
+            </button>
+          </span>
+          <input value={form.talla} onChange={handleChange('talla')} list="lista-talla" />
+          <datalist id="lista-talla">
+            {(opciones.talla || []).map((v) => (
+              <option key={v} value={v} />
+            ))}
+          </datalist>
+        </label>
+        <label>
+          <span className="form-label-fila">
+            Color
+            <button type="button" className="gestor-opciones-btn" onClick={() => abrirGestor('color')} title="Administrar opciones predeterminadas de Color">
+              ⚙️
+            </button>
+          </span>
+          <input value={form.color} onChange={handleChange('color')} list="lista-color" />
+          <datalist id="lista-color">
+            {(opciones.color || []).map((v) => (
+              <option key={v} value={v} />
+            ))}
+          </datalist>
+        </label>
+        <label>
+          Precio de venta*
+          <input
+            type="number"
+            min="0"
+            value={form.precio}
+            onChange={handleChangeNumero('precio', MAX_DIGITOS_PRECIO)}
+            required
+          />
+        </label>
+        <label>
+          Precio de compra
+          <input
+            type="number"
+            min="0"
+            value={form.precioCompra}
+            onChange={handleChangeNumero('precioCompra', MAX_DIGITOS_PRECIO)}
+          />
+        </label>
+        <label>
+          Stock {esEdicion ? '' : 'inicial'}
+          <input
+            type="number"
+            min="0"
+            value={form.stock}
+            onChange={handleChangeNumero('stock', MAX_DIGITOS_STOCK)}
+          />
+        </label>
+        <label>
+          Stock mínimo
+          <input
+            type="number"
+            min="0"
+            value={form.stockMinimo}
+            onChange={handleChangeNumero('stockMinimo', MAX_DIGITOS_STOCK)}
+          />
+        </label>
+        <label className="form-grid-wide">
+          Descripción
+          <input value={form.descripcion} onChange={handleChange('descripcion')} />
+        </label>
+      </div>
+
+      <div className="form-field-fotos">
+        <label>Fotos del producto</label>
+        <ImageUploader adminKey={adminKey} value={fotos} onChange={setFotos} />
+      </div>
+
+      {mensaje && (
+        <p className={`info-msg ${mensaje.startsWith('Error') ? 'error' : ''}`}>{mensaje}</p>
+      )}
+
+      <div className="form-actions">
+        <button type="submit" className="btn btn-primary" disabled={enviando}>
+          {enviando ? 'Guardando…' : esEdicion ? 'Guardar cambios' : 'Agregar producto'}
+        </button>
+        {esEdicion && (
+          <button type="button" className="btn btn-secondary" onClick={onCancelar}>
+            Cancelar
+          </button>
+        )}
+      </div>
+
+      {gestorAbierto && (
+        <div className="modal-overlay" onClick={cerrarGestor}>
+          <div className="modal-box" onClick={(e) => e.stopPropagation()}>
+            <h3>Opciones predeterminadas</h3>
+            <p className="muted">
+              Estas son TUS opciones para este campo — no se llenan solas, solo
+              aparecen aquí las que tú agregas. Puedes cambiar de campo con el
+              siguiente menú.
+            </p>
+
+            <label className="modal-field">
+              Campo
+              <select
+                value={campoGestion}
+                onChange={(e) => {
+                  setCampoGestion(e.target.value);
+                  setValorOpcion('');
+                  setEditandoValorOriginal(null);
+                }}
+              >
+                {CAMPOS_CON_OPCIONES.map((c) => (
+                  <option key={c.campo} value={c.campo}>
+                    {c.etiqueta}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <div className="opciones-lista">
+              {(opciones[campoGestion] || []).length === 0 && (
+                <p className="muted">Todavía no hay opciones guardadas para este campo.</p>
+              )}
+              {(opciones[campoGestion] || []).map((valor) => (
+                <div key={valor} className="opciones-item">
+                  <span>{valor}</span>
+                  <div className="opciones-item-botones">
+                    <button
+                      type="button"
+                      className="opciones-item-btn"
+                      onClick={() => handleEmpezarEditarOpcion(valor)}
+                      title="Editar"
+                    >
+                      ✏️
+                    </button>
+                    <button
+                      type="button"
+                      className="opciones-item-btn"
+                      onClick={() => handleEliminarOpcion(valor)}
+                      title="Quitar"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <label className="modal-field">
+              {editandoValorOriginal ? `Editando "${editandoValorOriginal}"` : 'Agregar una opción nueva'}
+              <input
+                value={valorOpcion}
+                onChange={(e) => setValorOpcion(e.target.value)}
+                placeholder="Escribe el valor"
+              />
+            </label>
+
+            <div className="form-actions">
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={guardandoOpcion || !valorOpcion.trim()}
+                onClick={handleGuardarOpcion}
+              >
+                {editandoValorOriginal ? 'Guardar cambio' : 'Agregar'}
+              </button>
+              {editandoValorOriginal && (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    setEditandoValorOriginal(null);
+                    setValorOpcion('');
+                  }}
+                >
+                  Cancelar edición
+                </button>
+              )}
+              <button type="button" className="btn btn-secondary" onClick={cerrarGestor}>
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </form>
+  );
+}
+
+// Agrupa productos por categoría para la pestaña de "Orden del catálogo",
+// mostrando primero los más nuevos (igual que hace el catálogo público).
+// Los productos sin categoría se juntan bajo "Otros", igual que en el
+// catálogo. También arma una cajita VACÍA por cada categoría que Claudia
+// haya agregado a propósito (o que ya existiera como opción predeterminada)
+// pero que todavía no tenga ningún producto, para poder renombrarla,
+// ocultarla o borrarla igual que las demás.
+function agruparParaOrden(productos, categoriasPredeterminadas, categoriasOcultas) {
+  const masNuevosPrimero = productos.slice().reverse();
+  const grupos = [];
+  const indicePorCategoria = {};
+
+  function asegurarGrupo(nombreCategoria) {
+    if (!nombreCategoria) return null;
+    if (!(nombreCategoria in indicePorCategoria)) {
+      indicePorCategoria[nombreCategoria] = grupos.length;
+      grupos.push({
+        nombre: nombreCategoria,
+        productos: [],
+        oculta: (categoriasOcultas || []).indexOf(nombreCategoria) !== -1,
+      });
+    }
+    return grupos[indicePorCategoria[nombreCategoria]];
+  }
+
+  masNuevosPrimero.forEach((p) => {
+    const nombreCategoria = String(p.Categoria || '').trim() || 'Otros';
+    asegurarGrupo(nombreCategoria).productos.push(p);
+  });
+
+  (categoriasPredeterminadas || []).forEach((nombreCategoria) => {
+    asegurarGrupo(String(nombreCategoria || '').trim());
+  });
+
+  grupos.forEach((g) => {
+    g.productos.sort((a, b) => (Number(a.Orden) || 0) - (Number(b.Orden) || 0));
+  });
+  return grupos;
+}
+
+// Pestaña para acomodar en qué orden se ven los productos en el catálogo
+// público, dentro de su propia categoría (con botones ▲ / ▼, más sencillos
+// de usar con precisión que arrastrar); para renombrar una categoría
+// completa de un jalón; para ocultarla/mostrarla del catálogo sin tocar sus
+// productos; para agregar una categoría nueva vacía; y para quitar o borrar
+// una categoría completa (con o sin sus productos).
+function OrdenTab({ productos, opciones, adminKey, onCambio }) {
+  const categoriasPredeterminadas = opciones.categoria || [];
+  const categoriasOcultas = opciones.categoriaOculta || [];
+
+  const [gruposLocal, setGruposLocal] = useState(() =>
+    agruparParaOrden(productos, categoriasPredeterminadas, categoriasOcultas)
+  );
+  const [guardando, setGuardando] = useState(false);
+  const [mensaje, setMensaje] = useState('');
+
+  const [renombrando, setRenombrando] = useState(null); // nombre de categoría actual, o null
+  const [nombreNuevo, setNombreNuevo] = useState('');
+  const [guardandoNombre, setGuardandoNombre] = useState(false);
+
+  const [agregandoCategoria, setAgregandoCategoria] = useState(false);
+  const [nombreCategoriaNueva, setNombreCategoriaNueva] = useState('');
+  const [guardandoCategoriaNueva, setGuardandoCategoriaNueva] = useState(false);
+
+  // Nombre de la categoría que se está ocultando/mostrando en este momento
+  // (mientras se guarda), para poder deshabilitar solo ESE botón y no
+  // todos, si Claudia le da clic a varias categorías seguidas.
+  const [ocultandoCategoria, setOcultandoCategoria] = useState('');
+
+  const [eliminando, setEliminando] = useState(null); // { nombre, cantidad } o null
+  const [borrarProductosTambien, setBorrarProductosTambien] = useState(false);
+  const [confirmoBorrarProductos, setConfirmoBorrarProductos] = useState(false);
+  const [guardandoEliminar, setGuardandoEliminar] = useState(false);
+
+  // Si los productos o las opciones (categorías nuevas, renombradas,
+  // ocultas) cambian desde fuera, se vuelve a acomodar la lista con los
+  // datos más recientes.
+  useEffect(() => {
+    setGruposLocal(agruparParaOrden(productos, categoriasPredeterminadas, categoriasOcultas));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productos, opciones]);
+
+  // Sube (dirección -1) o baja (dirección +1) un producto UN lugar dentro
+  // de su categoría. Mucho más preciso que arrastrar: cada clic mueve
+  // exactamente un lugar, sin riesgo de soltarlo en la fila equivocada.
+  function moverProducto(nombreCategoria, indice, direccion) {
+    setGruposLocal((prev) => {
+      const nuevos = prev.map((g) => ({ ...g, productos: g.productos.slice() }));
+      const grupo = nuevos.find((g) => g.nombre === nombreCategoria);
+      if (!grupo) return prev;
+
+      const destino = indice + direccion;
+      if (destino < 0 || destino >= grupo.productos.length) return prev;
+
+      const [movido] = grupo.productos.splice(indice, 1);
+      grupo.productos.splice(destino, 0, movido);
+
+      guardarOrdenDeCategoria(grupo);
+      return nuevos;
+    });
+  }
+
+  // Renumera 1, 2, 3... toda la categoría según cómo haya quedado
+  // acomodada, y manda todos esos números juntos en una sola llamada.
+  function guardarOrdenDeCategoria(grupo) {
+    const cambios = grupo.productos.map((p, i) => ({ productoId: p.ID, orden: i + 1 }));
+    setGuardando(true);
+    setMensaje('');
+    actualizarOrdenMultiple({ adminKey, cambios })
+      .then(() => onCambio())
+      .catch((err) => setMensaje(`Error al guardar el orden: ${err.message}`))
+      .finally(() => setGuardando(false));
+  }
+
+  function abrirRenombrar(nombreActual) {
+    setRenombrando(nombreActual);
+    setNombreNuevo(nombreActual === 'Otros' ? '' : nombreActual);
+  }
+
+  function confirmarRenombrar() {
+    const nuevo = nombreNuevo.trim();
+    if (!nuevo || !renombrando) return;
+    setGuardandoNombre(true);
+    renombrarCategoria({ adminKey, categoriaAnterior: renombrando, categoriaNueva: nuevo })
+      .then(() => {
+        setRenombrando(null);
+        onCambio();
+      })
+      .catch((err) => setMensaje(`Error al renombrar la categoría: ${err.message}`))
+      .finally(() => setGuardandoNombre(false));
+  }
+
+  function abrirAgregarCategoria() {
+    setNombreCategoriaNueva('');
+    setAgregandoCategoria(true);
+  }
+
+  function confirmarAgregarCategoria() {
+    const nombre = nombreCategoriaNueva.trim();
+    if (!nombre) return;
+    setGuardandoCategoriaNueva(true);
+    agregarOpcion({ adminKey, campo: 'categoria', valor: nombre })
+      .then(() => {
+        setAgregandoCategoria(false);
+        onCambio();
+      })
+      .catch((err) => setMensaje(`Error al agregar la categoría: ${err.message}`))
+      .finally(() => setGuardandoCategoriaNueva(false));
+  }
+
+  // Ocultar/mostrar es reversible y NO toca los productos ni su categoría:
+  // solo agrega o quita el nombre de la categoría de una listita aparte
+  // ("categoriaOculta"), que el catálogo público revisa antes de mostrar
+  // cada producto.
+  function toggleOcultarCategoria(grupo) {
+    setOcultandoCategoria(grupo.nombre);
+    setMensaje('');
+    const promesa = grupo.oculta
+      ? eliminarOpcion({ adminKey, campo: 'categoriaOculta', valor: grupo.nombre })
+      : agregarOpcion({ adminKey, campo: 'categoriaOculta', valor: grupo.nombre });
+    promesa
+      .then(() => onCambio())
+      .catch((err) =>
+        setMensaje(`Error al ${grupo.oculta ? 'volver a mostrar' : 'ocultar'} la categoría: ${err.message}`)
+      )
+      .finally(() => setOcultandoCategoria(''));
+  }
+
+  function abrirEliminar(grupo) {
+    setEliminando({ nombre: grupo.nombre, cantidad: grupo.productos.length });
+    setBorrarProductosTambien(false);
+    setConfirmoBorrarProductos(false);
+  }
+
+  function confirmarEliminar() {
+    if (!eliminando) return;
+    if (borrarProductosTambien && !confirmoBorrarProductos) return;
+    setGuardandoEliminar(true);
+    eliminarCategoria({ adminKey, categoria: eliminando.nombre, borrarProductos: borrarProductosTambien })
+      .then(() => {
+        setEliminando(null);
+        onCambio();
+      })
+      .catch((err) => setMensaje(`Error al quitar/borrar la categoría: ${err.message}`))
+      .finally(() => setGuardandoEliminar(false));
+  }
+
+  return (
+    <div className="orden-catalogo">
+      <p className="muted">
+        Usa las flechitas ▲ y ▼ para subir o bajar un producto, un lugar a la vez, dentro de su
+        categoría — así controlas el orden en que se ven en el catálogo público. El cambio se
+        guarda solo, no hace falta darle a ningún botón de "Guardar".
+      </p>
+
+      <div className="orden-barra-superior">
+        <button type="button" className="btn btn-secondary" onClick={abrirAgregarCategoria}>
+          + Agregar categoría
+        </button>
+      </div>
+
+      {guardando && <p className="info-msg">Guardando orden…</p>}
+      {mensaje && <p className="info-msg error">{mensaje}</p>}
+
+      {gruposLocal.map((grupo) => (
+        <section key={grupo.nombre} className={`orden-categoria-box ${grupo.oculta ? 'categoria-oculta' : ''}`}>
+          <div className="orden-categoria-header">
+            <h3>
+              {grupo.nombre}
+              {grupo.oculta && <span className="badge badge-oculto">Oculta del catálogo</span>}
+            </h3>
+            <div className="orden-categoria-botones">
+              <button
+                type="button"
+                className="btn btn-secondary btn-small"
+                onClick={() => abrirRenombrar(grupo.nombre)}
+              >
+                ✏️ Renombrar
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-small"
+                onClick={() => toggleOcultarCategoria(grupo)}
+                disabled={ocultandoCategoria === grupo.nombre}
+              >
+                {grupo.oculta ? '👁️ Mostrar' : '🙈 Ocultar'}
+              </button>
+              <button
+                type="button"
+                className="btn btn-eliminar btn-small"
+                onClick={() => abrirEliminar(grupo)}
+              >
+                🗑️ Eliminar
+              </button>
+            </div>
+          </div>
+
+          {grupo.productos.length === 0 ? (
+            <p className="muted">Todavía no hay productos en esta categoría.</p>
+          ) : (
+            <ul className="orden-lista">
+              {grupo.productos.map((p, i) => (
+                <li key={p.ID} className="orden-fila">
+                  <div className="orden-botones-mover">
+                    <button
+                      type="button"
+                      className="orden-mover-btn"
+                      onClick={() => moverProducto(grupo.nombre, i, -1)}
+                      disabled={i === 0}
+                      title="Subir un lugar"
+                      aria-label="Subir un lugar"
+                    >
+                      ▲
+                    </button>
+                    <button
+                      type="button"
+                      className="orden-mover-btn"
+                      onClick={() => moverProducto(grupo.nombre, i, 1)}
+                      disabled={i === grupo.productos.length - 1}
+                      title="Bajar un lugar"
+                      aria-label="Bajar un lugar"
+                    >
+                      ▼
+                    </button>
+                  </div>
+                  {primeraFoto(p.FotoURL) ? (
+                    <img src={primeraFoto(p.FotoURL)} alt={p.Nombre} className="orden-thumb" />
+                  ) : (
+                    <div className="orden-thumb orden-thumb-vacia">Sin foto</div>
+                  )}
+                  <span className="orden-nombre">{p.Nombre}</span>
+                  {!esProductoVisible(p) && <span className="badge badge-oculto">Oculto</span>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      ))}
+
+      {renombrando && (
+        <div className="modal-overlay" onClick={() => setRenombrando(null)}>
+          <div className="modal-box" onClick={(e) => e.stopPropagation()}>
+            <h3>Renombrar categoría</h3>
+            <p className="muted">
+              Esto cambia el nombre de la categoría en TODOS los productos que la tengan
+              (actualmente "{renombrando}"), de un jalón.
+            </p>
+            <label className="modal-field">
+              Nuevo nombre
+              <input value={nombreNuevo} onChange={(e) => setNombreNuevo(e.target.value)} autoFocus />
+            </label>
+            <div className="modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setRenombrando(null)}>
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={guardandoNombre || !nombreNuevo.trim()}
+                onClick={confirmarRenombrar}
+              >
+                {guardandoNombre ? 'Guardando…' : 'Guardar nuevo nombre'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {agregandoCategoria && (
+        <div className="modal-overlay" onClick={() => setAgregandoCategoria(false)}>
+          <div className="modal-box" onClick={(e) => e.stopPropagation()}>
+            <h3>Agregar categoría nueva</h3>
+            <p className="muted">
+              Se crea una cajita vacía con este nombre. Para meterle productos, agrégalos o
+              edítalos y escribe este mismo nombre en el campo "Categoría".
+            </p>
+            <label className="modal-field">
+              Nombre de la categoría
+              <input
+                value={nombreCategoriaNueva}
+                onChange={(e) => setNombreCategoriaNueva(e.target.value)}
+                placeholder="Ej. Zapatos"
+                autoFocus
+              />
+            </label>
+            <div className="modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setAgregandoCategoria(false)}>
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={guardandoCategoriaNueva || !nombreCategoriaNueva.trim()}
+                onClick={confirmarAgregarCategoria}
+              >
+                {guardandoCategoriaNueva ? 'Agregando…' : 'Agregar categoría'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {eliminando && (
+        <div className="modal-overlay" onClick={() => setEliminando(null)}>
+          <div className="modal-box" onClick={(e) => e.stopPropagation()}>
+            <h3>Eliminar categoría "{eliminando.nombre}"</h3>
+            <p className="muted">
+              Esta categoría tiene {eliminando.cantidad} producto{eliminando.cantidad === 1 ? '' : 's'}.
+              Elige qué quieres hacer:
+            </p>
+
+            <label className="modal-opcion-radio">
+              <input
+                type="radio"
+                name="modoEliminarCategoria"
+                checked={!borrarProductosTambien}
+                onChange={() => {
+                  setBorrarProductosTambien(false);
+                  setConfirmoBorrarProductos(false);
+                }}
+              />
+              Solo quitar la categoría — sus {eliminando.cantidad} producto
+              {eliminando.cantidad === 1 ? '' : 's'} se conservan, se van a "Otros".
+            </label>
+
+            <label className="modal-opcion-radio">
+              <input
+                type="radio"
+                name="modoEliminarCategoria"
+                checked={borrarProductosTambien}
+                onChange={() => setBorrarProductosTambien(true)}
+              />
+              Borrar la categoría Y sus {eliminando.cantidad} producto{eliminando.cantidad === 1 ? '' : 's'}{' '}
+              para siempre.
+            </label>
+
+            {borrarProductosTambien && (
+              <div className="aviso-peligro">
+                ⚠️ Esto NO se puede deshacer desde la app: se van a borrar {eliminando.cantidad}{' '}
+                producto{eliminando.cantidad === 1 ? '' : 's'} de tu inventario para siempre.
+                <label className="modal-opcion-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={confirmoBorrarProductos}
+                    onChange={(e) => setConfirmoBorrarProductos(e.target.checked)}
+                  />
+                  Sí, entiendo, quiero borrar también los productos.
+                </label>
+              </div>
+            )}
+
+            <div className="modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setEliminando(null)}>
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn btn-eliminar"
+                disabled={guardandoEliminar || (borrarProductosTambien && !confirmoBorrarProductos)}
+                onClick={confirmarEliminar}
+              >
+                {guardandoEliminar
+                  ? 'Aplicando…'
+                  : borrarProductosTambien
+                    ? 'Borrar categoría y productos'
+                    : 'Quitar categoría'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StockRow({ producto, onActualizar, onDirtyChange, onEditar, onCambiarDisponibilidad, onEliminar, onVerFoto }) {
+  const [valor, setValor] = useState(producto.Stock);
+  const stockConocido = useRef(producto.Stock);
+  const sinGuardar = Number(valor) !== Number(producto.Stock);
+  const llave = `stock:${producto.ID}`;
+  const visible = esProductoVisible(producto);
+  const foto = primeraFoto(producto.FotoURL);
+
+  // Si el Stock del producto cambió por FUERA de este cuadrito (por ejemplo,
+  // lo editaste desde el formulario de "Editar" y se guardó ahí), sincroniza
+  // el cuadro de "Actualizar stock" con el valor nuevo. Sin esto, el cuadro
+  // se quedaba pegado con el número viejo y marcaba un falso "cambio sin
+  // guardar" aunque ya lo hubieras guardado desde Editar.
+  useEffect(() => {
+    if (producto.Stock !== stockConocido.current) {
+      stockConocido.current = producto.Stock;
+      setValor(producto.Stock);
+    }
+  }, [producto.Stock]);
+
+  // Avisa al Dashboard si esta fila tiene un cambio pendiente de guardar,
+  // y con qué texto describirlo en el aviso flotante.
+  useEffect(() => {
+    const descripcion = sinGuardar
+      ? `Stock de "${producto.Nombre}": ${producto.Stock} → ${valor || 0}`
+      : '';
+    onDirtyChange(llave, sinGuardar, descripcion);
+    return () => onDirtyChange(llave, false, '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sinGuardar, llave, valor]);
+
+  const clasesFila = [!visible && 'fila-oculta', sinGuardar && 'fila-sin-guardar'].filter(Boolean).join(' ');
+
+  return (
+    <tr className={clasesFila}>
+      <td>{formatearFechaSolo(producto.FechaCreacion)}</td>
+      <td>{formatearHoraSolo(producto.FechaCreacion)}</td>
+      <td>
+        <div className="stock-nombre-con-foto">
+          {foto ? (
+            <img
+              src={foto}
+              alt={producto.Nombre}
+              className="stock-thumb"
+              onClick={() => onVerFoto(foto)}
+            />
+          ) : (
+            <div className="stock-thumb stock-thumb-vacia">Sin foto</div>
+          )}
+          <span>
+            {producto.Nombre}
+            {!visible && <span className="badge badge-oculto">Oculto</span>}
+          </span>
+        </div>
+      </td>
+      <td>{producto.CodigoPropio || '—'}</td>
+      <td>${Number(producto.Precio).toLocaleString('es-MX')}</td>
+      <td>{producto.Stock}</td>
+      <td>{producto.StockMinimo}</td>
+      <td>
+        <div className="stock-editor">
+          <input
+            type="number"
+            min="0"
+            className={sinGuardar ? 'campo-modificado' : ''}
+            value={valor}
+            onChange={(e) => setValor(limitarDigitos(e.target.value, MAX_DIGITOS_STOCK))}
+          />
+          <button
+            className="btn btn-small"
+            onClick={() => onActualizar(producto.ID, valor)}
+            disabled={!sinGuardar}
+          >
+            Guardar
+          </button>
+        </div>
+      </td>
+      <td className="celda-acciones">
+        <div className="acciones-producto">
+          <button type="button" className="btn btn-editar btn-chip" onClick={() => onEditar(producto)}>
+            Editar
+          </button>
+          <button type="button" className="btn btn-toggle btn-chip" onClick={() => onCambiarDisponibilidad(producto)}>
+            {visible ? 'Ocultar' : 'Mostrar'}
+          </button>
+          <button type="button" className="btn btn-eliminar btn-chip" onClick={() => onEliminar(producto)}>
+            Eliminar
+          </button>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+function PedidoRow({ pedido, onGuardar, onDirtyChange, onAbrirNota }) {
+  const [cantidad, setCantidad] = useState(pedido.Cantidad);
+  const [telefono, setTelefono] = useState(() => textoSeguro(pedido.Telefono));
+  const [notas, setNotas] = useState(() => notasIniciales(pedido));
+  const [estado, setEstado] = useState(pedido.Estado);
+  const [guardando, setGuardando] = useState(false);
+  const llave = `pedido:${pedido.ID}`;
+
+  const telefonoOriginal = textoSeguro(pedido.Telefono);
+  const notasOriginal = notasIniciales(pedido);
+
+  const cambioCantidad = String(cantidad) !== String(pedido.Cantidad);
+  const cambioTelefono = telefono !== telefonoOriginal;
+  const cambioNotas = notas !== notasOriginal;
+  const cambioEstado = estado !== pedido.Estado;
+  const sinGuardar = cambioCantidad || cambioTelefono || cambioNotas || cambioEstado;
+
+  // OJO: este efecto depende de los VALORES actuales (cantidad, telefono,
+  // notas, estado), no solo de los booleanos "cambió sí/no". Si solo
+  // dependiera de los booleanos, una vez que "cambioTelefono" pasa a true
+  // ya no se vuelve a ejecutar con cada letra que seguías escribiendo, y el
+  // aviso se quedaba pegado mostrando solo el primer caracter que tecleaste
+  // (por ejemplo mostraba "2" en vez del teléfono completo). También por
+  // esto el aviso a veces no se apagaba después de guardar.
+  useEffect(() => {
+    const cambios = [];
+    if (cambioCantidad) cambios.push(`Cantidad: ${pedido.Cantidad} → ${cantidad || 0}`);
+    if (cambioTelefono) cambios.push(`Teléfono: "${telefonoOriginal || 'vacío'}" → "${telefono || 'vacío'}"`);
+    if (cambioNotas) cambios.push(`Notas: "${notasOriginal || 'sin nota'}" → "${notas || 'sin nota'}"`);
+    if (cambioEstado) cambios.push(`Estado: ${pedido.Estado} → ${estado}`);
+    const descripcion = cambios.length > 0 ? `Pedido de ${pedido.Cliente} — ${cambios.join(' · ')}` : '';
+    onDirtyChange(llave, sinGuardar, descripcion);
+    return () => onDirtyChange(llave, false, '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cantidad, telefono, notas, estado, pedido, llave]);
+
+  function handleGuardar() {
+    setGuardando(true);
+    onGuardar(pedido.ID, { cantidad, telefono, notas, estado }).finally(() => setGuardando(false));
+  }
+
+  const fecha = new Date(pedido.Fecha);
+
+  return (
+    <tr className={sinGuardar ? 'fila-sin-guardar' : ''}>
+      <td>{fecha.toLocaleDateString('es-MX')}</td>
+      <td>{fecha.toLocaleTimeString('es-MX')}</td>
+      <td>{pedido.Cliente}</td>
+      <td>
+        <input
+          type="tel"
+          inputMode="numeric"
+          className={`pedido-input-tel ${cambioTelefono ? 'campo-modificado' : ''}`}
+          value={telefono}
+          onChange={(e) => setTelefono(limitarTelefono(e.target.value))}
+        />
+      </td>
+      <td>{pedido.Producto}</td>
+      <td>
+        <input
+          type="number"
+          min="1"
+          className={`pedido-input-cant ${cambioCantidad ? 'campo-modificado' : ''}`}
+          value={cantidad}
+          onChange={(e) => setCantidad(limitarDigitos(e.target.value, MAX_DIGITOS_CANTIDAD))}
+        />
+      </td>
+      <td>
+        {/* Cuadro compacto de siempre + un botón de lupa para ver/editar la
+            nota completa en grande cuando haga falta (nota larga). Los dos
+            comparten el mismo valor, así que lo que escribas en uno se ve
+            reflejado en el otro. */}
+        <div className="pedido-notas-celda">
+          <input
+            className={`pedido-input-notas ${cambioNotas ? 'campo-modificado' : ''}`}
+            value={notas}
+            onChange={(e) => setNotas(e.target.value)}
+            placeholder="Sin notas"
+          />
+          <button
+            type="button"
+            className="pedido-notas-zoom-btn"
+            onClick={() => onAbrirNota(pedido.Cliente, notas, setNotas)}
+            title="Ver nota completa"
+          >
+            🔍
+          </button>
+        </div>
+      </td>
+      <td>
+        <select
+          className={cambioEstado ? 'campo-modificado' : ''}
+          value={estado}
+          onChange={(e) => setEstado(e.target.value)}
+        >
+          <option>Pendiente</option>
+          <option>Confirmado</option>
+          <option>Entregado</option>
+          <option>Cancelado</option>
+        </select>
+      </td>
+      <td>
+        <button className="btn btn-small" onClick={handleGuardar} disabled={!sinGuardar || guardando}>
+          {guardando ? 'Guardando…' : 'Guardar'}
+        </button>
+      </td>
+    </tr>
+  );
 }
