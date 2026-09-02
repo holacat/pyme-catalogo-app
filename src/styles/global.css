@@ -892,3 +892,59 @@ main { flex: 1; padding: 1.5rem; max-width: 1100px; margin: 0 auto; width: 100%;
   font-size: 0.95rem;
   margin-bottom: 0.9rem;
 }
+
+/* ---- Catálogo dividido por categorías: cada categoría tiene su propia
+   cajita con su propio carrusel horizontal, para que no se encimen. ---- */
+.catalogo-barra-superior {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 1.2rem;
+}
+
+.categoria-seccion {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 1.1rem 1.1rem 0.4rem;
+  margin-bottom: 1.5rem;
+}
+
+.categoria-titulo {
+  margin: 0 0 0.9rem;
+  font-size: 1.15rem;
+  color: var(--brand-dark);
+}
+
+.categoria-titulo-completo {
+  margin: 1rem 0 1.2rem;
+}
+
+/* El carrusel es una fila horizontal que se desliza con el dedo o el
+   mouse. Cada tarjeta adentro tiene un ancho fijo (no se estira como en
+   la cuadrícula normal), para que se vean varias una junto a otra. */
+.categoria-carrusel {
+  display: flex;
+  gap: 1rem;
+  overflow-x: auto;
+  padding-bottom: 0.6rem;
+  scroll-snap-type: x proximity;
+}
+
+.categoria-carrusel .product-card {
+  flex: 0 0 220px;
+  scroll-snap-align: start;
+}
+
+.categoria-pie {
+  text-align: right;
+  padding: 0.2rem 0 0.8rem;
+}
+
+.categoria-ver-mas {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.volver-btn {
+  margin-bottom: 1rem;
+}
