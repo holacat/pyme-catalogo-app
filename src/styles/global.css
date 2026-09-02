@@ -948,3 +948,70 @@ main { flex: 1; padding: 1.5rem; max-width: 1100px; margin: 0 auto; width: 100%;
 .volver-btn {
   margin-bottom: 1rem;
 }
+
+/* ---- Dashboard: pestaña "Orden del catálogo" (arrastrar y acomodar) ---- */
+.orden-categoria-box {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.9rem 1rem;
+  margin-bottom: 1.2rem;
+}
+
+.orden-categoria-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  margin-bottom: 0.7rem;
+}
+
+.orden-categoria-header h3 { margin: 0; font-size: 1rem; }
+
+.orden-lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.orden-fila {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: #f9fafb;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.4rem 0.6rem;
+  cursor: grab;
+}
+
+.orden-fila.arrastrando { opacity: 0.4; }
+
+.orden-agarradera {
+  color: var(--muted);
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.orden-thumb {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.orden-thumb-vacia {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.48rem;
+  text-align: center;
+  color: var(--muted);
+  background: #f0f0f0;
+}
+
+.orden-nombre { font-size: 0.9rem; flex: 1; }
