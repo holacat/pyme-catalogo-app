@@ -984,15 +984,36 @@ main { flex: 1; padding: 1.5rem; max-width: 1100px; margin: 0 auto; width: 100%;
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 0.4rem 0.6rem;
-  cursor: grab;
 }
 
-.orden-fila.arrastrando { opacity: 0.4; }
+/* Botones ▲ / ▼ para subir/bajar un producto un lugar a la vez — más
+   fáciles de usar con precisión que arrastrar con el dedo o el mouse. */
+.orden-botones-mover {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
 
-.orden-agarradera {
-  color: var(--muted);
-  font-size: 1.1rem;
+.orden-mover-btn {
+  width: 26px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: white;
+  cursor: pointer;
+  font-size: 0.75rem;
   line-height: 1;
+  color: var(--text);
+}
+
+.orden-mover-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.orden-mover-btn:not(:disabled):hover {
+  background: #f0f0f0;
 }
 
 .orden-thumb {
@@ -1014,3 +1035,55 @@ main { flex: 1; padding: 1.5rem; max-width: 1100px; margin: 0 auto; width: 100%;
 }
 
 .orden-nombre { font-size: 0.9rem; flex: 1; }
+.orden-barra-superior {
+  margin-bottom: 1rem;
+}
+
+.orden-categoria-botones {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+/* Categoría marcada como "oculta del catálogo": se ve atenuada en el
+   Dashboard para que sea obvio, de un vistazo, que no aparece del lado
+   público — aunque sus productos y su información siguen intactos. */
+.orden-categoria-box.categoria-oculta {
+  background: #f5f5f5;
+  border-style: dashed;
+  opacity: 0.75;
+}
+
+/* Modal de "Eliminar categoría": las dos opciones (quitar / borrar todo) y
+   el aviso de peligro cuando se elige la opción destructiva. */
+.modal-opcion-radio {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  font-size: 0.88rem;
+  margin-bottom: 0.6rem;
+  cursor: pointer;
+}
+
+.modal-opcion-radio input {
+  margin-top: 0.2rem;
+}
+
+.aviso-peligro {
+  background: #fdecea;
+  border: 1px solid #f3b4ac;
+  border-radius: 8px;
+  padding: 0.7rem 0.8rem;
+  font-size: 0.85rem;
+  color: #7a1f1f;
+  margin: 0.4rem 0 0.8rem;
+}
+
+.modal-opcion-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+  font-weight: 600;
+  cursor: pointer;
+}
