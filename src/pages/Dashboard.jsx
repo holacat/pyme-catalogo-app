@@ -86,8 +86,8 @@ function formatearHoraSolo(valor) {
   return fecha.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
 }
 
-const MAX_DIGITOS_STOCK = 6; // hasta 999,999 piezas
-const MAX_DIGITOS_PRECIO = 7; // hasta 9,999,999 (con hasta 2 decimales)
+const MAX_DIGITOS_STOCK = 9; // hasta 999,999,999 piezas
+const MAX_DIGITOS_PRECIO = 9; // hasta 999,999,999 (con hasta 2 decimales)
 const MAX_DIGITOS_CANTIDAD = 4; // hasta 9,999 piezas por pedido
 
 // Cada cuánto se refresca solo el Dashboard en segundo plano (milisegundos).
