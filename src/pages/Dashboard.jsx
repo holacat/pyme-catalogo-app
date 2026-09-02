@@ -12,6 +12,8 @@ import {
   actualizarProducto,
   cambiarDisponibilidad,
   eliminarProducto,
+  actualizarOrdenMultiple,
+  renombrarCategoria,
 } from '../api.js';
 import ImageUploader from '../components/ImageUploader.jsx';
 import ImageLightbox from '../components/ImageLightbox.jsx';
@@ -106,7 +108,7 @@ export default function Dashboard() {
   const [inputKey, setInputKey] = useState('');
   const [verificandoLogin, setVerificandoLogin] = useState(false);
   const [errorLogin, setErrorLogin] = useState('');
-  const [tab, setTab] = useState('stock'); // stock | pedidos | alertas | nuevo
+  const [tab, setTab] = useState('stock'); // stock | pedidos | alertas | orden | nuevo
   const [productos, setProductos] = useState([]);
   const [pedidos, setPedidos] = useState([]);
   const [alertas, setAlertas] = useState([]);
@@ -423,6 +425,9 @@ export default function Dashboard() {
         <button className={tab === 'alertas' ? 'active' : ''} onClick={() => cambiarTab('alertas')}>
           Alertas ({alertas.length})
         </button>
+        <button className={tab === 'orden' ? 'active' : ''} onClick={() => cambiarTab('orden')}>
+          🔀 Orden del catálogo
+        </button>
         <button className={tab === 'nuevo' ? 'active' : ''} onClick={() => cambiarTab('nuevo')}>
           + Agregar producto
         </button>
@@ -563,6 +568,14 @@ export default function Dashboard() {
             </li>
           ))}
         </ul>
+      )}
+
+      {tab === 'orden' && (
+        <OrdenTab
+          productos={productos}
+          adminKey={adminKey}
+          onCambio={() => cargarTodo(adminKey, { silencioso: true })}
+        />
       )}
 
       {tab === 'nuevo' && (
@@ -1040,6 +1053,189 @@ function ProductoForm({ adminKey, opciones = {}, productoExistente, onGuardado, 
         </div>
       )}
     </form>
+  );
+}
+
+// Agrupa productos por categoría para la pestaña de "Orden del catálogo",
+// mostrando primero los más nuevos (igual que hace el catálogo público),
+// mientras no los hayas arrastrado todavía. Los productos sin categoría se
+// juntan bajo "Otros", igual que en el catálogo.
+function agruparParaOrden(productos) {
+  const masNuevosPrimero = productos.slice().reverse();
+  const grupos = [];
+  const indicePorCategoria = {};
+  masNuevosPrimero.forEach((p) => {
+    const nombreCategoria = String(p.Categoria || '').trim() || 'Otros';
+    if (!(nombreCategoria in indicePorCategoria)) {
+      indicePorCategoria[nombreCategoria] = grupos.length;
+      grupos.push({ nombre: nombreCategoria, productos: [] });
+    }
+    grupos[indicePorCategoria[nombreCategoria]].productos.push(p);
+  });
+  grupos.forEach((g) => {
+    g.productos.sort((a, b) => (Number(a.Orden) || 0) - (Number(b.Orden) || 0));
+  });
+  return grupos;
+}
+
+// Pestaña para arrastrar los productos y acomodar en qué orden se ven en
+// el catálogo público, dentro de su propia categoría — y para renombrar una
+// categoría completa de un jalón (en vez de editar producto por producto).
+function OrdenTab({ productos, adminKey, onCambio }) {
+  const [gruposLocal, setGruposLocal] = useState(() => agruparParaOrden(productos));
+  const [arrastrando, setArrastrando] = useState(null); // { categoria, productoId }
+  const [guardando, setGuardando] = useState(false);
+  const [mensaje, setMensaje] = useState('');
+  const [renombrando, setRenombrando] = useState(null); // nombre de categoría actual, o null
+  const [nombreNuevo, setNombreNuevo] = useState('');
+  const [guardandoNombre, setGuardandoNombre] = useState(false);
+
+  // Si los productos cambian desde fuera (agregaste uno nuevo, o llegó el
+  // refresco automático) y no estás a medio arrastrar nada, se vuelve a
+  // acomodar la lista con los datos más recientes.
+  useEffect(() => {
+    if (!arrastrando) setGruposLocal(agruparParaOrden(productos));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productos]);
+
+  function handleDragStart(categoria, productoId) {
+    setArrastrando({ categoria, productoId });
+  }
+
+  function handleDragOverFila(e) {
+    e.preventDefault();
+  }
+
+  function handleDropEnFila(categoria, productoIdDestino) {
+    if (!arrastrando || arrastrando.categoria !== categoria || arrastrando.productoId === productoIdDestino) {
+      setArrastrando(null);
+      return;
+    }
+
+    setGruposLocal((prev) => {
+      const nuevos = prev.map((g) => ({ ...g, productos: g.productos.slice() }));
+      const grupo = nuevos.find((g) => g.nombre === categoria);
+      if (!grupo) return prev;
+
+      const indiceOrigen = grupo.productos.findIndex((p) => p.ID === arrastrando.productoId);
+      const indiceDestino = grupo.productos.findIndex((p) => p.ID === productoIdDestino);
+      if (indiceOrigen === -1 || indiceDestino === -1) return prev;
+
+      const [movido] = grupo.productos.splice(indiceOrigen, 1);
+      grupo.productos.splice(indiceDestino, 0, movido);
+
+      guardarOrdenDeCategoria(grupo);
+      return nuevos;
+    });
+
+    setArrastrando(null);
+  }
+
+  // Renumera 1, 2, 3... toda la categoría según cómo haya quedado
+  // acomodada, y manda todos esos números juntos en una sola llamada.
+  function guardarOrdenDeCategoria(grupo) {
+    const cambios = grupo.productos.map((p, i) => ({ productoId: p.ID, orden: i + 1 }));
+    setGuardando(true);
+    setMensaje('');
+    actualizarOrdenMultiple({ adminKey, cambios })
+      .then(() => onCambio())
+      .catch((err) => setMensaje(`Error al guardar el orden: ${err.message}`))
+      .finally(() => setGuardando(false));
+  }
+
+  function abrirRenombrar(nombreActual) {
+    setRenombrando(nombreActual);
+    setNombreNuevo(nombreActual === 'Otros' ? '' : nombreActual);
+  }
+
+  function confirmarRenombrar() {
+    const nuevo = nombreNuevo.trim();
+    if (!nuevo || !renombrando) return;
+    setGuardandoNombre(true);
+    renombrarCategoria({ adminKey, categoriaAnterior: renombrando, categoriaNueva: nuevo })
+      .then(() => {
+        setRenombrando(null);
+        onCambio();
+      })
+      .catch((err) => setMensaje(`Error al renombrar la categoría: ${err.message}`))
+      .finally(() => setGuardandoNombre(false));
+  }
+
+  return (
+    <div className="orden-catalogo">
+      <p className="muted">
+        Arrastra los productos hacia arriba o hacia abajo para acomodar el orden en que se ven en
+        el catálogo público, dentro de su misma categoría. El cambio se guarda solo, no hace falta
+        darle a ningún botón de "Guardar".
+      </p>
+      {guardando && <p className="info-msg">Guardando orden…</p>}
+      {mensaje && <p className="info-msg error">{mensaje}</p>}
+
+      {gruposLocal.map((grupo) => (
+        <section key={grupo.nombre} className="orden-categoria-box">
+          <div className="orden-categoria-header">
+            <h3>{grupo.nombre}</h3>
+            <button
+              type="button"
+              className="btn btn-secondary btn-small"
+              onClick={() => abrirRenombrar(grupo.nombre)}
+            >
+              ✏️ Renombrar categoría
+            </button>
+          </div>
+          <ul className="orden-lista">
+            {grupo.productos.map((p) => (
+              <li
+                key={p.ID}
+                className={`orden-fila ${arrastrando?.productoId === p.ID ? 'arrastrando' : ''}`}
+                draggable
+                onDragStart={() => handleDragStart(grupo.nombre, p.ID)}
+                onDragOver={handleDragOverFila}
+                onDrop={() => handleDropEnFila(grupo.nombre, p.ID)}
+              >
+                <span className="orden-agarradera" title="Arrastra para reordenar">⠿</span>
+                {primeraFoto(p.FotoURL) ? (
+                  <img src={primeraFoto(p.FotoURL)} alt={p.Nombre} className="orden-thumb" />
+                ) : (
+                  <div className="orden-thumb orden-thumb-vacia">Sin foto</div>
+                )}
+                <span className="orden-nombre">{p.Nombre}</span>
+                {!esProductoVisible(p) && <span className="badge badge-oculto">Oculto</span>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
+
+      {renombrando && (
+        <div className="modal-overlay" onClick={() => setRenombrando(null)}>
+          <div className="modal-box" onClick={(e) => e.stopPropagation()}>
+            <h3>Renombrar categoría</h3>
+            <p className="muted">
+              Esto cambia el nombre de la categoría en TODOS los productos que la tengan
+              (actualmente "{renombrando}"), de un jalón.
+            </p>
+            <label className="modal-field">
+              Nuevo nombre
+              <input value={nombreNuevo} onChange={(e) => setNombreNuevo(e.target.value)} autoFocus />
+            </label>
+            <div className="modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setRenombrando(null)}>
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={guardandoNombre || !nombreNuevo.trim()}
+                onClick={confirmarRenombrar}
+              >
+                {guardandoNombre ? 'Guardando…' : 'Guardar nuevo nombre'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
