@@ -173,7 +173,7 @@ const MAX_DIGITOS_CANTIDAD = 4; // hasta 9,999 piezas por pedido
 // Cada cuánto se refresca solo el Dashboard en segundo plano (milisegundos).
 const INTERVALO_REFRESCO_MS = 5000;
 
-const ESTADOS_PEDIDO = ['Pendiente', 'Confirmado', 'Entregado', 'Cancelado'];
+const ESTADOS_PEDIDO = ['Sin solicitud', 'En proceso', 'Pagado', 'Reembolsado', 'Cancelado'];
 
 const STORAGE_KEY = 'pyme_admin_key';
 
@@ -1838,10 +1838,11 @@ function PedidoRow({ pedido, categoria, onGuardar, onDirtyChange, onAbrirNota })
           value={estado}
           onChange={(e) => setEstado(e.target.value)}
         >
-          <option>Pendiente</option>
-          <option>Confirmado</option>
-          <option>Entregado</option>
-          <option>Cancelado</option>
+         <option>Sin solicitud</option>
+<option>En proceso</option>
+<option>Pagado</option>
+<option>Reembolsado</option>
+<option>Cancelado</option>
         </select>
       </td>
       <td>
