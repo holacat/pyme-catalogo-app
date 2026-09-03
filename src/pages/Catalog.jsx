@@ -94,20 +94,21 @@ function agruparPorCategoria(productos) {
 // productos de la categoría ya caben en pantalla, no se ve ninguna flecha.
 function CategoriaCarrusel({ children }) {
   const scrollRef = useRef(null);
-  const [puedeIzquierda, setPuedeIzquierda] = useState(false);
-  const [puedeDerecha, setPuedeDerecha] = useState(false);
+  // A diferencia de antes, esto YA NO cambia según hacia dónde te deslizaste:
+  // una vez que hay más productos de los que caben en pantalla, las DOS
+  // flechas se quedan visibles siempre, no se esconden nunca.
+  const [hayDesbordamiento, setHayDesbordamiento] = useState(false);
 
-  function actualizarFlechas() {
+  function actualizarDesbordamiento() {
     const el = scrollRef.current;
     if (!el) return;
-    setPuedeIzquierda(el.scrollLeft > 4);
-    setPuedeDerecha(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
+    setHayDesbordamiento(el.scrollWidth > el.clientWidth + 4);
   }
 
   // Vuelve a calcular si hacen falta flechas cada vez que cambia la lista
   // de productos mostrados (por ejemplo, si uno se agota y desaparece).
   useEffect(() => {
-    actualizarFlechas();
+    actualizarDesbordamiento();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [children]);
 
@@ -120,23 +121,23 @@ function CategoriaCarrusel({ children }) {
 
   return (
     <div className="categoria-carrusel-envoltura">
-      {puedeIzquierda && (
+      {hayDesbordamiento && (
         <button
           type="button"
-                    className="categoria-carrusel-flecha categoria-carrusel-flecha-izq"
+          className="categoria-carrusel-flecha categoria-carrusel-flecha-izq"
           onClick={() => desplazar(-1)}
           aria-label="Ver productos anteriores"
         >
           ‹
         </button>
       )}
-      <div className="categoria-carrusel" ref={scrollRef} onScroll={actualizarFlechas}>
+      <div className="categoria-carrusel" ref={scrollRef}>
         {children}
       </div>
-      {puedeDerecha && (
+      {hayDesbordamiento && (
         <button
           type="button"
-                   className="categoria-carrusel-flecha categoria-carrusel-flecha-der"
+          className="categoria-carrusel-flecha categoria-carrusel-flecha-der"
           onClick={() => desplazar(1)}
           aria-label="Ver más productos"
         >
