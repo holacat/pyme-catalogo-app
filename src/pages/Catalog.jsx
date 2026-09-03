@@ -123,7 +123,7 @@ function CategoriaCarrusel({ children }) {
       {puedeIzquierda && (
         <button
           type="button"
-          className="carousel-btn carousel-prev"
+                    className="categoria-carrusel-flecha categoria-carrusel-flecha-izq"
           onClick={() => desplazar(-1)}
           aria-label="Ver productos anteriores"
         >
@@ -136,7 +136,7 @@ function CategoriaCarrusel({ children }) {
       {puedeDerecha && (
         <button
           type="button"
-          className="carousel-btn carousel-next"
+                   className="categoria-carrusel-flecha categoria-carrusel-flecha-der"
           onClick={() => desplazar(1)}
           aria-label="Ver más productos"
         >
