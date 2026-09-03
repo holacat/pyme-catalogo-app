@@ -362,7 +362,35 @@ main { flex: 1; padding: 1.5rem; max-width: 1100px; margin: 0 auto; width: 100%;
   white-space: normal;
   max-width: 150px;
 }
+.stock-table th:nth-child(4),
+.stock-table td:nth-child(4) {
+  white-space: normal;
+  max-width: 110px;
+}
 
+/* Encabezados de columna que se pueden ordenar con un clic (Fecha,
+   Producto, Categoría, Código, Precio, Stock en la pestaña Stock). Se ven
+   igual que un encabezado normal, pero con "cursor: pointer" y una
+   flechita (▲ ▼ o ↕ cuando no está eligiéndose ese orden). */
+.orden-header-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-weight: inherit;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.orden-header-btn:hover { text-decoration: underline; }
+
+.orden-header-flecha {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
 .stock-table .stock-thumb,
 .stock-table .stock-thumb-vacia {
   width: 28px;
