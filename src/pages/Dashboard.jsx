@@ -87,6 +87,75 @@ function formatearHoraSolo(valor) {
   return fecha.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
 }
 
+// Nombre de categoría tal como se muestra en toda la app: si el producto no
+// tiene categoría guardada, se muestra como "Otros" (igual que el catálogo
+// público y el backend).
+function categoriaDeProducto(producto) {
+  return String(producto?.Categoria || '').trim() || 'Otros';
+}
+
+// Dice si un producto "hace match" con lo que Claudia escribió en el
+// buscador de la pestaña Stock: revisa el texto (sin importar mayúsculas o
+// minúsculas) dentro del nombre, la categoría, el código propio, el precio
+// o el stock.
+function coincideBusquedaStock(producto, textoBusqueda) {
+  const texto = textoBusqueda.trim().toLowerCase();
+  if (!texto) return true;
+  const campos = [
+    producto.Nombre,
+    categoriaDeProducto(producto),
+    producto.CodigoPropio,
+    producto.Precio,
+    producto.Stock,
+  ];
+  return campos.some((campo) => String(campo ?? '').toLowerCase().includes(texto));
+}
+
+// Valor "comparable" de un producto según la columna por la que se está
+// ordenando la tabla de Stock (al darle clic a un encabezado).
+function valorOrdenableStock(producto, campo) {
+  switch (campo) {
+    case 'fecha':
+      return new Date(producto.FechaCreacion || 0).getTime();
+    case 'nombre':
+      return String(producto.Nombre || '').toLowerCase();
+    case 'categoria':
+      return categoriaDeProducto(producto).toLowerCase();
+    case 'codigo':
+      return String(producto.CodigoPropio || '').toLowerCase();
+    case 'precio':
+      return Number(producto.Precio) || 0;
+    case 'stock':
+      return Number(producto.Stock) || 0;
+    default:
+      return 0;
+  }
+}
+
+// Acomoda la lista de productos según el encabezado que Claudia haya
+// elegido. Si no eligió ninguno (orden === null), la deja tal cual —ahí es
+// cuando se ven los más nuevos primero, como siempre.
+function ordenarProductosStock(lista, orden) {
+  if (!orden) return lista;
+  const copia = lista.slice();
+  copia.sort((a, b) => {
+    const valorA = valorOrdenableStock(a, orden.campo);
+    const valorB = valorOrdenableStock(b, orden.campo);
+    if (valorA < valorB) return -1 * orden.direccion;
+    if (valorA > valorB) return 1 * orden.direccion;
+    return 0;
+  });
+  return copia;
+}
+
+// Texto (▲, ▼ o ↕) que se muestra junto al nombre de la columna, para que
+// Claudia vea de un vistazo si esa columna está ordenando la tabla y en
+// qué dirección.
+function indicadorOrdenStock(orden, campo) {
+  if (!orden || orden.campo !== campo) return '↕';
+  return orden.direccion === 1 ? '▲' : '▼';
+}
+
 const MAX_DIGITOS_STOCK = 9; // hasta 999,999,999 piezas
 const MAX_DIGITOS_PRECIO = 9; // hasta 999,999,999 (con hasta 2 decimales)
 const MAX_DIGITOS_CANTIDAD = 4; // hasta 9,999 piezas por pedido
@@ -124,6 +193,9 @@ export default function Dashboard() {
   const [productoEditando, setProductoEditando] = useState(null);
   const [filtroDesde, setFiltroDesde] = useState('');
   const [filtroHasta, setFiltroHasta] = useState('');
+  const [busquedaStock, setBusquedaStock] = useState('');
+  const [filtroCategoriaStock, setFiltroCategoriaStock] = useState('');
+  const [ordenStock, setOrdenStock] = useState(null); // { campo, direccion } o null
   const [filtroEstado, setFiltroEstado] = useState('');
   const [fotoAmpliada, setFotoAmpliada] = useState('');
   // Nota de un pedido abierta "en grande" (ver/editar completa). Null cuando
@@ -365,8 +437,48 @@ export default function Dashboard() {
     return true;
   }
 
-  const productosFiltrados = productosOrdenados.filter(productoEnRangoDeFecha);
+  // Lista de nombres de categoría que existen ahorita (incluye "Otros" si
+  // hay algún producto sin categoría), para llenar el menú desplegable del
+  // filtro. Ordenada alfabéticamente para que sea fácil de encontrar.
+  const categoriasDisponibles = Array.from(
+    new Set(productos.map((p) => categoriaDeProducto(p)))
+  ).sort((a, b) => a.localeCompare(b, 'es'));
+
+  // Para poder mostrar la Categoría de cada Pedido (los pedidos no guardan
+  // la categoría, solo el ID del producto), armamos un mapa ID -> Categoría
+  // usando la lista de productos que ya tenemos cargada.
+  const categoriaPorProductoId = {};
+  productos.forEach((p) => {
+    categoriaPorProductoId[p.ID] = categoriaDeProducto(p);
+  });
+
+  const productosPorFecha = productosOrdenados.filter(productoEnRangoDeFecha);
+  const productosPorCategoria = filtroCategoriaStock
+    ? productosPorFecha.filter((p) => categoriaDeProducto(p) === filtroCategoriaStock)
+    : productosPorFecha;
+  const productosBuscados = productosPorCategoria.filter((p) => coincideBusquedaStock(p, busquedaStock));
+  const productosFiltrados = ordenarProductosStock(productosBuscados, ordenStock);
+
   const filtroFechaActivo = !!(filtroDesde || filtroHasta);
+  const hayFiltrosStockActivos = filtroFechaActivo || !!filtroCategoriaStock || !!busquedaStock.trim();
+
+  // Al darle clic a un encabezado de columna ordenable: 1er clic ordena de
+  // menor a mayor, 2do clic de mayor a menor, 3er clic quita ese orden y
+  // regresa a como estaba (más nuevos primero).
+  function cambiarOrdenStock(campo) {
+    setOrdenStock((prev) => {
+      if (!prev || prev.campo !== campo) return { campo, direccion: 1 };
+      if (prev.direccion === 1) return { campo, direccion: -1 };
+      return null;
+    });
+  }
+
+  function limpiarFiltrosStock() {
+    setFiltroDesde('');
+    setFiltroHasta('');
+    setBusquedaStock('');
+    setFiltroCategoriaStock('');
+  }
 
   // Pedidos: igual que los productos, más recientes primero. Además se
   // pueden filtrar por Estado con la tablita de conteos de la derecha.
@@ -438,6 +550,27 @@ export default function Dashboard() {
         <>
           <div className="filtro-fechas">
             <label>
+              Buscar
+              <input
+                type="text"
+                value={busquedaStock}
+                onChange={(e) => setBusquedaStock(e.target.value)}
+                placeholder="Nombre, código, precio, stock…"
+              />
+            </label>
+            <label>
+              Categoría
+              <select
+                value={filtroCategoriaStock}
+                onChange={(e) => setFiltroCategoriaStock(e.target.value)}
+              >
+                <option value="">Todas</option>
+                {categoriasDisponibles.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </label>
+            <label>
               Agregados desde
               <input
                 type="date"
@@ -456,19 +589,16 @@ export default function Dashboard() {
             <span className="stock-conteo-total">
               📦 <strong>{productos.length}</strong> producto{productos.length === 1 ? '' : 's'} en total
             </span>
-            {filtroFechaActivo && (
+            {hayFiltrosStockActivos && (
               <button
                 type="button"
                 className="btn btn-secondary btn-small"
-                onClick={() => {
-                  setFiltroDesde('');
-                  setFiltroHasta('');
-                }}
+                onClick={limpiarFiltrosStock}
               >
-                Quitar filtro
+                Quitar filtros
               </button>
             )}
-            {filtroFechaActivo && (
+            {hayFiltrosStockActivos && (
               <span className="filtro-fechas-conteo">
                 Mostrando {productosFiltrados.length} de {productosOrdenados.length} productos
               </span>
@@ -479,8 +609,40 @@ export default function Dashboard() {
             <table className="data-table stock-table">
               <thead>
                 <tr>
-                  <th>Fecha agregado</th><th>Hora agregado</th><th>Producto</th><th>Código</th><th>Precio</th><th>Stock</th>
-                  <th>Mínimo</th><th>Actualizar stock</th><th>Acciones</th>
+                  <th>
+                    <button type="button" className="orden-header-btn" onClick={() => cambiarOrdenStock('fecha')}>
+                      Fecha agregado <span className="orden-header-flecha">{indicadorOrdenStock(ordenStock, 'fecha')}</span>
+                    </button>
+                  </th>
+                  <th>Hora agregado</th>
+                  <th>
+                    <button type="button" className="orden-header-btn" onClick={() => cambiarOrdenStock('nombre')}>
+                      Producto <span className="orden-header-flecha">{indicadorOrdenStock(ordenStock, 'nombre')}</span>
+                    </button>
+                  </th>
+                  <th>
+                    <button type="button" className="orden-header-btn" onClick={() => cambiarOrdenStock('categoria')}>
+                      Categoría <span className="orden-header-flecha">{indicadorOrdenStock(ordenStock, 'categoria')}</span>
+                    </button>
+                  </th>
+                  <th>
+                    <button type="button" className="orden-header-btn" onClick={() => cambiarOrdenStock('codigo')}>
+                      Código <span className="orden-header-flecha">{indicadorOrdenStock(ordenStock, 'codigo')}</span>
+                    </button>
+                  </th>
+                  <th>
+                    <button type="button" className="orden-header-btn" onClick={() => cambiarOrdenStock('precio')}>
+                      Precio <span className="orden-header-flecha">{indicadorOrdenStock(ordenStock, 'precio')}</span>
+                    </button>
+                  </th>
+                  <th>
+                    <button type="button" className="orden-header-btn" onClick={() => cambiarOrdenStock('stock')}>
+                      Stock <span className="orden-header-flecha">{indicadorOrdenStock(ordenStock, 'stock')}</span>
+                    </button>
+                  </th>
+                  <th>Mínimo</th>
+                  <th>Actualizar stock</th>
+                  <th>Acciones</th>
                 </tr>
               </thead>
               <tbody>
@@ -488,6 +650,7 @@ export default function Dashboard() {
                   <StockRow
                     key={`${p.ID}-${resetToken}`}
                     producto={p}
+                    categoria={categoriaDeProducto(p)}
                     onActualizar={handleActualizarStock}
                     onDirtyChange={marcarSucio}
                     onEditar={setProductoEditando}
@@ -499,7 +662,7 @@ export default function Dashboard() {
               </tbody>
             </table>
             {productosFiltrados.length === 0 && (
-              <p className="info-msg">Ningún producto fue agregado en ese rango de fechas.</p>
+              <p className="info-msg">Ningún producto coincide con la búsqueda o los filtros de arriba.</p>
             )}
           </div>
         </>
@@ -537,7 +700,7 @@ export default function Dashboard() {
             <table className="data-table pedidos-table">
               <thead>
                 <tr>
-                  <th>Fecha</th><th>Hora</th><th>Cliente</th><th>Teléfono</th><th>Producto</th>
+                  <th>Fecha</th><th>Hora</th><th>Cliente</th><th>Teléfono</th><th>Producto</th><th>Categoría</th>
                   <th>Cant.</th><th>Notas</th><th>Estado</th><th>Guardar</th>
                 </tr>
               </thead>
@@ -546,6 +709,7 @@ export default function Dashboard() {
                   <PedidoRow
                     key={`${ped.ID}-${resetToken}`}
                     pedido={ped}
+                    categoria={categoriaPorProductoId[ped.ProductoID] || '—'}
                     onGuardar={handleGuardarPedido}
                     onDirtyChange={marcarSucio}
                     onAbrirNota={(cliente, valor, onChange) => setNotaEnZoom({ cliente, valor, onChange })}
@@ -1473,7 +1637,7 @@ function OrdenTab({ productos, opciones, adminKey, onCambio }) {
   );
 }
 
-function StockRow({ producto, onActualizar, onDirtyChange, onEditar, onCambiarDisponibilidad, onEliminar, onVerFoto }) {
+function StockRow({ producto, categoria, onActualizar, onDirtyChange, onEditar, onCambiarDisponibilidad, onEliminar, onVerFoto }) {
   const [valor, setValor] = useState(producto.Stock);
   const stockConocido = useRef(producto.Stock);
   const sinGuardar = Number(valor) !== Number(producto.Stock);
@@ -1528,6 +1692,7 @@ function StockRow({ producto, onActualizar, onDirtyChange, onEditar, onCambiarDi
           </span>
         </div>
       </td>
+      <td>{categoria}</td>
       <td>{producto.CodigoPropio || '—'}</td>
       <td>${Number(producto.Precio).toLocaleString('es-MX')}</td>
       <td>{producto.Stock}</td>
@@ -1567,7 +1732,7 @@ function StockRow({ producto, onActualizar, onDirtyChange, onEditar, onCambiarDi
   );
 }
 
-function PedidoRow({ pedido, onGuardar, onDirtyChange, onAbrirNota }) {
+function PedidoRow({ pedido, categoria, onGuardar, onDirtyChange, onAbrirNota }) {
   const [cantidad, setCantidad] = useState(pedido.Cantidad);
   const [telefono, setTelefono] = useState(() => textoSeguro(pedido.Telefono));
   const [notas, setNotas] = useState(() => notasIniciales(pedido));
@@ -1625,6 +1790,7 @@ function PedidoRow({ pedido, onGuardar, onDirtyChange, onAbrirNota }) {
         />
       </td>
       <td>{pedido.Producto}</td>
+      <td>{categoria}</td>
       <td>
         <input
           type="number"
