@@ -167,6 +167,16 @@ export function renombrarCategoria({ adminKey, categoriaAnterior, categoriaNueva
   return post({ action: 'renombrarCategoria', adminKey, categoriaAnterior, categoriaNueva });
 }
 
+// Quita o borra una categoría completa.
+// - Si borrarProductos es false (o no se manda): los productos de esa
+//   categoría se CONSERVAN, solo se les vacía la Categoría (se van a
+//   "Otros").
+// - Si borrarProductos es true: se borran también, para siempre, TODOS
+//   los productos de esa categoría (no se puede deshacer desde la app).
+export function eliminarCategoria({ adminKey, categoria, borrarProductos }) {
+  return post({ action: 'eliminarCategoria', adminKey, categoria, borrarProductos });
+}
+
 // ---- Opciones predeterminadas (Nombre, Categoría, Marca, Talla, Color,
 // Código propio) que se muestran como sugerencia en "+ Agregar producto".
 // A diferencia del Stock/Pedidos, esta lista NUNCA se llena sola: solo
