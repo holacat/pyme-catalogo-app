@@ -101,11 +101,21 @@ function categoriaDeProducto(producto) {
 function coincideBusquedaStock(producto, textoBusqueda) {
   const texto = textoBusqueda.trim().toLowerCase();
   if (!texto) return true;
+
+  // Si Claudia escribe "$" al inicio (por ejemplo "$150"), buscamos
+  // ÚNICAMENTE en el precio. Así puede buscar por precio sin que se
+  // confunda con un código o una cantidad de stock que tenga el mismo
+  // número.
+  if (texto.startsWith('$')) {
+    const textoPrecio = texto.slice(1).trim();
+    if (!textoPrecio) return true;
+    return String(producto.Precio ?? '').toLowerCase().includes(textoPrecio);
+  }
+
   const campos = [
     producto.Nombre,
     categoriaDeProducto(producto),
     producto.CodigoPropio,
-    producto.Precio,
     producto.Stock,
   ];
   return campos.some((campo) => String(campo ?? '').toLowerCase().includes(texto));
@@ -555,7 +565,7 @@ export default function Dashboard() {
                 type="text"
                 value={busquedaStock}
                 onChange={(e) => setBusquedaStock(e.target.value)}
-                placeholder="Nombre, código, precio, stock…"
+                   placeholder="Nombre, categoría, código, stock, o $precio…"
               />
             </label>
             <label>
