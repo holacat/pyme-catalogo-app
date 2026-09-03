@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import ProductCard from '../components/ProductCard.jsx';
 import SolicitudModal from '../components/SolicitudModal.jsx';
 import CarritoModal from '../components/CarritoModal.jsx';
@@ -85,6 +85,66 @@ function agruparPorCategoria(productos) {
     grupos[indicePorCategoria[nombreCategoria]].productos.push(p);
   });
   return grupos;
+}
+
+// Envuelve la fila horizontal de productos de una categoría con flechas
+// laterales ‹ › (igual que el carrusel de fotos de cada producto), en vez
+// de dejar visible la barra de scroll del navegador. Las flechas solo se
+// muestran cuando de verdad hay más productos para ese lado: si todos los
+// productos de la categoría ya caben en pantalla, no se ve ninguna flecha.
+function CategoriaCarrusel({ children }) {
+  const scrollRef = useRef(null);
+  const [puedeIzquierda, setPuedeIzquierda] = useState(false);
+  const [puedeDerecha, setPuedeDerecha] = useState(false);
+
+  function actualizarFlechas() {
+    const el = scrollRef.current;
+    if (!el) return;
+    setPuedeIzquierda(el.scrollLeft > 4);
+    setPuedeDerecha(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
+  }
+
+  // Vuelve a calcular si hacen falta flechas cada vez que cambia la lista
+  // de productos mostrados (por ejemplo, si uno se agota y desaparece).
+  useEffect(() => {
+    actualizarFlechas();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [children]);
+
+  function desplazar(direccion) {
+    const el = scrollRef.current;
+    if (!el) return;
+    const cantidad = Math.round(el.clientWidth * 0.8) * direccion;
+    el.scrollBy({ left: cantidad, behavior: 'smooth' });
+  }
+
+  return (
+    <div className="categoria-carrusel-envoltura">
+      {puedeIzquierda && (
+        <button
+          type="button"
+          className="carousel-btn carousel-prev"
+          onClick={() => desplazar(-1)}
+          aria-label="Ver productos anteriores"
+        >
+          ‹
+        </button>
+      )}
+      <div className="categoria-carrusel" ref={scrollRef} onScroll={actualizarFlechas}>
+        {children}
+      </div>
+      {puedeDerecha && (
+        <button
+          type="button"
+          className="carousel-btn carousel-next"
+          onClick={() => desplazar(1)}
+          aria-label="Ver más productos"
+        >
+          ›
+        </button>
+      )}
+    </div>
+  );
 }
 
 export default function Catalog() {
@@ -299,7 +359,7 @@ export default function Catalog() {
           {grupos.map((grupo) => (
             <section key={grupo.nombre} className="categoria-seccion">
               <h2 className="categoria-titulo">{grupo.nombre}</h2>
-              <div className="categoria-carrusel">{tarjetas(grupo.productos)}</div>
+              <CategoriaCarrusel>{tarjetas(grupo.productos)}</CategoriaCarrusel>
               <div className="categoria-pie">
                 <button
                   type="button"
