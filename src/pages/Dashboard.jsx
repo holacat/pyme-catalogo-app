@@ -207,6 +207,8 @@ export default function Dashboard() {
   const [filtroCategoriaStock, setFiltroCategoriaStock] = useState('');
   const [ordenStock, setOrdenStock] = useState(null); // { campo, direccion } o null
   const [filtroEstado, setFiltroEstado] = useState('');
+  const [filtroPedidoDesde, setFiltroPedidoDesde] = useState('');
+  const [filtroPedidoHasta, setFiltroPedidoHasta] = useState('');
   const [fotoAmpliada, setFotoAmpliada] = useState('');
   // Nota de un pedido abierta "en grande" (ver/editar completa). Null cuando
   // no hay ninguna abierta. Guarda también `onChange`, que es el `setNotas`
@@ -375,8 +377,8 @@ export default function Dashboard() {
       .catch((err) => setMensaje(`Error al actualizar stock: ${err.message}`));
   }
 
-  function handleGuardarPedido(pedidoId, { cantidad, telefono, notas, estado }) {
-    return actualizarPedido({ adminKey, pedidoId, cantidad, telefono, notas, estado })
+  function handleGuardarPedido(pedidoId, { cantidad, telefono, notas, estado, montoReembolso }) {
+    return actualizarPedido({ adminKey, pedidoId, cantidad, telefono, notas, estado, montoReembolso })
       .then(() => cargarTodo(adminKey))
       .catch((err) => setMensaje(`Error al actualizar pedido: ${err.message}`));
   }
@@ -491,15 +493,35 @@ export default function Dashboard() {
   }
 
   // Pedidos: igual que los productos, más recientes primero. Además se
-  // pueden filtrar por Estado con la tablita de conteos de la derecha.
+  // pueden filtrar por fecha (Desde/Hasta) y por Estado con la tablita de
+  // conteos de la derecha.
   const pedidosOrdenados = pedidos.slice().reverse();
-  const conteoPorEstado = pedidosOrdenados.reduce((acc, p) => {
+
+  function pedidoEnRangoDeFecha(pedido) {
+    if (!filtroPedidoDesde && !filtroPedidoHasta) return true;
+    if (!pedido.Fecha) return false;
+    const fecha = new Date(pedido.Fecha);
+    if (Number.isNaN(fecha.getTime())) return false;
+    if (filtroPedidoDesde && fecha < new Date(`${filtroPedidoDesde}T00:00:00`)) return false;
+    if (filtroPedidoHasta && fecha > new Date(`${filtroPedidoHasta}T23:59:59`)) return false;
+    return true;
+  }
+
+  const pedidosPorFecha = pedidosOrdenados.filter(pedidoEnRangoDeFecha);
+  const conteoPorEstado = pedidosPorFecha.reduce((acc, p) => {
     acc[p.Estado] = (acc[p.Estado] || 0) + 1;
     return acc;
   }, {});
   const pedidosFiltrados = filtroEstado
-    ? pedidosOrdenados.filter((p) => p.Estado === filtroEstado)
-    : pedidosOrdenados;
+    ? pedidosPorFecha.filter((p) => p.Estado === filtroEstado)
+    : pedidosPorFecha;
+
+  const filtroPedidoFechaActivo = !!(filtroPedidoDesde || filtroPedidoHasta);
+
+  function limpiarFiltroPedidoFecha() {
+    setFiltroPedidoDesde('');
+    setFiltroPedidoHasta('');
+  }
 
   return (
     <div className="dashboard">
@@ -565,7 +587,7 @@ export default function Dashboard() {
                 type="text"
                 value={busquedaStock}
                 onChange={(e) => setBusquedaStock(e.target.value)}
-                   placeholder="Nombre, categoría, código, stock, o $precio…"
+                placeholder="Nombre, categoría, código, stock, o $precio…"
               />
             </label>
             <label>
@@ -680,9 +702,38 @@ export default function Dashboard() {
 
       {tab === 'pedidos' && (
         <>
+          <div className="filtro-fechas">
+            <label>
+              Pedidos desde
+              <input
+                type="date"
+                value={filtroPedidoDesde}
+                onChange={(e) => setFiltroPedidoDesde(e.target.value)}
+              />
+            </label>
+            <label>
+              Hasta
+              <input
+                type="date"
+                value={filtroPedidoHasta}
+                onChange={(e) => setFiltroPedidoHasta(e.target.value)}
+              />
+            </label>
+            {filtroPedidoFechaActivo && (
+              <button
+                type="button"
+                className="btn btn-secondary btn-small"
+                onClick={limpiarFiltroPedidoFecha}
+              >
+                Quitar filtro de fechas
+              </button>
+            )}
+          </div>
+
           {/* Tablita de conteo por estado, ARRIBA de la tabla (no al lado),
               para no quitarle ancho a la tabla y así evitar que tenga que
-              hacer scroll hacia los lados. */}
+              hacer scroll hacia los lados. Los números ya respetan el
+              filtro de fechas de arriba, si está activo. */}
           <div className="pedidos-resumen-fila">
             <span className="pedidos-resumen-titulo">Pedidos por estado:</span>
             <button
@@ -691,7 +742,7 @@ export default function Dashboard() {
               onClick={() => setFiltroEstado('')}
             >
               <span>Todos</span>
-              <strong>{pedidosOrdenados.length}</strong>
+              <strong>{pedidosPorFecha.length}</strong>
             </button>
             {ESTADOS_PEDIDO.map((estadoOpcion) => (
               <button
@@ -711,7 +762,7 @@ export default function Dashboard() {
               <thead>
                 <tr>
                   <th>Fecha</th><th>Hora</th><th>Cliente</th><th>Teléfono</th><th>Producto</th><th>Categoría</th>
-                  <th>Cant.</th><th>Notas</th><th>Estado</th><th>Guardar</th>
+                  <th>Cant.</th><th>Precio</th><th>Total</th><th>Notas</th><th>Estado</th><th>Guardar</th>
                 </tr>
               </thead>
               <tbody>
@@ -728,7 +779,7 @@ export default function Dashboard() {
               </tbody>
             </table>
             {pedidosFiltrados.length === 0 && (
-              <p className="info-msg">No hay pedidos con ese estado.</p>
+              <p className="info-msg">Ningún pedido coincide con el estado o el rango de fechas de arriba.</p>
             )}
           </div>
         </>
@@ -1742,22 +1793,53 @@ function StockRow({ producto, categoria, onActualizar, onDirtyChange, onEditar, 
   );
 }
 
+// Precio guardado en el pedido (fijado al momento del pedido). Los pedidos
+// de antes de esta versión no tienen nada guardado ahí, así que en esos
+// casos devolvemos null (para mostrar "—" en vez de inventar un $0).
+function precioDelPedido(pedido) {
+  if (pedido.Precio === undefined || pedido.Precio === null || pedido.Precio === '') return null;
+  const numero = Number(pedido.Precio);
+  return Number.isNaN(numero) ? null : numero;
+}
+
+function formatearMoneda(numero) {
+  return `$${numero.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
 function PedidoRow({ pedido, categoria, onGuardar, onDirtyChange, onAbrirNota }) {
   const [cantidad, setCantidad] = useState(pedido.Cantidad);
   const [telefono, setTelefono] = useState(() => textoSeguro(pedido.Telefono));
   const [notas, setNotas] = useState(() => notasIniciales(pedido));
   const [estado, setEstado] = useState(pedido.Estado);
+  // Monto que se va a registrar como "Cargo" si guardas este pedido con
+  // Estado = "Reembolsado". Se precarga con el total del pedido en cuanto
+  // eliges "Reembolsado" en el menú, pero se puede borrar y escribir otro
+  // número (por ejemplo, para un reembolso parcial).
+  const [montoReembolso, setMontoReembolso] = useState('');
   const [guardando, setGuardando] = useState(false);
   const llave = `pedido:${pedido.ID}`;
 
   const telefonoOriginal = textoSeguro(pedido.Telefono);
   const notasOriginal = notasIniciales(pedido);
+  const precioPedido = precioDelPedido(pedido);
+  const totalPedido = precioPedido !== null ? precioPedido * (Number(cantidad) || 0) : null;
 
   const cambioCantidad = String(cantidad) !== String(pedido.Cantidad);
   const cambioTelefono = telefono !== telefonoOriginal;
   const cambioNotas = notas !== notasOriginal;
   const cambioEstado = estado !== pedido.Estado;
   const sinGuardar = cambioCantidad || cambioTelefono || cambioNotas || cambioEstado;
+
+  // Al elegir "Reembolsado" en el menú (viniendo de cualquier otro estado),
+  // precargamos la cajita de monto con el total del pedido. Si Claudia
+  // vuelve a cambiar de estado y regresa a "Reembolsado", se recalcula de
+  // nuevo con la cantidad que tenga en ese momento.
+  function handleCambiarEstado(nuevoEstado) {
+    if (nuevoEstado === 'Reembolsado' && estado !== 'Reembolsado') {
+      setMontoReembolso(totalPedido !== null ? totalPedido.toFixed(2) : '');
+    }
+    setEstado(nuevoEstado);
+  }
 
   // OJO: este efecto depende de los VALORES actuales (cantidad, telefono,
   // notas, estado), no solo de los booleanos "cambió sí/no". Si solo
@@ -1780,7 +1862,9 @@ function PedidoRow({ pedido, categoria, onGuardar, onDirtyChange, onAbrirNota })
 
   function handleGuardar() {
     setGuardando(true);
-    onGuardar(pedido.ID, { cantidad, telefono, notas, estado }).finally(() => setGuardando(false));
+    const payload = { cantidad, telefono, notas, estado };
+    if (estado === 'Reembolsado') payload.montoReembolso = montoReembolso;
+    onGuardar(pedido.ID, payload).finally(() => setGuardando(false));
   }
 
   const fecha = new Date(pedido.Fecha);
@@ -1810,6 +1894,8 @@ function PedidoRow({ pedido, categoria, onGuardar, onDirtyChange, onAbrirNota })
           onChange={(e) => setCantidad(limitarDigitos(e.target.value, MAX_DIGITOS_CANTIDAD))}
         />
       </td>
+      <td>{precioPedido !== null ? formatearMoneda(precioPedido) : '—'}</td>
+      <td>{totalPedido !== null ? formatearMoneda(totalPedido) : '—'}</td>
       <td>
         {/* Cuadro compacto de siempre + un botón de lupa para ver/editar la
             nota completa en grande cuando haga falta (nota larga). Los dos
@@ -1836,14 +1922,29 @@ function PedidoRow({ pedido, categoria, onGuardar, onDirtyChange, onAbrirNota })
         <select
           className={cambioEstado ? 'campo-modificado' : ''}
           value={estado}
-          onChange={(e) => setEstado(e.target.value)}
+          onChange={(e) => handleCambiarEstado(e.target.value)}
         >
-         <option>Sin solicitud</option>
-<option>En proceso</option>
-<option>Pagado</option>
-<option>Reembolsado</option>
-<option>Cancelado</option>
+          <option>Sin solicitud</option>
+          <option>En proceso</option>
+          <option>Pagado</option>
+          <option>Reembolsado</option>
+          <option>Cancelado</option>
         </select>
+        {estado === 'Reembolsado' && (
+          <div className="pedido-reembolso-caja">
+            <label>
+              Monto a reembolsar
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                className="pedido-input-reembolso"
+                value={montoReembolso}
+                onChange={(e) => setMontoReembolso(limitarDigitos(e.target.value, MAX_DIGITOS_PRECIO))}
+              />
+            </label>
+          </div>
+        )}
       </td>
       <td>
         <button className="btn btn-small" onClick={handleGuardar} disabled={!sinGuardar || guardando}>
