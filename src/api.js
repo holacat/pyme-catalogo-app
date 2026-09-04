@@ -57,10 +57,16 @@ export function actualizarStock({ adminKey, productoId, nuevoStock }) {
 
 // Actualiza cualquier combinación de estado/cantidad/teléfono/notas de un
 // pedido. Solo manda los campos que le pases; los que omitas no se tocan.
-export function actualizarPedido({ adminKey, pedidoId, estado, cantidad, telefono, notas }) {
-  return post({ action: 'actualizarPedido', adminKey, pedidoId, estado, cantidad, telefono, notas });
+// `montoReembolso` solo se usa cuando `estado` es "Reembolsado": si no se
+// manda, el backend reembolsa el total del pedido por default.
+export function actualizarPedido({ adminKey, pedidoId, estado, cantidad, telefono, notas, montoReembolso }) {
+  return post({ action: 'actualizarPedido', adminKey, pedidoId, estado, cantidad, telefono, notas, montoReembolso });
 }
 
+// ---- Movimientos (abonos y cargos) para el "Estado de cuenta" ----
+export function listarMovimientos(adminKey) {
+  return get('listarMovimientos', { adminKey });
+}
 export function crearProducto({
   adminKey,
   nombre,
