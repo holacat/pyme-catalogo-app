@@ -465,12 +465,15 @@ export default function Dashboard() {
     new Set(productos.map((p) => categoriaDeProducto(p)))
   ).sort((a, b) => a.localeCompare(b, 'es'));
 
-  // Para poder mostrar la Categoría de cada Pedido (los pedidos no guardan
-  // la categoría, solo el ID del producto), armamos un mapa ID -> Categoría
-  // usando la lista de productos que ya tenemos cargada.
+  // Para poder mostrar la Categoría y el Código de cada Pedido (los pedidos
+  // no guardan eso, solo el ID del producto), armamos dos mapas ID ->
+  // Categoría / ID -> Código usando la lista de productos que ya tenemos
+  // cargada.
   const categoriaPorProductoId = {};
+  const codigoPorProductoId = {};
   productos.forEach((p) => {
     categoriaPorProductoId[p.ID] = categoriaDeProducto(p);
+    codigoPorProductoId[p.ID] = p.CodigoPropio || '';
   });
 
   const productosPorFecha = productosOrdenados.filter(productoEnRangoDeFecha);
@@ -773,7 +776,7 @@ export default function Dashboard() {
             <table className="data-table pedidos-table">
               <thead>
                 <tr>
-                  <th>Fecha</th><th>Hora</th><th>Cliente</th><th>Teléfono</th><th>Producto</th><th>Categoría</th>
+                  <th>Fecha</th><th>Hora</th><th>Cliente</th><th>Teléfono</th><th>Producto</th><th>Categoría</th><th>Código</th>
                   <th>Cant.</th><th>Precio</th><th>Total</th><th>Notas</th><th>Estado</th><th>Guardar</th>
                 </tr>
               </thead>
@@ -783,6 +786,7 @@ export default function Dashboard() {
                     key={`${ped.ID}-${resetToken}`}
                     pedido={ped}
                     categoria={categoriaPorProductoId[ped.ProductoID] || '—'}
+                    codigo={codigoPorProductoId[ped.ProductoID] || '—'}
                     onGuardar={handleGuardarPedido}
                     onDirtyChange={marcarSucio}
                     onAbrirNota={(cliente, valor, onChange) => setNotaEnZoom({ cliente, valor, onChange })}
@@ -808,7 +812,9 @@ export default function Dashboard() {
         </ul>
       )}
 
-      {tab === 'cuenta' && <EstadoCuentaTab movimientos={movimientos} />}
+      {tab === 'cuenta' && (
+        <EstadoCuentaTab movimientos={movimientos} pedidos={pedidos} productos={productos} />
+      )}
 
       {tab === 'orden' && (
         <OrdenTab
@@ -1855,9 +1861,33 @@ function textoRangoFechas(desde, hasta) {
   return `Del ${textoDesde} al ${textoHasta}`;
 }
 
-function EstadoCuentaTab({ movimientos }) {
+function EstadoCuentaTab({ movimientos, pedidos, productos }) {
   const [desde, setDesde] = useState('');
   const [hasta, setHasta] = useState('');
+
+  // Los Movimientos solo guardan el ID del pedido — el nombre del producto y
+  // su código propio se buscan aquí usando los Pedidos y Productos que el
+  // Dashboard ya tiene cargados, sin tener que guardar nada extra en la
+  // hoja de Movimientos.
+  const pedidoPorId = {};
+  (pedidos || []).forEach((p) => {
+    pedidoPorId[p.ID] = p;
+  });
+  const codigoPorProductoId = {};
+  (productos || []).forEach((p) => {
+    codigoPorProductoId[p.ID] = p.CodigoPropio || '';
+  });
+
+  function productoDelMovimiento(mov) {
+    const pedido = pedidoPorId[mov.PedidoID];
+    return pedido ? pedido.Producto : '—';
+  }
+
+  function codigoDelMovimiento(mov) {
+    const pedido = pedidoPorId[mov.PedidoID];
+    if (!pedido) return '—';
+    return codigoPorProductoId[pedido.ProductoID] || '—';
+  }
 
   const movimientosOrdenados = movimientos.slice().reverse(); // más recientes primero
   const movimientosFiltrados = movimientosOrdenados.filter((m) => movimientoEnRangoDeFecha(m, desde, hasta));
@@ -1918,6 +1948,8 @@ function EstadoCuentaTab({ movimientos }) {
               <tr>
                 <th>Fecha</th>
                 <th>Cliente</th>
+                <th>Producto</th>
+                <th>Código</th>
                 <th>Tipo</th>
                 <th>Monto</th>
                 <th>Concepto</th>
@@ -1928,6 +1960,8 @@ function EstadoCuentaTab({ movimientos }) {
                 <tr key={m.ID}>
                   <td>{formatearFechaHora(m.Fecha)}</td>
                   <td>{m.Cliente || '—'}</td>
+                  <td>{productoDelMovimiento(m)}</td>
+                  <td>{codigoDelMovimiento(m)}</td>
                   <td>
                     <span className={`badge-movimiento ${m.Tipo === 'Abono' ? 'badge-abono' : 'badge-cargo'}`}>
                       {m.Tipo}
@@ -1960,7 +1994,7 @@ function EstadoCuentaTab({ movimientos }) {
   );
 }
 
-function PedidoRow({ pedido, categoria, onGuardar, onDirtyChange, onAbrirNota }) {
+function PedidoRow({ pedido, categoria, codigo, onGuardar, onDirtyChange, onAbrirNota }) {
   const [cantidad, setCantidad] = useState(pedido.Cantidad);
   const [telefono, setTelefono] = useState(() => textoSeguro(pedido.Telefono));
   const [notas, setNotas] = useState(() => notasIniciales(pedido));
@@ -2039,6 +2073,7 @@ function PedidoRow({ pedido, categoria, onGuardar, onDirtyChange, onAbrirNota })
       </td>
       <td>{pedido.Producto}</td>
       <td>{categoria}</td>
+      <td>{codigo}</td>
       <td>
         <input
           type="number"
