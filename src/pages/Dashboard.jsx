@@ -8,6 +8,7 @@ import {
   eliminarOpcion,
   actualizarStock,
   actualizarPedido,
+  listarMovimientos,
   crearProducto,
   actualizarProducto,
   cambiarDisponibilidad,
@@ -188,10 +189,11 @@ export default function Dashboard() {
   const [inputKey, setInputKey] = useState('');
   const [verificandoLogin, setVerificandoLogin] = useState(false);
   const [errorLogin, setErrorLogin] = useState('');
-  const [tab, setTab] = useState('stock'); // stock | pedidos | alertas | orden | nuevo
+  const [tab, setTab] = useState('stock'); // stock | pedidos | alertas | cuenta | orden | nuevo
   const [productos, setProductos] = useState([]);
   const [pedidos, setPedidos] = useState([]);
   const [alertas, setAlertas] = useState([]);
+  const [movimientos, setMovimientos] = useState([]);
   // Opciones predeterminadas para los campos de "+ Agregar producto"
   // (Nombre, Código propio, Categoría, Marca, Talla, Color). Se guarda como
   // { categoria: ['Bolsas', 'Zapatos'], color: ['Rojo'], ... }. A propósito
@@ -291,12 +293,19 @@ export default function Dashboard() {
   function cargarTodo(key, opciones = {}) {
     const silencioso = !!opciones.silencioso;
     if (!silencioso) setCargando(true);
-    return Promise.all([listarProductosAdmin(key), listarPedidos(key), obtenerAlertas(key), listarOpciones(key)])
-      .then(([p, o, a, op]) => {
+    return Promise.all([
+      listarProductosAdmin(key),
+      listarPedidos(key),
+      obtenerAlertas(key),
+      listarOpciones(key),
+      listarMovimientos(key),
+    ])
+      .then(([p, o, a, op, mv]) => {
         setProductos(p.productos);
         setPedidos(o.pedidos);
         setAlertas(a.alertas);
         setOpciones(op.opciones || {});
+        setMovimientos(mv.movimientos || []);
         if (!silencioso) setMensaje('');
       })
       .catch((err) => {
@@ -570,6 +579,9 @@ export default function Dashboard() {
         <button className={tab === 'alertas' ? 'active' : ''} onClick={() => cambiarTab('alertas')}>
           Alertas ({alertas.length})
         </button>
+        <button className={tab === 'cuenta' ? 'active' : ''} onClick={() => cambiarTab('cuenta')}>
+          📄 Estado de cuenta
+        </button>
         <button className={tab === 'orden' ? 'active' : ''} onClick={() => cambiarTab('orden')}>
           🔀 Orden del catálogo
         </button>
@@ -795,6 +807,8 @@ export default function Dashboard() {
           ))}
         </ul>
       )}
+
+      {tab === 'cuenta' && <EstadoCuentaTab movimientos={movimientos} />}
 
       {tab === 'orden' && (
         <OrdenTab
@@ -1804,6 +1818,146 @@ function precioDelPedido(pedido) {
 
 function formatearMoneda(numero) {
   return `$${numero.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+// ---- Estado de cuenta (pestaña "📄 Estado de cuenta") ----
+// Cada vez que un pedido pasa a "Pagado" se registra un "Abono" en la hoja
+// Movimientos, y cada vez que pasa a "Reembolsado" se registra un "Cargo".
+// Esta pestaña solo muestra esa lista, filtrable por fecha, con sus totales.
+
+function movimientoEnRangoDeFecha(mov, desde, hasta) {
+  if (!desde && !hasta) return true;
+  if (!mov.Fecha) return false;
+  const fecha = new Date(mov.Fecha);
+  if (Number.isNaN(fecha.getTime())) return false;
+  if (desde && fecha < new Date(`${desde}T00:00:00`)) return false;
+  if (hasta && fecha > new Date(`${hasta}T23:59:59`)) return false;
+  return true;
+}
+
+function formatearFechaHora(valor) {
+  if (!valor) return '—';
+  const fecha = new Date(valor);
+  if (Number.isNaN(fecha.getTime())) return '—';
+  return `${fecha.toLocaleDateString('es-MX')} ${fecha.toLocaleTimeString('es-MX', {
+    hour: '2-digit',
+    minute: '2-digit',
+  })}`;
+}
+
+// Texto del rango de fechas elegido, para mostrarlo arriba de la tabla (y,
+// sobre todo, en la versión impresa/PDF, donde ya no se ven los cuadros de
+// fecha porque se ocultan al imprimir).
+function textoRangoFechas(desde, hasta) {
+  if (!desde && !hasta) return 'Todos los movimientos registrados';
+  const textoDesde = desde ? new Date(`${desde}T00:00:00`).toLocaleDateString('es-MX') : 'el inicio';
+  const textoHasta = hasta ? new Date(`${hasta}T00:00:00`).toLocaleDateString('es-MX') : 'hoy';
+  return `Del ${textoDesde} al ${textoHasta}`;
+}
+
+function EstadoCuentaTab({ movimientos }) {
+  const [desde, setDesde] = useState('');
+  const [hasta, setHasta] = useState('');
+
+  const movimientosOrdenados = movimientos.slice().reverse(); // más recientes primero
+  const movimientosFiltrados = movimientosOrdenados.filter((m) => movimientoEnRangoDeFecha(m, desde, hasta));
+
+  const totalAbonos = movimientosFiltrados
+    .filter((m) => m.Tipo === 'Abono')
+    .reduce((suma, m) => suma + (Number(m.Monto) || 0), 0);
+  const totalCargos = movimientosFiltrados
+    .filter((m) => m.Tipo === 'Cargo')
+    .reduce((suma, m) => suma + (Number(m.Monto) || 0), 0);
+  const totalNeto = totalAbonos - totalCargos;
+
+  const hayFiltro = !!(desde || hasta);
+
+  function limpiarFiltro() {
+    setDesde('');
+    setHasta('');
+  }
+
+  return (
+    <div className="estado-cuenta">
+      <div className="filtro-fechas no-imprimir">
+        <label>
+          Desde
+          <input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} />
+        </label>
+        <label>
+          Hasta
+          <input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} />
+        </label>
+        {hayFiltro && (
+          <button type="button" className="btn btn-secondary btn-small" onClick={limpiarFiltro}>
+            Quitar filtro de fechas
+          </button>
+        )}
+        <button type="button" className="btn btn-primary btn-small" onClick={() => window.print()}>
+          🖨️ Imprimir / Guardar como PDF
+        </button>
+      </div>
+
+      <p className="muted no-imprimir">
+        Para guardarlo como PDF, dale clic a "Imprimir / Guardar como PDF" y, en la ventana que se
+        abre, elige "Guardar como PDF" en el destino/impresora.
+      </p>
+
+      {/* Todo lo que está DENTRO de este div es lo único que se ve al
+          imprimir o guardar como PDF — el resto del panel (menú, pestañas,
+          filtros, botones) se oculta automáticamente. */}
+      <div id="estado-cuenta-imprimible">
+        <div className="estado-cuenta-encabezado-impresion">
+          <h2>Estado de cuenta</h2>
+          <p className="muted">{textoRangoFechas(desde, hasta)}</p>
+        </div>
+
+        <div className="table-scroll">
+          <table className="data-table estado-cuenta-table">
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Cliente</th>
+                <th>Tipo</th>
+                <th>Monto</th>
+                <th>Concepto</th>
+              </tr>
+            </thead>
+            <tbody>
+              {movimientosFiltrados.map((m) => (
+                <tr key={m.ID}>
+                  <td>{formatearFechaHora(m.Fecha)}</td>
+                  <td>{m.Cliente || '—'}</td>
+                  <td>
+                    <span className={`badge-movimiento ${m.Tipo === 'Abono' ? 'badge-abono' : 'badge-cargo'}`}>
+                      {m.Tipo}
+                    </span>
+                  </td>
+                  <td>{formatearMoneda(Number(m.Monto) || 0)}</td>
+                  <td>{m.Concepto || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {movimientosFiltrados.length === 0 && (
+            <p className="info-msg">No hay movimientos en el rango de fechas de arriba.</p>
+          )}
+        </div>
+
+        <div className="estado-cuenta-totales">
+          <p>
+            Total de abonos: <strong>{formatearMoneda(totalAbonos)}</strong>
+          </p>
+          <p>
+            Total de cargos: <strong>{formatearMoneda(totalCargos)}</strong>
+          </p>
+          <p className="estado-cuenta-total-neto">
+            Total neto: <strong>{formatearMoneda(totalNeto)}</strong>
+          </p>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function PedidoRow({ pedido, categoria, onGuardar, onDirtyChange, onAbrirNota }) {
