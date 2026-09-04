@@ -1216,3 +1216,68 @@ main { flex: 1; padding: 1.5rem; max-width: 1100px; margin: 0 auto; width: 100%;
   font-weight: 600;
   cursor: pointer;
 }
+
+/* ---- Estado de cuenta (pestaña "📄 Estado de cuenta") ---- */
+
+.badge-movimiento {
+  display: inline-block;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+.badge-abono {
+  background: #d7f5df;
+  color: #1c7a3b;
+}
+.badge-cargo {
+  background: #fde0e0;
+  color: #a3251f;
+}
+
+.estado-cuenta-totales {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  max-width: 320px;
+  margin-left: auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+}
+
+.estado-cuenta-total-neto {
+  font-size: 1.05rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.4rem;
+  margin-top: 0.3rem;
+}
+
+.estado-cuenta-encabezado-impresion {
+  display: none;
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #estado-cuenta-imprimible,
+  #estado-cuenta-imprimible * {
+    visibility: visible;
+  }
+  #estado-cuenta-imprimible {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+  }
+  .no-imprimir {
+    display: none !important;
+  }
+  .estado-cuenta-encabezado-impresion {
+    display: block;
+    margin-bottom: 1rem;
+  }
+}
