@@ -352,10 +352,10 @@ main { flex: 1; padding: 1.5rem; max-width: 1100px; margin: 0 auto; width: 100%;
 .pedidos-table .btn-small { padding: 0.3rem 0.5rem; font-size: 0.75rem; }
 /* Columnas de Precio y Total (unitario y con la cantidad ya multiplicada):
    no necesitan mucho espacio, así que evitamos que se les estire la tabla. */
-.pedidos-table th:nth-child(8),
-.pedidos-table td:nth-child(8),
 .pedidos-table th:nth-child(9),
-.pedidos-table td:nth-child(9) {
+.pedidos-table td:nth-child(9),
+.pedidos-table th:nth-child(10),
+.pedidos-table td:nth-child(10) {
   white-space: nowrap;
 }
 
