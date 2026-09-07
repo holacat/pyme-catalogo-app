@@ -51,22 +51,31 @@ export function obtenerAlertas(adminKey) {
   return get('alertas', { adminKey });
 }
 
-export function actualizarStock({ adminKey, productoId, nuevoStock }) {
-  return post({ action: 'actualizarStock', adminKey, productoId, nuevoStock });
+// `usuario` es el nombre que la persona escribió al entrar al panel (se usa
+// solo para la Bitácora de cambios, no para seguridad — eso lo sigue
+// haciendo adminKey).
+export function actualizarStock({ adminKey, productoId, nuevoStock, usuario }) {
+  return post({ action: 'actualizarStock', adminKey, productoId, nuevoStock, usuario });
 }
 
 // Actualiza cualquier combinación de estado/cantidad/teléfono/notas de un
 // pedido. Solo manda los campos que le pases; los que omitas no se tocan.
 // `montoReembolso` solo se usa cuando `estado` es "Reembolsado": si no se
 // manda, el backend reembolsa el total del pedido por default.
-export function actualizarPedido({ adminKey, pedidoId, estado, cantidad, telefono, notas, montoReembolso }) {
-  return post({ action: 'actualizarPedido', adminKey, pedidoId, estado, cantidad, telefono, notas, montoReembolso });
+export function actualizarPedido({ adminKey, pedidoId, estado, cantidad, telefono, notas, montoReembolso, usuario }) {
+  return post({ action: 'actualizarPedido', adminKey, pedidoId, estado, cantidad, telefono, notas, montoReembolso, usuario });
 }
 
 // ---- Movimientos (abonos y cargos) para el "Estado de cuenta" ----
 export function listarMovimientos(adminKey) {
   return get('listarMovimientos', { adminKey });
 }
+
+// ---- Bitácora de cambios (quién hizo qué y cuándo) ----
+export function listarBitacora(adminKey) {
+  return get('listarBitacora', { adminKey });
+}
+
 export function crearProducto({
   adminKey,
   nombre,
@@ -81,6 +90,7 @@ export function crearProducto({
   fotoUrl,
   descripcion,
   codigoPropio,
+  usuario,
 }) {
   return post({
     action: 'crearProducto',
@@ -97,6 +107,7 @@ export function crearProducto({
     fotoUrl,
     descripcion,
     codigoPropio,
+    usuario,
   });
 }
 
@@ -118,6 +129,7 @@ export function actualizarProducto({
   disponible,
   codigoPropio,
   orden,
+  usuario,
 }) {
   return post({
     action: 'actualizarProducto',
@@ -137,19 +149,20 @@ export function actualizarProducto({
     disponible,
     codigoPropio,
     orden,
+    usuario,
   });
 }
 
 // Muestra/oculta un producto del catálogo público sin borrar nada (se
 // puede revertir en cualquier momento).
-export function cambiarDisponibilidad({ adminKey, productoId, disponible }) {
-  return post({ action: 'actualizarProducto', adminKey, productoId, disponible });
+export function cambiarDisponibilidad({ adminKey, productoId, disponible, usuario }) {
+  return post({ action: 'actualizarProducto', adminKey, productoId, disponible, usuario });
 }
 
 // Borra la fila del producto de forma permanente. No se puede deshacer
 // desde la app.
-export function eliminarProducto({ adminKey, productoId }) {
-  return post({ action: 'eliminarProducto', adminKey, productoId });
+export function eliminarProducto({ adminKey, productoId, usuario }) {
+  return post({ action: 'eliminarProducto', adminKey, productoId, usuario });
 }
 
 // Sube una foto (como base64) a la carpeta de Google Drive del negocio y
@@ -163,14 +176,14 @@ export function subirFoto({ adminKey, nombreArchivo, tipoMime, datosBase64 }) {
 // Guarda de un jalón el nuevo número de "Orden" de varios productos a la
 // vez (por ejemplo, todos los de una categoría después de arrastrar uno).
 // cambios = [{ productoId, orden }, ...]
-export function actualizarOrdenMultiple({ adminKey, cambios }) {
-  return post({ action: 'actualizarOrdenMultiple', adminKey, cambios });
+export function actualizarOrdenMultiple({ adminKey, cambios, usuario }) {
+  return post({ action: 'actualizarOrdenMultiple', adminKey, cambios, usuario });
 }
 
 // Cambia el nombre de una categoría en TODOS los productos que la tengan,
 // de un jalón (por ejemplo, "Bolsas" -> "Bolsos").
-export function renombrarCategoria({ adminKey, categoriaAnterior, categoriaNueva }) {
-  return post({ action: 'renombrarCategoria', adminKey, categoriaAnterior, categoriaNueva });
+export function renombrarCategoria({ adminKey, categoriaAnterior, categoriaNueva, usuario }) {
+  return post({ action: 'renombrarCategoria', adminKey, categoriaAnterior, categoriaNueva, usuario });
 }
 
 // Quita o borra una categoría completa.
@@ -179,8 +192,8 @@ export function renombrarCategoria({ adminKey, categoriaAnterior, categoriaNueva
 //   "Otros").
 // - Si borrarProductos es true: se borran también, para siempre, TODOS
 //   los productos de esa categoría (no se puede deshacer desde la app).
-export function eliminarCategoria({ adminKey, categoria, borrarProductos }) {
-  return post({ action: 'eliminarCategoria', adminKey, categoria, borrarProductos });
+export function eliminarCategoria({ adminKey, categoria, borrarProductos, usuario }) {
+  return post({ action: 'eliminarCategoria', adminKey, categoria, borrarProductos, usuario });
 }
 
 // ---- Opciones predeterminadas (Nombre, Categoría, Marca, Talla, Color,
