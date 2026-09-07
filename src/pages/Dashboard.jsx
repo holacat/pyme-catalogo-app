@@ -9,6 +9,7 @@ import {
   actualizarStock,
   actualizarPedido,
   listarMovimientos,
+  listarBitacora,
   crearProducto,
   actualizarProducto,
   cambiarDisponibilidad,
@@ -178,6 +179,13 @@ const ESTADOS_PEDIDO = ['Sin solicitud', 'En proceso', 'Pagado', 'Reembolsado', 
 
 const STORAGE_KEY = 'pyme_admin_key';
 
+// El nombre de usuario NO es una clave de seguridad (esa sigue siendo
+// ADMIN_KEY) — es solo para que la Bitácora de cambios pueda decir QUIÉN
+// hizo cada cosa. Por eso se guarda en localStorage (no sessionStorage):
+// se pregunta una sola vez por celular/computadora, y se queda ahí aunque
+// se cierre el navegador.
+const USUARIO_STORAGE_KEY = 'pyme_admin_usuario';
+
 export default function Dashboard() {
   const [adminKey, setAdminKey] = useState(() => sessionStorage.getItem(STORAGE_KEY) || '');
   const [autenticado, setAutenticado] = useState(!!sessionStorage.getItem(STORAGE_KEY));
@@ -187,13 +195,16 @@ export default function Dashboard() {
   // que en realidad no tiene una clave correcta.
   const [verificandoSesion, setVerificandoSesion] = useState(() => !!sessionStorage.getItem(STORAGE_KEY));
   const [inputKey, setInputKey] = useState('');
+  const [usuario, setUsuario] = useState(() => localStorage.getItem(USUARIO_STORAGE_KEY) || '');
+  const [inputUsuario, setInputUsuario] = useState('');
   const [verificandoLogin, setVerificandoLogin] = useState(false);
   const [errorLogin, setErrorLogin] = useState('');
-  const [tab, setTab] = useState('stock'); // stock | pedidos | alertas | cuenta | orden | nuevo
+  const [tab, setTab] = useState('stock'); // stock | pedidos | alertas | cuenta | bitacora | orden | nuevo
   const [productos, setProductos] = useState([]);
   const [pedidos, setPedidos] = useState([]);
   const [alertas, setAlertas] = useState([]);
   const [movimientos, setMovimientos] = useState([]);
+  const [bitacora, setBitacora] = useState([]);
   // Opciones predeterminadas para los campos de "+ Agregar producto"
   // (Nombre, Código propio, Categoría, Marca, Talla, Color). Se guarda como
   // { categoria: ['Bolsas', 'Zapatos'], color: ['Rojo'], ... }. A propósito
@@ -299,13 +310,15 @@ export default function Dashboard() {
       obtenerAlertas(key),
       listarOpciones(key),
       listarMovimientos(key),
+      listarBitacora(key),
     ])
-      .then(([p, o, a, op, mv]) => {
+      .then(([p, o, a, op, mv, b]) => {
         setProductos(p.productos);
         setPedidos(o.pedidos);
         setAlertas(a.alertas);
         setOpciones(op.opciones || {});
         setMovimientos(mv.movimientos || []);
+        setBitacora(b.bitacora || []);
         if (!silencioso) setMensaje('');
       })
       .catch((err) => {
@@ -354,11 +367,19 @@ export default function Dashboard() {
     e.preventDefault();
     const clave = inputKey.trim();
     if (!clave) return;
+    // Si todavía no hay un nombre guardado en este celular/computadora, es
+    // obligatorio escribirlo antes de entrar (una sola vez por dispositivo).
+    const nombre = usuario || inputUsuario.trim();
+    if (!usuario && !nombre) return;
     setVerificandoLogin(true);
     setErrorLogin('');
     listarProductosAdmin(clave)
       .then(() => {
         sessionStorage.setItem(STORAGE_KEY, clave);
+        if (!usuario) {
+          localStorage.setItem(USUARIO_STORAGE_KEY, nombre);
+          setUsuario(nombre);
+        }
         setAdminKey(clave);
         setAutenticado(true);
         setVerificandoSesion(false);
@@ -380,21 +401,35 @@ export default function Dashboard() {
     setInputKey('');
   }
 
+  // "Cambiar" el nombre guardado: cierra sesión y borra el nombre de este
+  // dispositivo, así la próxima vez que alguien entre aquí se le vuelve a
+  // preguntar (por ejemplo, si cambia la persona que usa esa computadora).
+  function handleCambiarUsuario() {
+    const confirmar = window.confirm(
+      `Se va a cerrar la sesión y la próxima persona que entre en este celular/computadora tendrá que volver a escribir su nombre. ¿Continuar?`
+    );
+    if (!confirmar) return;
+    localStorage.removeItem(USUARIO_STORAGE_KEY);
+    setUsuario('');
+    setInputUsuario('');
+    handleLogout();
+  }
+
   function handleActualizarStock(productoId, nuevoStock) {
-    actualizarStock({ adminKey, productoId, nuevoStock })
+    actualizarStock({ adminKey, productoId, nuevoStock, usuario })
       .then(() => cargarTodo(adminKey))
       .catch((err) => setMensaje(`Error al actualizar stock: ${err.message}`));
   }
 
   function handleGuardarPedido(pedidoId, { cantidad, telefono, notas, estado, montoReembolso }) {
-    return actualizarPedido({ adminKey, pedidoId, cantidad, telefono, notas, estado, montoReembolso })
+    return actualizarPedido({ adminKey, pedidoId, cantidad, telefono, notas, estado, montoReembolso, usuario })
       .then(() => cargarTodo(adminKey))
       .catch((err) => setMensaje(`Error al actualizar pedido: ${err.message}`));
   }
 
   function handleCambiarDisponibilidad(producto) {
     const nuevoValor = !esProductoVisible(producto);
-    cambiarDisponibilidad({ adminKey, productoId: producto.ID, disponible: nuevoValor })
+    cambiarDisponibilidad({ adminKey, productoId: producto.ID, disponible: nuevoValor, usuario })
       .then(() => cargarTodo(adminKey))
       .catch((err) => setMensaje(`Error al cambiar visibilidad: ${err.message}`));
   }
@@ -404,7 +439,7 @@ export default function Dashboard() {
       `¿Seguro que quieres eliminar "${producto.Nombre}" para siempre? Esta acción no se puede deshacer desde la app.`
     );
     if (!confirmar) return;
-    eliminarProducto({ adminKey, productoId: producto.ID })
+    eliminarProducto({ adminKey, productoId: producto.ID, usuario })
       .then(() => cargarTodo(adminKey))
       .catch((err) => setMensaje(`Error al eliminar producto: ${err.message}`));
   }
@@ -417,6 +452,15 @@ export default function Dashboard() {
           Ingresa la clave de administrador para entrar al panel de control.
         </p>
         {errorLogin && <p className="info-msg error">{errorLogin}</p>}
+        {!usuario && (
+          <input
+            type="text"
+            placeholder="Tu nombre (solo se pregunta una vez en este celular/compu)"
+            value={inputUsuario}
+            onChange={(e) => setInputUsuario(e.target.value)}
+            required
+          />
+        )}
         <input
           type="password"
           placeholder="Clave de administrador"
@@ -539,7 +583,15 @@ export default function Dashboard() {
     <div className="dashboard">
       <div className="dashboard-header">
         <h2>Panel de administración</h2>
-        <button className="btn btn-secondary" onClick={handleLogout}>Cerrar sesión</button>
+        <div className="dashboard-header-acciones">
+          <span className="muted texto-usuario-conectado">
+            Sesión: <strong>{usuario || 'Sin nombre'}</strong>{' '}
+            <button type="button" className="link-boton" onClick={handleCambiarUsuario}>
+              (cambiar)
+            </button>
+          </span>
+          <button className="btn btn-secondary" onClick={handleLogout}>Cerrar sesión</button>
+        </div>
       </div>
 
       {alertas.length > 0 && (
@@ -584,6 +636,9 @@ export default function Dashboard() {
         </button>
         <button className={tab === 'cuenta' ? 'active' : ''} onClick={() => cambiarTab('cuenta')}>
           📄 Estado de cuenta
+        </button>
+        <button className={tab === 'bitacora' ? 'active' : ''} onClick={() => cambiarTab('bitacora')}>
+          🗒️ Bitácora
         </button>
         <button className={tab === 'orden' ? 'active' : ''} onClick={() => cambiarTab('orden')}>
           🔀 Orden del catálogo
@@ -816,11 +871,14 @@ export default function Dashboard() {
         <EstadoCuentaTab movimientos={movimientos} pedidos={pedidos} productos={productos} />
       )}
 
+      {tab === 'bitacora' && <BitacoraTab bitacora={bitacora} />}
+
       {tab === 'orden' && (
         <OrdenTab
           productos={productos}
           opciones={opciones}
           adminKey={adminKey}
+          usuario={usuario}
           onCambio={() => cargarTodo(adminKey, { silencioso: true })}
         />
       )}
@@ -828,6 +886,7 @@ export default function Dashboard() {
       {tab === 'nuevo' && (
         <ProductoForm
           adminKey={adminKey}
+          usuario={usuario}
           opciones={opciones}
           onOpcionesActualizadas={() => cargarTodo(adminKey, { silencioso: true })}
           onGuardado={() => {
@@ -843,6 +902,7 @@ export default function Dashboard() {
             <h3>Editar producto</h3>
             <ProductoForm
               adminKey={adminKey}
+              usuario={usuario}
               opciones={opciones}
               onOpcionesActualizadas={() => cargarTodo(adminKey, { silencioso: true })}
               productoExistente={productoEditando}
@@ -939,7 +999,7 @@ const CAMPOS_CON_OPCIONES = [
 // Sirve tanto para dar de alta un producto nuevo como para editar uno que
 // ya existe: si le pasas `productoExistente`, precarga sus datos y guarda
 // con "actualizarProducto" en vez de "crearProducto".
-function ProductoForm({ adminKey, opciones = {}, productoExistente, onGuardado, onOpcionesActualizadas, onCancelar }) {
+function ProductoForm({ adminKey, usuario, opciones = {}, productoExistente, onGuardado, onOpcionesActualizadas, onCancelar }) {
   const esEdicion = !!productoExistente;
   const [form, setForm] = useState(() => (esEdicion ? formDesdeProducto(productoExistente) : FORM_INICIAL));
   const [fotos, setFotos] = useState(() => (esEdicion ? fotosDesdeProducto(productoExistente) : []));
@@ -1027,7 +1087,7 @@ function ProductoForm({ adminKey, opciones = {}, productoExistente, onGuardado, 
     setEnviando(true);
     setMensaje('');
 
-    const datos = { adminKey, ...form, fotoUrl: fotos.join('|') };
+    const datos = { adminKey, usuario, ...form, fotoUrl: fotos.join('|') };
     const promesa = esEdicion
       ? actualizarProducto({ ...datos, productoId: productoExistente.ID })
       : crearProducto(datos);
@@ -1349,7 +1409,7 @@ function agruparParaOrden(productos, categoriasPredeterminadas, categoriasOculta
 // completa de un jalón; para ocultarla/mostrarla del catálogo sin tocar sus
 // productos; para agregar una categoría nueva vacía; y para quitar o borrar
 // una categoría completa (con o sin sus productos).
-function OrdenTab({ productos, opciones, adminKey, onCambio }) {
+function OrdenTab({ productos, opciones, adminKey, usuario, onCambio }) {
   const categoriasPredeterminadas = opciones.categoria || [];
   const categoriasOcultas = opciones.categoriaOculta || [];
 
@@ -1411,7 +1471,7 @@ function OrdenTab({ productos, opciones, adminKey, onCambio }) {
     const cambios = grupo.productos.map((p, i) => ({ productoId: p.ID, orden: i + 1 }));
     setGuardando(true);
     setMensaje('');
-    actualizarOrdenMultiple({ adminKey, cambios })
+    actualizarOrdenMultiple({ adminKey, cambios, usuario })
       .then(() => onCambio())
       .catch((err) => setMensaje(`Error al guardar el orden: ${err.message}`))
       .finally(() => setGuardando(false));
@@ -1426,7 +1486,7 @@ function OrdenTab({ productos, opciones, adminKey, onCambio }) {
     const nuevo = nombreNuevo.trim();
     if (!nuevo || !renombrando) return;
     setGuardandoNombre(true);
-    renombrarCategoria({ adminKey, categoriaAnterior: renombrando, categoriaNueva: nuevo })
+    renombrarCategoria({ adminKey, categoriaAnterior: renombrando, categoriaNueva: nuevo, usuario })
       .then(() => {
         setRenombrando(null);
         onCambio();
@@ -1481,7 +1541,7 @@ function OrdenTab({ productos, opciones, adminKey, onCambio }) {
     if (!eliminando) return;
     if (borrarProductosTambien && !confirmoBorrarProductos) return;
     setGuardandoEliminar(true);
-    eliminarCategoria({ adminKey, categoria: eliminando.nombre, borrarProductos: borrarProductosTambien })
+    eliminarCategoria({ adminKey, categoria: eliminando.nombre, borrarProductos: borrarProductosTambien, usuario })
       .then(() => {
         setEliminando(null);
         onCambio();
@@ -1989,6 +2049,74 @@ function EstadoCuentaTab({ movimientos, pedidos, productos }) {
             Total neto: <strong>{formatearMoneda(totalNeto)}</strong>
           </p>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ---- Bitácora de cambios (pestaña "🗒️ Bitácora") ----
+// Cada línea la agrega SOLA el backend cuando alguien agrega/edita/elimina
+// un producto, mueve el stock, actualiza un pedido, o reordena/renombra/
+// elimina una categoría. Esta pestaña solo muestra esa lista, más reciente
+// primero, filtrable por fecha (igual que Estado de cuenta).
+function BitacoraTab({ bitacora }) {
+  const [desde, setDesde] = useState('');
+  const [hasta, setHasta] = useState('');
+
+  const bitacoraOrdenada = bitacora.slice().reverse();
+  const bitacoraFiltrada = bitacoraOrdenada.filter((b) => movimientoEnRangoDeFecha(b, desde, hasta));
+
+  const hayFiltro = !!(desde || hasta);
+
+  function limpiarFiltro() {
+    setDesde('');
+    setHasta('');
+  }
+
+  return (
+    <div className="bitacora-tab">
+      <div className="filtro-fechas">
+        <label>
+          Desde
+          <input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} />
+        </label>
+        <label>
+          Hasta
+          <input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} />
+        </label>
+        {hayFiltro && (
+          <button type="button" className="btn btn-secondary btn-small" onClick={limpiarFiltro}>
+            Quitar filtro de fechas
+          </button>
+        )}
+      </div>
+
+      <p className="muted">{textoRangoFechas(desde, hasta)}</p>
+
+      <div className="table-scroll">
+        <table className="data-table bitacora-table">
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Usuario</th>
+              <th>Acción</th>
+              <th>Detalle</th>
+            </tr>
+          </thead>
+          <tbody>
+            {bitacoraFiltrada.map((b) => (
+              <tr key={b.ID}>
+                <td>{formatearFechaHora(b.Fecha)}</td>
+                <td>{b.Usuario || '—'}</td>
+                <td>{b.Accion || '—'}</td>
+                <td>{b.Detalle || '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {bitacoraFiltrada.length === 0 && (
+          <p className="info-msg">No hay cambios registrados en el rango de fechas de arriba.</p>
+        )}
       </div>
     </div>
   );
