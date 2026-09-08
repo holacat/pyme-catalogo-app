@@ -1301,3 +1301,157 @@ main { flex: 1; padding: 1.5rem; max-width: 1100px; margin: 0 auto; width: 100%;
     margin-bottom: 1rem;
   }
 }
+/* ---- Pestaña "📈 Analítica de ventas" (Bloque 3, ítem 4) ----
+   Las gráficas son barras hechas con CSS puro (ancho/alto en %), sin
+   ninguna librería nueva de gráficas — así no hay riesgo de romper el
+   despliegue por una dependencia externa que falte. */
+.analitica-rapido-btn {
+  padding: 0.4rem 0.8rem;
+  border: 1px solid var(--border);
+  background: #f9fafb;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.analitica-rapido-btn.activo {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: white;
+}
+
+.analitica-tarjeta {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-bottom: 1.25rem;
+}
+
+.analitica-tarjeta-titulo {
+  font-size: 0.85rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.analitica-tarjeta-monto {
+  font-size: 1.8rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.analitica-cambio {
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.analitica-cambio-positivo {
+  color: #1c7a3b;
+}
+
+.analitica-cambio-negativo {
+  color: #a3251f;
+}
+
+.analitica-seccion {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.25rem;
+}
+
+.analitica-seccion h3 {
+  margin: 0 0 0.9rem;
+  font-size: 1rem;
+}
+
+.analitica-barras {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.analitica-barra-fila {
+  display: grid;
+  grid-template-columns: minmax(90px, 160px) 1fr minmax(110px, auto);
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.analitica-barra-etiqueta {
+  font-size: 0.85rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.analitica-barra-pista {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  height: 14px;
+  overflow: hidden;
+}
+
+.analitica-barra-relleno {
+  height: 100%;
+  background: var(--brand);
+  border-radius: 999px;
+  transition: width 0.2s ease;
+}
+
+.analitica-barra-relleno-categoria {
+  background: #2563eb;
+}
+
+.analitica-barra-relleno-vendedor {
+  background: #a855f7;
+}
+
+.analitica-barra-valor {
+  font-size: 0.82rem;
+  color: var(--muted);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.analitica-tendencia {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.35rem;
+  height: 160px;
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
+}
+
+.analitica-tendencia-columna {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  height: 100%;
+  min-width: 26px;
+  flex: 1 0 auto;
+}
+
+.analitica-tendencia-barra {
+  width: 100%;
+  max-width: 22px;
+  background: var(--brand);
+  border-radius: 4px 4px 0 0;
+  min-height: 2px;
+}
+
+.analitica-tendencia-fecha {
+  font-size: 0.65rem;
+  color: var(--muted);
+  margin-top: 0.3rem;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  max-height: 45px;
+}
