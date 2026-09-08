@@ -1466,4 +1466,1336 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio }) {
   const [gruposLocal, setGruposLocal] = useState(() =>
     agruparParaOrden(productos, categoriasPredeterminadas, categoriasOcultas)
   );
-  const [gu
+  const [guardando, setGuardando] = useState(false);
+  const [mensaje, setMensaje] = useState('');
+
+  const [renombrando, setRenombrando] = useState(null); // nombre de categoría actual, o null
+  const [nombreNuevo, setNombreNuevo] = useState('');
+  const [guardandoNombre, setGuardandoNombre] = useState(false);
+
+  const [agregandoCategoria, setAgregandoCategoria] = useState(false);
+  const [nombreCategoriaNueva, setNombreCategoriaNueva] = useState('');
+  const [guardandoCategoriaNueva, setGuardandoCategoriaNueva] = useState(false);
+
+  // Nombre de la categoría que se está ocultando/mostrando en este momento
+  // (mientras se guarda), para poder deshabilitar solo ESE botón y no
+  // todos, si Claudia le da clic a varias categorías seguidas.
+  const [ocultandoCategoria, setOcultandoCategoria] = useState('');
+
+  const [eliminando, setEliminando] = useState(null); // { nombre, cantidad } o null
+  const [borrarProductosTambien, setBorrarProductosTambien] = useState(false);
+  const [confirmoBorrarProductos, setConfirmoBorrarProductos] = useState(false);
+  const [guardandoEliminar, setGuardandoEliminar] = useState(false);
+
+  // Si los productos o las opciones (categorías nuevas, renombradas,
+  // ocultas) cambian desde fuera, se vuelve a acomodar la lista con los
+  // datos más recientes.
+  useEffect(() => {
+    setGruposLocal(agruparParaOrden(productos, categoriasPredeterminadas, categoriasOcultas));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productos, opciones]);
+
+  // Sube (dirección -1) o baja (dirección +1) un producto UN lugar dentro
+  // de su categoría. Mucho más preciso que arrastrar: cada clic mueve
+  // exactamente un lugar, sin riesgo de soltarlo en la fila equivocada.
+  function moverProducto(nombreCategoria, indice, direccion) {
+    setGruposLocal((prev) => {
+      const nuevos = prev.map((g) => ({ ...g, productos: g.productos.slice() }));
+      const grupo = nuevos.find((g) => g.nombre === nombreCategoria);
+      if (!grupo) return prev;
+
+      const destino = indice + direccion;
+      if (destino < 0 || destino >= grupo.productos.length) return prev;
+
+      const [movido] = grupo.productos.splice(indice, 1);
+      grupo.productos.splice(destino, 0, movido);
+
+      guardarOrdenDeCategoria(grupo);
+      return nuevos;
+    });
+  }
+
+  // Renumera 1, 2, 3... toda la categoría según cómo haya quedado
+  // acomodada, y manda todos esos números juntos en una sola llamada.
+  function guardarOrdenDeCategoria(grupo) {
+    const cambios = grupo.productos.map((p, i) => ({ productoId: p.ID, orden: i + 1 }));
+    setGuardando(true);
+    setMensaje('');
+    actualizarOrdenMultiple({ sesionToken, cambios })
+      .then(() => onCambio())
+      .catch((err) => setMensaje(`Error al guardar el orden: ${err.message}`))
+      .finally(() => setGuardando(false));
+  }
+
+  function abrirRenombrar(nombreActual) {
+    setRenombrando(nombreActual);
+    setNombreNuevo(nombreActual === 'Otros' ? '' : nombreActual);
+  }
+
+  function confirmarRenombrar() {
+    const nuevo = nombreNuevo.trim();
+    if (!nuevo || !renombrando) return;
+    setGuardandoNombre(true);
+    renombrarCategoria({ sesionToken, categoriaAnterior: renombrando, categoriaNueva: nuevo })
+      .then(() => {
+        setRenombrando(null);
+        onCambio();
+      })
+      .catch((err) => setMensaje(`Error al renombrar la categoría: ${err.message}`))
+      .finally(() => setGuardandoNombre(false));
+  }
+
+  function abrirAgregarCategoria() {
+    setNombreCategoriaNueva('');
+    setAgregandoCategoria(true);
+  }
+
+  function confirmarAgregarCategoria() {
+    const nombre = nombreCategoriaNueva.trim();
+    if (!nombre) return;
+    setGuardandoCategoriaNueva(true);
+    agregarOpcion({ sesionToken, campo: 'categoria', valor: nombre })
+      .then(() => {
+        setAgregandoCategoria(false);
+        onCambio();
+      })
+      .catch((err) => setMensaje(`Error al agregar la categoría: ${err.message}`))
+      .finally(() => setGuardandoCategoriaNueva(false));
+  }
+
+  // Ocultar/mostrar es reversible y NO toca los productos ni su categoría:
+  // solo agrega o quita el nombre de la categoría de una listita aparte
+  // ("categoriaOculta"), que el catálogo público revisa antes de mostrar
+  // cada producto.
+  function toggleOcultarCategoria(grupo) {
+    setOcultandoCategoria(grupo.nombre);
+    setMensaje('');
+    const promesa = grupo.oculta
+      ? eliminarOpcion({ sesionToken, campo: 'categoriaOculta', valor: grupo.nombre })
+      : agregarOpcion({ sesionToken, campo: 'categoriaOculta', valor: grupo.nombre });
+    promesa
+      .then(() => onCambio())
+      .catch((err) =>
+        setMensaje(`Error al ${grupo.oculta ? 'volver a mostrar' : 'ocultar'} la categoría: ${err.message}`)
+      )
+      .finally(() => setOcultandoCategoria(''));
+  }
+
+  function abrirEliminar(grupo) {
+    setEliminando({ nombre: grupo.nombre, cantidad: grupo.productos.length });
+    setBorrarProductosTambien(false);
+    setConfirmoBorrarProductos(false);
+  }
+
+  function confirmarEliminar() {
+    if (!eliminando) return;
+    if (borrarProductosTambien && !confirmoBorrarProductos) return;
+    setGuardandoEliminar(true);
+    eliminarCategoria({ sesionToken, categoria: eliminando.nombre, borrarProductos: borrarProductosTambien })
+      .then(() => {
+        setEliminando(null);
+        onCambio();
+      })
+      .catch((err) => setMensaje(`Error al quitar/borrar la categoría: ${err.message}`))
+      .finally(() => setGuardandoEliminar(false));
+  }
+
+  return (
+    <div className="orden-catalogo">
+      <p className="muted">
+        Usa las flechitas ▲ y ▼ para subir o bajar un producto, un lugar a la vez, dentro de su
+        categoría — así controlas el orden en que se ven en el catálogo público. El cambio se
+        guarda solo, no hace falta darle a ningún botón de "Guardar".
+      </p>
+
+      <div className="orden-barra-superior">
+        <button type="button" className="btn btn-secondary" onClick={abrirAgregarCategoria}>
+          + Agregar categoría
+        </button>
+      </div>
+
+      {guardando && <p className="info-msg">Guardando orden…</p>}
+      {mensaje && <p className="info-msg error">{mensaje}</p>}
+
+      {gruposLocal.map((grupo) => (
+        <section key={grupo.nombre} className={`orden-categoria-box ${grupo.oculta ? 'categoria-oculta' : ''}`}>
+          <div className="orden-categoria-header">
+            <h3>
+              {grupo.nombre}
+              {grupo.oculta && <span className="badge badge-oculto">Oculta del catálogo</span>}
+            </h3>
+            <div className="orden-categoria-botones">
+              <button
+                type="button"
+                className="btn btn-secondary btn-small"
+                onClick={() => abrirRenombrar(grupo.nombre)}
+              >
+                ✏️ Renombrar
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-small"
+                onClick={() => toggleOcultarCategoria(grupo)}
+                disabled={ocultandoCategoria === grupo.nombre}
+              >
+                {grupo.oculta ? '👁️ Mostrar' : '🙈 Ocultar'}
+              </button>
+              <button
+                type="button"
+                className="btn btn-eliminar btn-small"
+                onClick={() => abrirEliminar(grupo)}
+              >
+                🗑️ Eliminar
+              </button>
+            </div>
+          </div>
+
+          {grupo.productos.length === 0 ? (
+            <p className="muted">Todavía no hay productos en esta categoría.</p>
+          ) : (
+            <ul className="orden-lista">
+              {grupo.productos.map((p, i) => (
+                <li key={p.ID} className="orden-fila">
+                  <div className="orden-botones-mover">
+                    <button
+                      type="button"
+                      className="orden-mover-btn"
+                      onClick={() => moverProducto(grupo.nombre, i, -1)}
+                      disabled={i === 0}
+                      title="Subir un lugar"
+                      aria-label="Subir un lugar"
+                    >
+                      ▲
+                    </button>
+                    <button
+                      type="button"
+                      className="orden-mover-btn"
+                      onClick={() => moverProducto(grupo.nombre, i, 1)}
+                      disabled={i === grupo.productos.length - 1}
+                      title="Bajar un lugar"
+                      aria-label="Bajar un lugar"
+                    >
+                      ▼
+                    </button>
+                  </div>
+                  {primeraFoto(p.FotoURL) ? (
+                    <img src={primeraFoto(p.FotoURL)} alt={p.Nombre} className="orden-thumb" />
+                  ) : (
+                    <div className="orden-thumb orden-thumb-vacia">Sin foto</div>
+                  )}
+                  <span className="orden-nombre">{p.Nombre}</span>
+                  {!esProductoVisible(p) && <span className="badge badge-oculto">Oculto</span>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      ))}
+
+      {renombrando && (
+        <div className="modal-overlay" onClick={() => setRenombrando(null)}>
+          <div className="modal-box" onClick={(e) => e.stopPropagation()}>
+            <h3>Renombrar categoría</h3>
+            <p className="muted">
+              Esto cambia el nombre de la categoría en TODOS los productos que la tengan
+              (actualmente "{renombrando}"), de un jalón.
+            </p>
+            <label className="modal-field">
+              Nuevo nombre
+              <input value={nombreNuevo} onChange={(e) => setNombreNuevo(e.target.value)} autoFocus />
+            </label>
+            <div className="modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setRenombrando(null)}>
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={guardandoNombre || !nombreNuevo.trim()}
+                onClick={confirmarRenombrar}
+              >
+                {guardandoNombre ? 'Guardando…' : 'Guardar nuevo nombre'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {agregandoCategoria && (
+        <div className="modal-overlay" onClick={() => setAgregandoCategoria(false)}>
+          <div className="modal-box" onClick={(e) => e.stopPropagation()}>
+            <h3>Agregar categoría nueva</h3>
+            <p className="muted">
+              Se crea una cajita vacía con este nombre. Para meterle productos, agrégalos o
+              edítalos y escribe este mismo nombre en el campo "Categoría".
+            </p>
+            <label className="modal-field">
+              Nombre de la categoría
+              <input
+                value={nombreCategoriaNueva}
+                onChange={(e) => setNombreCategoriaNueva(e.target.value)}
+                placeholder="Ej. Zapatos"
+                autoFocus
+              />
+            </label>
+            <div className="modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setAgregandoCategoria(false)}>
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={guardandoCategoriaNueva || !nombreCategoriaNueva.trim()}
+                onClick={confirmarAgregarCategoria}
+              >
+                {guardandoCategoriaNueva ? 'Agregando…' : 'Agregar categoría'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {eliminando && (
+        <div className="modal-overlay" onClick={() => setEliminando(null)}>
+          <div className="modal-box" onClick={(e) => e.stopPropagation()}>
+            <h3>Eliminar categoría "{eliminando.nombre}"</h3>
+            <p className="muted">
+              Esta categoría tiene {eliminando.cantidad} producto{eliminando.cantidad === 1 ? '' : 's'}.
+              Elige qué quieres hacer:
+            </p>
+
+            <label className="modal-opcion-radio">
+              <input
+                type="radio"
+                name="modoEliminarCategoria"
+                checked={!borrarProductosTambien}
+                onChange={() => {
+                  setBorrarProductosTambien(false);
+                  setConfirmoBorrarProductos(false);
+                }}
+              />
+              Solo quitar la categoría — sus {eliminando.cantidad} producto
+              {eliminando.cantidad === 1 ? '' : 's'} se conservan, se van a "Otros".
+            </label>
+
+            <label className="modal-opcion-radio">
+              <input
+                type="radio"
+                name="modoEliminarCategoria"
+                checked={borrarProductosTambien}
+                onChange={() => setBorrarProductosTambien(true)}
+              />
+              Borrar la categoría Y sus {eliminando.cantidad} producto{eliminando.cantidad === 1 ? '' : 's'}{' '}
+              para siempre.
+            </label>
+
+            {borrarProductosTambien && (
+              <div className="aviso-peligro">
+                ⚠️ Esto NO se puede deshacer desde la app: se van a borrar {eliminando.cantidad}{' '}
+                producto{eliminando.cantidad === 1 ? '' : 's'} de tu inventario para siempre.
+                <label className="modal-opcion-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={confirmoBorrarProductos}
+                    onChange={(e) => setConfirmoBorrarProductos(e.target.checked)}
+                  />
+                  Sí, entiendo, quiero borrar también los productos.
+                </label>
+              </div>
+            )}
+
+            <div className="modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setEliminando(null)}>
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn btn-eliminar"
+                disabled={guardandoEliminar || (borrarProductosTambien && !confirmoBorrarProductos)}
+                onClick={confirmarEliminar}
+              >
+                {guardandoEliminar
+                  ? 'Aplicando…'
+                  : borrarProductosTambien
+                    ? 'Borrar categoría y productos'
+                    : 'Quitar categoría'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StockRow({ producto, categoria, onActualizar, onDirtyChange, onEditar, onCambiarDisponibilidad, onEliminar, onVerFoto }) {
+  const [valor, setValor] = useState(producto.Stock);
+  const stockConocido = useRef(producto.Stock);
+  const sinGuardar = Number(valor) !== Number(producto.Stock);
+  const llave = `stock:${producto.ID}`;
+  const visible = esProductoVisible(producto);
+  const foto = primeraFoto(producto.FotoURL);
+
+  // Si el Stock del producto cambió por FUERA de este cuadrito (por ejemplo,
+  // lo editaste desde el formulario de "Editar" y se guardó ahí), sincroniza
+  // el cuadro de "Actualizar stock" con el valor nuevo. Sin esto, el cuadro
+  // se quedaba pegado con el número viejo y marcaba un falso "cambio sin
+  // guardar" aunque ya lo hubieras guardado desde Editar.
+  useEffect(() => {
+    if (producto.Stock !== stockConocido.current) {
+      stockConocido.current = producto.Stock;
+      setValor(producto.Stock);
+    }
+  }, [producto.Stock]);
+
+  // Avisa al Dashboard si esta fila tiene un cambio pendiente de guardar,
+  // y con qué texto describirlo en el aviso flotante.
+  useEffect(() => {
+    const descripcion = sinGuardar
+      ? `Stock de "${producto.Nombre}": ${producto.Stock} → ${valor || 0}`
+      : '';
+    onDirtyChange(llave, sinGuardar, descripcion);
+    return () => onDirtyChange(llave, false, '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sinGuardar, llave, valor]);
+
+  const clasesFila = [!visible && 'fila-oculta', sinGuardar && 'fila-sin-guardar'].filter(Boolean).join(' ');
+
+  return (
+    <tr className={clasesFila}>
+      <td>{formatearFechaSolo(producto.FechaCreacion)}</td>
+      <td>{formatearHoraSolo(producto.FechaCreacion)}</td>
+      <td>
+        <div className="stock-nombre-con-foto">
+          {foto ? (
+            <img
+              src={foto}
+              alt={producto.Nombre}
+              className="stock-thumb"
+              onClick={() => onVerFoto(foto)}
+            />
+          ) : (
+            <div className="stock-thumb stock-thumb-vacia">Sin foto</div>
+          )}
+          <span>
+            {producto.Nombre}
+            {!visible && <span className="badge badge-oculto">Oculto</span>}
+          </span>
+        </div>
+      </td>
+      <td>{categoria}</td>
+      <td>{producto.CodigoPropio || '—'}</td>
+      <td>${Number(producto.Precio).toLocaleString('es-MX')}</td>
+      <td>{producto.Stock}</td>
+      <td>{producto.StockMinimo}</td>
+      <td>
+        <div className="stock-editor">
+          <input
+            type="number"
+            min="0"
+            className={sinGuardar ? 'campo-modificado' : ''}
+            value={valor}
+            onChange={(e) => setValor(limitarDigitos(e.target.value, MAX_DIGITOS_STOCK))}
+          />
+          <button
+            className="btn btn-small"
+            onClick={() => onActualizar(producto.ID, valor)}
+            disabled={!sinGuardar}
+          >
+            Guardar
+          </button>
+        </div>
+      </td>
+      <td className="celda-acciones">
+        <div className="acciones-producto">
+          <button type="button" className="btn btn-editar btn-chip" onClick={() => onEditar(producto)}>
+            Editar
+          </button>
+          <button type="button" className="btn btn-toggle btn-chip" onClick={() => onCambiarDisponibilidad(producto)}>
+            {visible ? 'Ocultar' : 'Mostrar'}
+          </button>
+          <button type="button" className="btn btn-eliminar btn-chip" onClick={() => onEliminar(producto)}>
+            Eliminar
+          </button>
+        </div>
+      </td>
+    </tr>
+  );
+}
+// Precio guardado en el pedido (fijado al momento del pedido). Los pedidos
+// de antes de esta versión no tienen nada guardado ahí, así que en esos
+// casos devolvemos null (para mostrar "—" en vez de inventar un $0).
+function precioDelPedido(pedido) {
+  if (pedido.Precio === undefined || pedido.Precio === null || pedido.Precio === '') return null;
+  const numero = Number(pedido.Precio);
+  return Number.isNaN(numero) ? null : numero;
+}
+
+function formatearMoneda(numero) {
+  return `$${numero.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+// ---- Estado de cuenta (pestaña "📄 Estado de cuenta") ----
+// Cada vez que un pedido pasa a "Pagado" se registra un "Abono" en la hoja
+// Movimientos, y cada vez que pasa a "Reembolsado" se registra un "Cargo".
+// Esta pestaña solo muestra esa lista, filtrable por fecha, con sus totales.
+
+function movimientoEnRangoDeFecha(mov, desde, hasta) {
+  if (!desde && !hasta) return true;
+  if (!mov.Fecha) return false;
+  const fecha = new Date(mov.Fecha);
+  if (Number.isNaN(fecha.getTime())) return false;
+  if (desde && fecha < new Date(`${desde}T00:00:00`)) return false;
+  if (hasta && fecha > new Date(`${hasta}T23:59:59`)) return false;
+  return true;
+}
+
+function formatearFechaHora(valor) {
+  if (!valor) return '—';
+  const fecha = new Date(valor);
+  if (Number.isNaN(fecha.getTime())) return '—';
+  return `${fecha.toLocaleDateString('es-MX')} ${fecha.toLocaleTimeString('es-MX', {
+    hour: '2-digit',
+    minute: '2-digit',
+  })}`;
+}
+
+// Texto del rango de fechas elegido, para mostrarlo arriba de la tabla (y,
+// sobre todo, en la versión impresa/PDF, donde ya no se ven los cuadros de
+// fecha porque se ocultan al imprimir).
+function textoRangoFechas(desde, hasta) {
+  if (!desde && !hasta) return 'Todos los movimientos registrados';
+  const textoDesde = desde ? new Date(`${desde}T00:00:00`).toLocaleDateString('es-MX') : 'el inicio';
+  const textoHasta = hasta ? new Date(`${hasta}T00:00:00`).toLocaleDateString('es-MX') : 'hoy';
+  return `Del ${textoDesde} al ${textoHasta}`;
+}
+
+function EstadoCuentaTab({ movimientos, pedidos, productos }) {
+  const [desde, setDesde] = useState('');
+  const [hasta, setHasta] = useState('');
+
+  // Los Movimientos solo guardan el ID del pedido — el nombre del producto y
+  // su código propio se buscan aquí usando los Pedidos y Productos que el
+  // Dashboard ya tiene cargados, sin tener que guardar nada extra en la
+  // hoja de Movimientos.
+  const pedidoPorId = {};
+  (pedidos || []).forEach((p) => {
+    pedidoPorId[p.ID] = p;
+  });
+  const codigoPorProductoId = {};
+  (productos || []).forEach((p) => {
+    codigoPorProductoId[p.ID] = p.CodigoPropio || '';
+  });
+
+  function productoDelMovimiento(mov) {
+    const pedido = pedidoPorId[mov.PedidoID];
+    return pedido ? pedido.Producto : '—';
+  }
+
+  function codigoDelMovimiento(mov) {
+    const pedido = pedidoPorId[mov.PedidoID];
+    if (!pedido) return '—';
+    return codigoPorProductoId[pedido.ProductoID] || '—';
+  }
+
+  const movimientosOrdenados = movimientos.slice().reverse(); // más recientes primero
+  const movimientosFiltrados = movimientosOrdenados.filter((m) => movimientoEnRangoDeFecha(m, desde, hasta));
+
+  const totalAbonos = movimientosFiltrados
+    .filter((m) => m.Tipo === 'Abono')
+    .reduce((suma, m) => suma + (Number(m.Monto) || 0), 0);
+  const totalCargos = movimientosFiltrados
+    .filter((m) => m.Tipo === 'Cargo')
+    .reduce((suma, m) => suma + (Number(m.Monto) || 0), 0);
+  const totalNeto = totalAbonos - totalCargos;
+
+  const hayFiltro = !!(desde || hasta);
+
+  function limpiarFiltro() {
+    setDesde('');
+    setHasta('');
+  }
+
+  return (
+    <div className="estado-cuenta">
+      <div className="filtro-fechas no-imprimir">
+        <label>
+          Desde
+          <input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} />
+        </label>
+        <label>
+          Hasta
+          <input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} />
+        </label>
+        {hayFiltro && (
+          <button type="button" className="btn btn-secondary btn-small" onClick={limpiarFiltro}>
+            Quitar filtro de fechas
+          </button>
+        )}
+        <button type="button" className="btn btn-primary btn-small" onClick={() => window.print()}>
+          🖨️ Imprimir / Guardar como PDF
+        </button>
+      </div>
+
+      <p className="muted no-imprimir">
+        Para guardarlo como PDF, dale clic a "Imprimir / Guardar como PDF" y, en la ventana que se
+        abre, elige "Guardar como PDF" en el destino/impresora.
+      </p>
+
+      {/* Todo lo que está DENTRO de este div es lo único que se ve al
+          imprimir o guardar como PDF — el resto del panel (menú, pestañas,
+          filtros, botones) se oculta automáticamente. */}
+      <div id="estado-cuenta-imprimible">
+        <div className="estado-cuenta-encabezado-impresion">
+          <h2>Estado de cuenta</h2>
+          <p className="muted">{textoRangoFechas(desde, hasta)}</p>
+        </div>
+
+        <div className="table-scroll">
+          <table className="data-table estado-cuenta-table">
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Cliente</th>
+                <th>Producto</th>
+                <th>Código</th>
+                <th>Tipo</th>
+                <th>Monto</th>
+                <th>Concepto</th>
+              </tr>
+            </thead>
+            <tbody>
+              {movimientosFiltrados.map((m) => (
+                <tr key={m.ID}>
+                  <td>{formatearFechaHora(m.Fecha)}</td>
+                  <td>{m.Cliente || '—'}</td>
+                  <td>{productoDelMovimiento(m)}</td>
+                  <td>{codigoDelMovimiento(m)}</td>
+                  <td>
+                    <span className={`badge-movimiento ${m.Tipo === 'Abono' ? 'badge-abono' : 'badge-cargo'}`}>
+                      {m.Tipo}
+                    </span>
+                  </td>
+                  <td>{formatearMoneda(Number(m.Monto) || 0)}</td>
+                  <td>{m.Concepto || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {movimientosFiltrados.length === 0 && (
+            <p className="info-msg">No hay movimientos en el rango de fechas de arriba.</p>
+          )}
+        </div>
+
+        <div className="estado-cuenta-totales">
+          <p>
+            Total de abonos: <strong>{formatearMoneda(totalAbonos)}</strong>
+          </p>
+          <p>
+            Total de cargos: <strong>{formatearMoneda(totalCargos)}</strong>
+          </p>
+          <p className="estado-cuenta-total-neto">
+            Total neto: <strong>{formatearMoneda(totalNeto)}</strong>
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---- Bitácora de cambios (pestaña "🗒️ Bitácora") ----
+// Cada línea la agrega SOLA el backend cuando alguien agrega/edita/elimina
+// un producto, mueve el stock, actualiza un pedido, o reordena/renombra/
+// elimina una categoría. Esta pestaña solo muestra esa lista, más reciente
+// primero, filtrable por fecha (igual que Estado de cuenta).
+function BitacoraTab({ bitacora }) {
+  const [desde, setDesde] = useState('');
+  const [hasta, setHasta] = useState('');
+
+  const bitacoraOrdenada = bitacora.slice().reverse();
+  const bitacoraFiltrada = bitacoraOrdenada.filter((b) => movimientoEnRangoDeFecha(b, desde, hasta));
+
+  const hayFiltro = !!(desde || hasta);
+
+  function limpiarFiltro() {
+    setDesde('');
+    setHasta('');
+  }
+
+  return (
+    <div className="bitacora-tab">
+      <div className="filtro-fechas">
+        <label>
+          Desde
+          <input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} />
+        </label>
+        <label>
+          Hasta
+          <input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} />
+        </label>
+        {hayFiltro && (
+          <button type="button" className="btn btn-secondary btn-small" onClick={limpiarFiltro}>
+            Quitar filtro de fechas
+          </button>
+        )}
+      </div>
+
+      <p className="muted">{textoRangoFechas(desde, hasta)}</p>
+
+      <div className="table-scroll">
+        <table className="data-table bitacora-table">
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Usuario</th>
+              <th>Acción</th>
+              <th>Detalle</th>
+            </tr>
+          </thead>
+          <tbody>
+            {bitacoraFiltrada.map((b) => (
+              <tr key={b.ID}>
+                <td>{formatearFechaHora(b.Fecha)}</td>
+                <td>{b.Usuario || '—'}</td>
+                <td>{b.Accion || '—'}</td>
+                <td>{b.Detalle || '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {bitacoraFiltrada.length === 0 && (
+          <p className="info-msg">No hay cambios registrados en el rango de fechas de arriba.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---- Gestión de usuarios (pestaña "👤 Usuarios", solo Administrador) ----
+// Aquí se dan de alta las cuentas de tus vendedores/empleados (y otros
+// Administradores, si hace falta), se les cambia la contraseña, se edita su
+// nombre/rol, y se activan o inhabilitan sin perder su historial en la
+// Bitácora. El backend vuelve a revisar todo esto por su cuenta — esta
+// pestaña ni siquiera se le muestra a un Vendedor.
+function UsuariosTab({ usuarios, sesionToken, onCambio }) {
+  const [mensaje, setMensaje] = useState('');
+
+  const [agregando, setAgregando] = useState(false);
+  const [nuevoNombre, setNuevoNombre] = useState('');
+  const [nuevoUsuario, setNuevoUsuario] = useState('');
+  const [nuevaContrasena, setNuevaContrasena] = useState('');
+  const [nuevoRol, setNuevoRol] = useState('Vendedor');
+  const [guardandoNuevo, setGuardandoNuevo] = useState(false);
+
+  const [editando, setEditando] = useState(null); // usuario completo, o null
+  const [editNombre, setEditNombre] = useState('');
+  const [editRol, setEditRol] = useState('Vendedor');
+  const [guardandoEdit, setGuardandoEdit] = useState(false);
+
+  const [cambiandoClave, setCambiandoClave] = useState(null); // usuario, o null
+  const [claveNueva, setClaveNueva] = useState('');
+  const [guardandoClave, setGuardandoClave] = useState(false);
+
+  const [cambiandoEstadoId, setCambiandoEstadoId] = useState('');
+
+  function abrirAgregar() {
+    setNuevoNombre('');
+    setNuevoUsuario('');
+    setNuevaContrasena('');
+    setNuevoRol('Vendedor');
+    setMensaje('');
+    setAgregando(true);
+  }
+
+  function confirmarAgregar(e) {
+    e.preventDefault();
+    if (!nuevoNombre.trim() || !nuevoUsuario.trim() || nuevaContrasena.length < 4) return;
+    setGuardandoNuevo(true);
+    setMensaje('');
+    crearUsuario({
+      sesionToken,
+      nombre: nuevoNombre.trim(),
+      usuario: nuevoUsuario.trim(),
+      contrasena: nuevaContrasena,
+      rol: nuevoRol,
+    })
+      .then(() => {
+        setAgregando(false);
+        onCambio();
+      })
+      .catch((err) => setMensaje(`Error al crear el usuario: ${err.message}`))
+      .finally(() => setGuardandoNuevo(false));
+  }
+
+  function abrirEditar(u) {
+    setEditando(u);
+    setEditNombre(u.Nombre || '');
+    setEditRol(u.Rol || 'Vendedor');
+    setMensaje('');
+  }
+
+  function confirmarEditar(e) {
+    e.preventDefault();
+    if (!editando || !editNombre.trim()) return;
+    setGuardandoEdit(true);
+    setMensaje('');
+    actualizarUsuario({ sesionToken, usuarioId: editando.ID, nombre: editNombre.trim(), rol: editRol })
+      .then(() => {
+        setEditando(null);
+        onCambio();
+      })
+      .catch((err) => setMensaje(`Error al editar el usuario: ${err.message}`))
+      .finally(() => setGuardandoEdit(false));
+  }
+
+  function abrirCambiarClave(u) {
+    setCambiandoClave(u);
+    setClaveNueva('');
+    setMensaje('');
+  }
+
+  function confirmarCambiarClave(e) {
+    e.preventDefault();
+    if (!cambiandoClave || claveNueva.length < 4) return;
+    setGuardandoClave(true);
+    setMensaje('');
+    cambiarContrasenaUsuario({ sesionToken, usuarioId: cambiandoClave.ID, contrasenaNueva: claveNueva })
+      .then(() => {
+        setCambiandoClave(null);
+        onCambio();
+      })
+      .catch((err) => setMensaje(`Error al cambiar la contraseña: ${err.message}`))
+      .finally(() => setGuardandoClave(false));
+  }
+
+  function toggleActivo(u) {
+    const activo = esActivo(u.Activo);
+    setCambiandoEstadoId(u.ID);
+    setMensaje('');
+    const promesa = activo
+      ? inhabilitarUsuario({ sesionToken, usuarioId: u.ID })
+      : habilitarUsuario({ sesionToken, usuarioId: u.ID });
+    promesa
+      .then(() => onCambio())
+      .catch((err) => setMensaje(`Error: ${err.message}`))
+      .finally(() => setCambiandoEstadoId(''));
+  }
+
+  return (
+    <div className="usuarios-tab">
+      <p className="muted">
+        Aquí das de alta a tus vendedores/empleados para que puedan entrar al Dashboard con su
+        propio usuario y contraseña. Un "Vendedor" puede administrar productos, stock, pedidos y
+        categorías, pero no ve la Bitácora, el Estado de cuenta, ni esta pestaña.
+      </p>
+
+      <div className="orden-barra-superior">
+        <button type="button" className="btn btn-secondary" onClick={abrirAgregar}>
+          + Agregar usuario
+        </button>
+      </div>
+
+      {mensaje && <p className="info-msg error">{mensaje}</p>}
+
+      <div className="table-scroll">
+        <table className="data-table usuarios-table">
+          <thead>
+            <tr>
+              <th>Nombre</th>
+              <th>Usuario</th>
+              <th>Rol</th>
+              <th>Estado</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {usuarios.map((u) => {
+              const activo = esActivo(u.Activo);
+              return (
+                <tr key={u.ID} className={activo ? '' : 'fila-oculta'}>
+                  <td>{u.Nombre}</td>
+                  <td>{u.Usuario}</td>
+                  <td>{u.Rol}</td>
+                  <td>{activo ? 'Activo' : 'Inhabilitado'}</td>
+                  <td className="celda-acciones">
+                    <div className="acciones-producto">
+                      <button type="button" className="btn btn-editar btn-chip" onClick={() => abrirEditar(u)}>
+                        Editar
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-chip"
+                        onClick={() => abrirCambiarClave(u)}
+                      >
+                        Cambiar contraseña
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-toggle btn-chip"
+                        onClick={() => toggleActivo(u)}
+                        disabled={cambiandoEstadoId === u.ID}
+                      >
+                        {activo ? 'Inhabilitar' : 'Habilitar'}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {usuarios.length === 0 && <p className="info-msg">Todavía no hay usuarios registrados.</p>}
+      </div>
+
+      {agregando && (
+        <div className="modal-overlay" onClick={() => setAgregando(false)}>
+          <form className="modal-box" onClick={(e) => e.stopPropagation()} onSubmit={confirmarAgregar}>
+            <h3>Agregar usuario</h3>
+            <label className="modal-field">
+              Nombre
+              <input value={nuevoNombre} onChange={(e) => setNuevoNombre(e.target.value)} autoFocus required />
+            </label>
+            <label className="modal-field">
+              Usuario (para iniciar sesión)
+              <input value={nuevoUsuario} onChange={(e) => setNuevoUsuario(e.target.value)} required />
+            </label>
+            <label className="modal-field">
+              Contraseña
+              <input
+                type="password"
+                value={nuevaContrasena}
+                onChange={(e) => setNuevaContrasena(e.target.value)}
+                minLength={4}
+                required
+              />
+            </label>
+            <label className="modal-field">
+              Rol
+              <select value={nuevoRol} onChange={(e) => setNuevoRol(e.target.value)}>
+                <option value="Vendedor">Vendedor</option>
+                <option value="Administrador">Administrador</option>
+              </select>
+            </label>
+            <div className="modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setAgregando(false)}>
+                Cancelar
+              </button>
+              <button type="submit" className="btn btn-primary" disabled={guardandoNuevo}>
+                {guardandoNuevo ? 'Creando…' : 'Crear usuario'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {editando && (
+        <div className="modal-overlay" onClick={() => setEditando(null)}>
+          <form className="modal-box" onClick={(e) => e.stopPropagation()} onSubmit={confirmarEditar}>
+            <h3>Editar usuario</h3>
+            <label className="modal-field">
+              Nombre
+              <input value={editNombre} onChange={(e) => setEditNombre(e.target.value)} autoFocus required />
+            </label>
+            <label className="modal-field">
+              Rol
+              <select value={editRol} onChange={(e) => setEditRol(e.target.value)}>
+                <option value="Vendedor">Vendedor</option>
+                <option value="Administrador">Administrador</option>
+              </select>
+            </label>
+            <div className="modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setEditando(null)}>
+                Cancelar
+              </button>
+              <button type="submit" className="btn btn-primary" disabled={guardandoEdit}>
+                {guardandoEdit ? 'Guardando…' : 'Guardar cambios'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {cambiandoClave && (
+        <div className="modal-overlay" onClick={() => setCambiandoClave(null)}>
+          <form className="modal-box" onClick={(e) => e.stopPropagation()} onSubmit={confirmarCambiarClave}>
+            <h3>Cambiar contraseña de {cambiandoClave.Nombre}</h3>
+            <label className="modal-field">
+              Contraseña nueva
+              <input
+                type="password"
+                value={claveNueva}
+                onChange={(e) => setClaveNueva(e.target.value)}
+                minLength={4}
+                autoFocus
+                required
+              />
+            </label>
+            <div className="modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setCambiandoClave(null)}>
+                Cancelar
+              </button>
+              <button type="submit" className="btn btn-primary" disabled={guardandoClave}>
+                {guardandoClave ? 'Guardando…' : 'Cambiar contraseña'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+    </div>
+  );
+}
+// ---- Analítica de ventas (pestaña "📈 Analítica de ventas", solo
+// Administrador) ----
+// Toda la información viene de UNA sola llamada al backend (`analiticaVentas`,
+// que lee la hoja Movimientos): total del período con comparación contra el
+// período anterior, productos más vendidos, ventas por categoría, ventas por
+// vendedor (quién marcó cada pedido como Pagado/Reembolsado) y la tendencia
+// día por día. Las gráficas son barras hechas con CSS (ancho/alto en %), sin
+// ninguna librería nueva — así no hay riesgo de romper el despliegue por una
+// dependencia que falte.
+const RANGOS_RAPIDOS_ANALITICA = ['Hoy', 'Esta semana', 'Este mes'];
+
+function AnaliticaTab({ sesionToken }) {
+  const [rangoRapido, setRangoRapido] = useState('Este mes');
+  const [desde, setDesde] = useState(() => fechaISOLocal(inicioDeMes(new Date())));
+  const [hasta, setHasta] = useState(() => fechaISOLocal(new Date()));
+  const [datos, setDatos] = useState(null);
+  const [cargando, setCargando] = useState(false);
+  const [mensaje, setMensaje] = useState('');
+
+  function aplicarRangoRapido(nombre) {
+    const hoy = new Date();
+    setRangoRapido(nombre);
+    if (nombre === 'Hoy') {
+      setDesde(fechaISOLocal(hoy));
+      setHasta(fechaISOLocal(hoy));
+    } else if (nombre === 'Esta semana') {
+      setDesde(fechaISOLocal(inicioDeSemana(hoy)));
+      setHasta(fechaISOLocal(hoy));
+    } else if (nombre === 'Este mes') {
+      setDesde(fechaISOLocal(inicioDeMes(hoy)));
+      setHasta(fechaISOLocal(hoy));
+    }
+  }
+
+  function cambiarFechaManual(campo, valor) {
+    setRangoRapido(''); // deja de marcarse cualquier botón rápido como activo
+    if (campo === 'desde') setDesde(valor);
+    else setHasta(valor);
+  }
+
+  useEffect(() => {
+    if (!desde || !hasta) return;
+    setCargando(true);
+    setMensaje('');
+    analiticaVentas({ sesionToken, desde, hasta })
+      .then((res) => setDatos(res))
+      .catch((err) => setMensaje(`Error al calcular la analítica: ${err.message}`))
+      .finally(() => setCargando(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sesionToken, desde, hasta]);
+
+  const cambio = datos && typeof datos.cambioPorcentaje === 'number' ? datos.cambioPorcentaje : null;
+  const subio = cambio !== null && cambio >= 0;
+
+  const maxProducto = datos && datos.porProducto.length > 0 ? Math.max(...datos.porProducto.map((p) => p.total)) : 0;
+  const maxCategoria = datos && datos.porCategoria.length > 0 ? Math.max(...datos.porCategoria.map((c) => c.total)) : 0;
+  const maxVendedor = datos && datos.porVendedor.length > 0 ? Math.max(...datos.porVendedor.map((v) => v.cantidadVentas)) : 0;
+  const maxDia = datos && datos.serieTiempo.length > 0 ? Math.max(...datos.serieTiempo.map((d) => d.total)) : 0;
+
+  // Convierte un valor a un porcentaje de ancho/alto de barra entre 0% y
+  // 100%. Si el valor es negativo (por ejemplo, un producto con más
+  // reembolsos que ventas en el rango) se deja una barra mínima de 2% en
+  // vez de un ancho negativo, que rompería el layout.
+  function porcentajeBarra(valor, maximo) {
+    if (!maximo || maximo <= 0) return '0%';
+    const pct = (valor / maximo) * 100;
+    return `${Math.max(pct, 2)}%`;
+  }
+
+  return (
+    <div className="analitica-tab">
+      <div className="filtro-fechas">
+        {RANGOS_RAPIDOS_ANALITICA.map((r) => (
+          <button
+            key={r}
+            type="button"
+            className={`analitica-rapido-btn ${rangoRapido === r ? 'activo' : ''}`}
+            onClick={() => aplicarRangoRapido(r)}
+          >
+            {r}
+          </button>
+        ))}
+        <label>
+          Desde
+          <input type="date" value={desde} onChange={(e) => cambiarFechaManual('desde', e.target.value)} />
+        </label>
+        <label>
+          Hasta
+          <input type="date" value={hasta} onChange={(e) => cambiarFechaManual('hasta', e.target.value)} />
+        </label>
+      </div>
+
+      {cargando && <p className="info-msg">Calculando…</p>}
+      {mensaje && <p className="info-msg error">{mensaje}</p>}
+
+      {datos && (
+        <>
+          <div className="analitica-tarjeta">
+            <span className="analitica-tarjeta-titulo">Ventas netas en el período elegido</span>
+            <span className="analitica-tarjeta-monto">{formatearMoneda(datos.totalActual)}</span>
+            {cambio !== null ? (
+              <span className={`analitica-cambio ${subio ? 'analitica-cambio-positivo' : 'analitica-cambio-negativo'}`}>
+                {subio ? '▲' : '▼'} {Math.abs(cambio).toFixed(1)}% vs. el período anterior de igual duración
+                ({formatearMoneda(datos.totalAnterior)})
+              </span>
+            ) : (
+              <span className="muted">No hay ventas registradas en el período anterior para comparar.</span>
+            )}
+          </div>
+
+          <section className="analitica-seccion">
+            <h3>📦 Productos más vendidos</h3>
+            {datos.porProducto.length === 0 ? (
+              <p className="info-msg">No hay ventas en este rango de fechas.</p>
+            ) : (
+              <div className="analitica-barras">
+                {datos.porProducto.map((p) => (
+                  <div className="analitica-barra-fila" key={p.producto}>
+                    <span className="analitica-barra-etiqueta" title={p.producto}>{p.producto}</span>
+                    <div className="analitica-barra-pista">
+                      <div className="analitica-barra-relleno" style={{ width: porcentajeBarra(p.total, maxProducto) }} />
+                    </div>
+                    <span className="analitica-barra-valor">
+                      {formatearMoneda(p.total)} ({p.cantidadVentas} venta{p.cantidadVentas === 1 ? '' : 's'})
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="analitica-seccion">
+            <h3>🗂️ Ventas por categoría</h3>
+            {datos.porCategoria.length === 0 ? (
+              <p className="info-msg">No hay ventas en este rango de fechas.</p>
+            ) : (
+              <div className="analitica-barras">
+                {datos.porCategoria.map((c) => (
+                  <div className="analitica-barra-fila" key={c.categoria}>
+                    <span className="analitica-barra-etiqueta" title={c.categoria}>{c.categoria}</span>
+                    <div className="analitica-barra-pista">
+                      <div
+                        className="analitica-barra-relleno analitica-barra-relleno-categoria"
+                        style={{ width: porcentajeBarra(c.total, maxCategoria) }}
+                      />
+                    </div>
+                    <span className="analitica-barra-valor">{formatearMoneda(c.total)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="analitica-seccion">
+            <h3>🧑‍💼 Ventas por vendedor</h3>
+            {datos.porVendedor.length === 0 ? (
+              <p className="info-msg">No hay ventas en este rango de fechas.</p>
+            ) : (
+              <div className="analitica-barras">
+                {datos.porVendedor.map((v) => (
+                  <div className="analitica-barra-fila" key={v.usuario}>
+                    <span className="analitica-barra-etiqueta" title={v.usuario}>{v.usuario}</span>
+                    <div className="analitica-barra-pista">
+                      <div
+                        className="analitica-barra-relleno analitica-barra-relleno-vendedor"
+                        style={{ width: porcentajeBarra(v.cantidadVentas, maxVendedor) }}
+                      />
+                    </div>
+                    <span className="analitica-barra-valor">
+                      {v.cantidadVentas} venta{v.cantidadVentas === 1 ? '' : 's'} · {formatearMoneda(v.total)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <p className="muted">
+              "Vendedor" es quién marcó cada pedido como Pagado/Reembolsado desde el Dashboard. Los
+              movimientos guardados antes de esta función aparecen como "Sin registrar".
+            </p>
+          </section>
+
+          <section className="analitica-seccion">
+            <h3>📈 Tendencia de ventas por día</h3>
+            {datos.serieTiempo.length === 0 ? (
+              <p className="info-msg">No hay ventas en este rango de fechas.</p>
+            ) : (
+              <div className="analitica-tendencia">
+                {datos.serieTiempo.map((d) => (
+                  <div
+                    className="analitica-tendencia-columna"
+                    key={d.fecha}
+                    title={`${d.fecha}: ${formatearMoneda(d.total)}`}
+                  >
+                    <div className="analitica-tendencia-barra" style={{ height: porcentajeBarra(d.total, maxDia) }} />
+                    <span className="analitica-tendencia-fecha">{d.fecha.slice(5)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        </>
+      )}
+    </div>
+  );
+}
+
+function PedidoRow({ pedido, categoria, codigo, onGuardar, onDirtyChange, onAbrirNota }) {
+  const [cantidad, setCantidad] = useState(pedido.Cantidad);
+  const [telefono, setTelefono] = useState(() => textoSeguro(pedido.Telefono));
+  const [notas, setNotas] = useState(() => notasIniciales(pedido));
+  const [estado, setEstado] = useState(pedido.Estado);
+  // Monto que se va a registrar como "Cargo" si guardas este pedido con
+  // Estado = "Reembolsado". Se precarga con el total del pedido en cuanto
+  // eliges "Reembolsado" en el menú, pero se puede borrar y escribir otro
+  // número (por ejemplo, para un reembolso parcial).
+  const [montoReembolso, setMontoReembolso] = useState('');
+  const [guardando, setGuardando] = useState(false);
+  const llave = `pedido:${pedido.ID}`;
+
+  const telefonoOriginal = textoSeguro(pedido.Telefono);
+  const notasOriginal = notasIniciales(pedido);
+  const precioPedido = precioDelPedido(pedido);
+  const totalPedido = precioPedido !== null ? precioPedido * (Number(cantidad) || 0) : null;
+
+  const cambioCantidad = String(cantidad) !== String(pedido.Cantidad);
+  const cambioTelefono = telefono !== telefonoOriginal;
+  const cambioNotas = notas !== notasOriginal;
+  const cambioEstado = estado !== pedido.Estado;
+  const sinGuardar = cambioCantidad || cambioTelefono || cambioNotas || cambioEstado;
+
+  // Al elegir "Reembolsado" en el menú (viniendo de cualquier otro estado),
+  // precargamos la cajita de monto con el total del pedido. Si Claudia
+  // vuelve a cambiar de estado y regresa a "Reembolsado", se recalcula de
+  // nuevo con la cantidad que tenga en ese momento.
+  function handleCambiarEstado(nuevoEstado) {
+    if (nuevoEstado === 'Reembolsado' && estado !== 'Reembolsado') {
+      setMontoReembolso(totalPedido !== null ? totalPedido.toFixed(2) : '');
+    }
+    setEstado(nuevoEstado);
+  }
+
+  // OJO: este efecto depende de los VALORES actuales (cantidad, telefono,
+  // notas, estado), no solo de los booleanos "cambió sí/no". Si solo
+  // dependiera de los booleanos, una vez que "cambioTelefono" pasa a true
+  // ya no se vuelve a ejecutar con cada letra que seguías escribiendo, y el
+  // aviso se quedaba pegado mostrando solo el primer caracter que tecleaste
+  // (por ejemplo mostraba "2" en vez del teléfono completo). También por
+  // esto el aviso a veces no se apagaba después de guardar.
+  useEffect(() => {
+    const cambios = [];
+    if (cambioCantidad) cambios.push(`Cantidad: ${pedido.Cantidad} → ${cantidad || 0}`);
+    if (cambioTelefono) cambios.push(`Teléfono: "${telefonoOriginal || 'vacío'}" → "${telefono || 'vacío'}"`);
+    if (cambioNotas) cambios.push(`Notas: "${notasOriginal || 'sin nota'}" → "${notas || 'sin nota'}"`);
+    if (cambioEstado) cambios.push(`Estado: ${pedido.Estado} → ${estado}`);
+    const descripcion = cambios.length > 0 ? `Pedido de ${pedido.Cliente} — ${cambios.join(' · ')}` : '';
+    onDirtyChange(llave, sinGuardar, descripcion);
+    return () => onDirtyChange(llave, false, '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cantidad, telefono, notas, estado, pedido, llave]);
+
+  function handleGuardar() {
+    setGuardando(true);
+    const payload = { cantidad, telefono, notas, estado };
+    if (estado === 'Reembolsado') payload.montoReembolso = montoReembolso;
+    onGuardar(pedido.ID, payload).finally(() => setGuardando(false));
+  }
+
+  const fecha = new Date(pedido.Fecha);
+
+  return (
+    <tr className={sinGuardar ? 'fila-sin-guardar' : ''}>
+      <td>{fecha.toLocaleDateString('es-MX')}</td>
+      <td>{fecha.toLocaleTimeString('es-MX')}</td>
+      <td>{pedido.Cliente}</td>
+      <td>
+        <input
+          type="tel"
+          inputMode="numeric"
+          className={`pedido-input-tel ${cambioTelefono ? 'campo-modificado' : ''}`}
+          value={telefono}
+          onChange={(e) => setTelefono(limitarTelefono(e.target.value))}
+        />
+      </td>
+      <td>{pedido.Producto}</td>
+      <td>{categoria}</td>
+      <td>{codigo}</td>
+      <td>
+        <input
+          type="number"
+          min="1"
+          className={`pedido-input-cant ${cambioCantidad ? 'campo-modificado' : ''}`}
+          value={cantidad}
+          onChange={(e) => setCantidad(limitarDigitos(e.target.value, MAX_DIGITOS_CANTIDAD))}
+        />
+      </td>
+      <td>{precioPedido !== null ? formatearMoneda(precioPedido) : '—'}</td>
+      <td>{totalPedido !== null ? formatearMoneda(totalPedido) : '—'}</td>
+      <td>
+        {/* Cuadro compacto de siempre + un botón de lupa para ver/editar la
+            nota completa en grande cuando haga falta (nota larga). Los dos
+            comparten el mismo valor, así que lo que escribas en uno se ve
+            reflejado en el otro. */}
+        <div className="pedido-notas-celda">
+          <input
+            className={`pedido-input-notas ${cambioNotas ? 'campo-modificado' : ''}`}
+            value={notas}
+            onChange={(e) => setNotas(e.target.value)}
+            placeholder="Sin notas"
+          />
+          <button
+            type="button"
+            className="pedido-notas-zoom-btn"
+            onClick={() => onAbrirNota(pedido.Cliente, notas, setNotas)}
+            title="Ver nota completa"
+          >
+            🔍
+          </button>
+        </div>
+      </td>
+      <td>
+        <select
+          className={cambioEstado ? 'campo-modificado' : ''}
+          value={estado}
+          onChange={(e) => handleCambiarEstado(e.target.value)}
+        >
+          <option>Sin solicitud</option>
+          <option>En proceso</option>
+          <option>Pagado</option>
+          <option>Reembolsado</option>
+          <option>Cancelado</option>
+        </select>
+        {estado === 'Reembolsado' && (
+          <div className="pedido-reembolso-caja">
+            <label>
+              Monto a reembolsar
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                className="pedido-input-reembolso"
+                value={montoReembolso}
+                onChange={(e) => setMontoReembolso(limitarDigitos(e.target.value, MAX_DIGITOS_PRECIO))}
+              />
+            </label>
+          </div>
+        )}
+      </td>
+      <td>
+        <button className="btn btn-small" onClick={handleGuardar} disabled={!sinGuardar || guardando}>
+          {guardando ? 'Guardando…' : 'Guardar'}
+        </button>
+      </td>
+    </tr>
+  );
+}
