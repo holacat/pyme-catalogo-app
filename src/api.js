@@ -29,6 +29,8 @@ async function get(action, extraParams = {}) {
 async function post(body) {
   const res = await fetch(API_URL, {
     method: 'POST',
+    // "text/plain" evita que el navegador dispare un preflight OPTIONS,
+    // que Apps Script no maneja bien. El script igual lee el JSON del body.
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
     body: JSON.stringify({ key: PUBLIC_KEY, ...body }),
   });
@@ -74,18 +76,31 @@ export function actualizarStock({ sesionToken, productoId, nuevoStock }) {
   return post({ action: 'actualizarStock', sesionToken, productoId, nuevoStock });
 }
 
+// Actualiza cualquier combinación de estado/cantidad/teléfono/notas de un
+// pedido. Solo manda los campos que le pases; los que omitas no se tocan.
+// `montoReembolso` solo se usa cuando `estado` es "Reembolsado": si no se
+// manda, el backend reembolsa el total del pedido por default.
 export function actualizarPedido({ sesionToken, pedidoId, estado, cantidad, telefono, notas, montoReembolso }) {
   return post({ action: 'actualizarPedido', sesionToken, pedidoId, estado, cantidad, telefono, notas, montoReembolso });
 }
 
 // ---- Movimientos (abonos y cargos) para el "Estado de cuenta" ----
+// Solo lo puede ver un Administrador (el backend lo revisa también).
 export function listarMovimientos(sesionToken) {
   return get('listarMovimientos', { sesionToken });
 }
 
 // ---- Bitácora de cambios (quién hizo qué y cuándo) ----
+// Solo lo puede ver un Administrador (el backend lo revisa también).
 export function listarBitacora(sesionToken) {
   return get('listarBitacora', { sesionToken });
+}
+
+// ---- Analítica de ventas (Bloque 3, ítem 4) ----
+// Solo lo puede ver un Administrador (el backend lo revisa también).
+// `desde`/`hasta` van como texto "YYYY-MM-DD".
+export function analiticaVentas({ sesionToken, desde, hasta }) {
+  return get('analiticaVentas', { sesionToken, desde, hasta });
 }
 
 export function crearProducto({
@@ -121,6 +136,7 @@ export function crearProducto({
   });
 }
 
+// Igual que crearProducto, pero para editar uno que ya existe.
 export function actualizarProducto({
   sesionToken,
   productoId,
@@ -160,32 +176,53 @@ export function actualizarProducto({
   });
 }
 
+// Muestra/oculta un producto del catálogo público sin borrar nada (se
+// puede revertir en cualquier momento).
 export function cambiarDisponibilidad({ sesionToken, productoId, disponible }) {
   return post({ action: 'actualizarProducto', sesionToken, productoId, disponible });
 }
 
+// Borra la fila del producto de forma permanente. No se puede deshacer
+// desde la app.
 export function eliminarProducto({ sesionToken, productoId }) {
   return post({ action: 'eliminarProducto', sesionToken, productoId });
 }
 
+// Sube una foto (como base64) a la carpeta de Google Drive del negocio y
+// devuelve la URL pública para guardarla en el producto.
 export function subirFoto({ sesionToken, nombreArchivo, tipoMime, datosBase64 }) {
   return post({ action: 'subirFoto', sesionToken, nombreArchivo, tipoMime, datosBase64 });
 }
 
 // ---- Orden del catálogo (arrastrar y acomodar, por categoría) ----
+
+// Guarda de un jalón el nuevo número de "Orden" de varios productos a la
+// vez (por ejemplo, todos los de una categoría después de arrastrar uno).
+// cambios = [{ productoId, orden }, ...]
 export function actualizarOrdenMultiple({ sesionToken, cambios }) {
   return post({ action: 'actualizarOrdenMultiple', sesionToken, cambios });
 }
 
+// Cambia el nombre de una categoría en TODOS los productos que la tengan,
+// de un jalón (por ejemplo, "Bolsas" -> "Bolsos").
 export function renombrarCategoria({ sesionToken, categoriaAnterior, categoriaNueva }) {
   return post({ action: 'renombrarCategoria', sesionToken, categoriaAnterior, categoriaNueva });
 }
 
+// Quita o borra una categoría completa.
+// - Si borrarProductos es false (o no se manda): los productos de esa
+//   categoría se CONSERVAN, solo se les vacía la Categoría (se van a
+//   "Otros").
+// - Si borrarProductos es true: se borran también, para siempre, TODOS
+//   los productos de esa categoría (no se puede deshacer desde la app).
 export function eliminarCategoria({ sesionToken, categoria, borrarProductos }) {
   return post({ action: 'eliminarCategoria', sesionToken, categoria, borrarProductos });
 }
 
-// ---- Opciones predeterminadas ----
+// ---- Opciones predeterminadas (Nombre, Categoría, Marca, Talla, Color,
+// Código propio) que se muestran como sugerencia en "+ Agregar producto".
+// A diferencia del Stock/Pedidos, esta lista NUNCA se llena sola: solo
+// tiene los valores que se agregaron a propósito desde el Dashboard.
 export function listarOpciones(sesionToken) {
   return get('listarOpciones', { sesionToken });
 }
