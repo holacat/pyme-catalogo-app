@@ -1413,6 +1413,51 @@ main { flex: 1; padding: 1.5rem; max-width: 1100px; margin: 0 auto; width: 100%;
   background: #a855f7;
 }
 
+/* Porcentaje que se muestra junto al monto en las barras de "Productos más
+   vendidos", "Ventas por categoría" y "Ventas por vendedor". */
+.analitica-barra-porcentaje {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+/* ---- Gráfica de línea con puntos de "Tendencia de ventas por día" ----
+   Dibujada con SVG puro (sin ninguna librería de gráficas), con eje
+   vertical de montos y líneas de referencia punteadas. */
+.analitica-linea-svg {
+  width: 100%;
+  height: 220px;
+  overflow: visible;
+  font-family: inherit;
+}
+
+.analitica-linea-eje-rejilla {
+  stroke: var(--border);
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+}
+
+.analitica-linea-eje-texto {
+  font-size: 10px;
+  fill: var(--muted);
+  font-family: inherit;
+}
+
+.analitica-linea-trazo {
+  stroke: var(--brand);
+  stroke-width: 2;
+}
+
+.analitica-linea-punto {
+  fill: var(--brand);
+  stroke: var(--card-bg);
+  stroke-width: 1.5;
+  cursor: pointer;
+  transition: r 0.15s ease;
+}
+
+.analitica-linea-punto:hover {
+  r: 6;
+}
 .analitica-barra-valor {
   font-size: 0.82rem;
   color: var(--muted);
@@ -1447,6 +1492,14 @@ main { flex: 1; padding: 1.5rem; max-width: 1100px; margin: 0 auto; width: 100%;
   min-height: 2px;
 }
 
+.analitica-tendencia-fecha {
+  font-size: 0.65rem;
+  color: var(--muted);
+  margin-top: 0.3rem;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  max-height: 45px;
+}
 .analitica-tendencia-fecha {
   font-size: 0.65rem;
   color: var(--muted);
