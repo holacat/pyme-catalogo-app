@@ -2464,10 +2464,98 @@ function UsuariosTab({ usuarios, sesionToken, onCambio }) {
 // que lee la hoja Movimientos): total del período con comparación contra el
 // período anterior, productos más vendidos, ventas por categoría, ventas por
 // vendedor (quién marcó cada pedido como Pagado/Reembolsado) y la tendencia
-// día por día. Las gráficas son barras hechas con CSS (ancho/alto en %), sin
-// ninguna librería nueva — así no hay riesgo de romper el despliegue por una
-// dependencia que falte.
+// día por día. Las gráficas de barras son CSS puro (ancho/alto en %) y la de
+// tendencia es una línea en SVG puro — sin ninguna librería nueva, así no hay
+// riesgo de romper el despliegue por una dependencia que falte.
 const RANGOS_RAPIDOS_ANALITICA = ['Hoy', 'Esta semana', 'Este mes'];
+
+// Gráfica de "Tendencia de ventas por día": una línea con un punto por día,
+// dibujada con SVG puro (sin ninguna librería de gráficas). Incluye un eje
+// vertical con montos ($) y líneas de referencia punteadas, para que se
+// entienda de un vistazo qué valor mide cada altura — antes esto solo se
+// veía como barras sin escala, y el monto exacto solo aparecía al pasar el
+// mouse encima.
+function GraficaLineaTendencia({ serie }) {
+  const ANCHO = 600;
+  const ALTO = 220;
+  const MARGEN_IZQ = 58;
+  const MARGEN_DER = 12;
+  const MARGEN_SUP = 12;
+  const MARGEN_INF = 30;
+  const areaAncho = ANCHO - MARGEN_IZQ - MARGEN_DER;
+  const areaAlto = ALTO - MARGEN_SUP - MARGEN_INF;
+
+  const valores = serie.map((d) => d.total);
+  // El eje siempre incluye el 0, aunque todos los días hayan sido positivos
+  // (o negativos), para que la línea nunca "flote" sin punto de referencia.
+  const valorMax = Math.max(0, ...valores);
+  const valorMin = Math.min(0, ...valores);
+  const rango = valorMax - valorMin || 1; // evita dividir entre 0 si todo el período dio $0
+
+  function coordX(indice) {
+    return serie.length === 1
+      ? MARGEN_IZQ + areaAncho / 2
+      : MARGEN_IZQ + (indice / (serie.length - 1)) * areaAncho;
+  }
+  function coordY(valor) {
+    return MARGEN_SUP + areaAlto - ((valor - valorMin) / rango) * areaAlto;
+  }
+
+  const puntosLinea = serie.map((d, i) => `${coordX(i)},${coordY(d.total)}`).join(' ');
+
+  // 5 líneas de referencia horizontales, repartidas parejo entre el mínimo
+  // y el máximo del rango (incluye el 0 si cae dentro de ese rango).
+  const PASOS_EJE = 4;
+  const lineasEje = Array.from({ length: PASOS_EJE + 1 }, (_, i) => {
+    const valor = valorMin + (rango * i) / PASOS_EJE;
+    return { valor, y: coordY(valor) };
+  });
+
+  // Si hay muchos días, no caben todas las fechas abajo sin encimarse — se
+  // muestra solo cada N-ésima etiqueta (el punto y la línea siguen ahí para
+  // todos los días, solo se oculta el TEXTO de la fecha).
+  const saltoEtiquetas = Math.max(1, Math.ceil(serie.length / 8));
+
+  return (
+    <svg className="analitica-linea-svg" viewBox={`0 0 ${ANCHO} ${ALTO}`} preserveAspectRatio="none" role="img">
+      {lineasEje.map((linea, i) => (
+        <g key={i}>
+          <line
+            x1={MARGEN_IZQ}
+            x2={ANCHO - MARGEN_DER}
+            y1={linea.y}
+            y2={linea.y}
+            className="analitica-linea-eje-rejilla"
+          />
+          <text
+            x={MARGEN_IZQ - 8}
+            y={linea.y}
+            className="analitica-linea-eje-texto"
+            textAnchor="end"
+            dominantBaseline="middle"
+          >
+            {formatearMonedaCorta(linea.valor)}
+          </text>
+        </g>
+      ))}
+
+      <polyline points={puntosLinea} className="analitica-linea-trazo" fill="none" />
+
+      {serie.map((d, i) => (
+        <g key={d.fecha}>
+          <circle cx={coordX(i)} cy={coordY(d.total)} r="4" className="analitica-linea-punto">
+            <title>{`${d.fecha}: ${formatearMoneda(d.total)}`}</title>
+          </circle>
+          {i % saltoEtiquetas === 0 && (
+            <text x={coordX(i)} y={ALTO - 8} className="analitica-linea-eje-texto" textAnchor="middle">
+              {d.fecha.slice(5)}
+            </text>
+          )}
+        </g>
+      ))}
+    </svg>
+  );
+}
 
 function AnaliticaTab({ sesionToken }) {
   const [rangoRapido, setRangoRapido] = useState('Este mes');
@@ -2515,7 +2603,6 @@ function AnaliticaTab({ sesionToken }) {
   const maxProducto = datos && datos.porProducto.length > 0 ? Math.max(...datos.porProducto.map((p) => p.total)) : 0;
   const maxCategoria = datos && datos.porCategoria.length > 0 ? Math.max(...datos.porCategoria.map((c) => c.total)) : 0;
   const maxVendedor = datos && datos.porVendedor.length > 0 ? Math.max(...datos.porVendedor.map((v) => v.cantidadVentas)) : 0;
-  const maxDia = datos && datos.serieTiempo.length > 0 ? Math.max(...datos.serieTiempo.map((d) => d.total)) : 0;
 
   // Convierte un valor a un porcentaje de ancho/alto de barra entre 0% y
   // 100%. Si el valor es negativo (por ejemplo, un producto con más
@@ -2526,6 +2613,20 @@ function AnaliticaTab({ sesionToken }) {
     const pct = (valor / maximo) * 100;
     return `${Math.max(pct, 2)}%`;
   }
+
+  // Qué porcentaje representa `valor` dentro de la suma de TODO lo que se
+  // está mostrando en esa misma lista (no del total general del período).
+  // Por ejemplo, en "Productos más vendidos" (que solo enseña el top 10),
+  // el 100% es la suma de esos 10 productos, no de todas las ventas del
+  // período. Devuelve null si no hay nada que repartir (evita "NaN%").
+  function porcentajeDeLista(valor, sumaTotal) {
+    if (!sumaTotal || sumaTotal <= 0) return null;
+    return (valor / sumaTotal) * 100;
+  }
+
+  const sumaProductoVisible = datos ? datos.porProducto.reduce((s, p) => s + p.total, 0) : 0;
+  const sumaCategoriaVisible = datos ? datos.porCategoria.reduce((s, c) => s + c.total, 0) : 0;
+  const sumaVentasVendedor = datos ? datos.porVendedor.reduce((s, v) => s + v.cantidadVentas, 0) : 0;
 
   return (
     <div className="analitica-tab">
@@ -2582,6 +2683,12 @@ function AnaliticaTab({ sesionToken }) {
                     </div>
                     <span className="analitica-barra-valor">
                       {formatearMoneda(p.total)} ({p.cantidadVentas} venta{p.cantidadVentas === 1 ? '' : 's'})
+                      {porcentajeDeLista(p.total, sumaProductoVisible) !== null && (
+                        <span className="analitica-barra-porcentaje">
+                          {' '}
+                          · {porcentajeDeLista(p.total, sumaProductoVisible).toFixed(1)}%
+                        </span>
+                      )}
                     </span>
                   </div>
                 ))}
@@ -2604,7 +2711,15 @@ function AnaliticaTab({ sesionToken }) {
                         style={{ width: porcentajeBarra(c.total, maxCategoria) }}
                       />
                     </div>
-                    <span className="analitica-barra-valor">{formatearMoneda(c.total)}</span>
+                    <span className="analitica-barra-valor">
+                      {formatearMoneda(c.total)}
+                      {porcentajeDeLista(c.total, sumaCategoriaVisible) !== null && (
+                        <span className="analitica-barra-porcentaje">
+                          {' '}
+                          · {porcentajeDeLista(c.total, sumaCategoriaVisible).toFixed(1)}%
+                        </span>
+                      )}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -2628,6 +2743,12 @@ function AnaliticaTab({ sesionToken }) {
                     </div>
                     <span className="analitica-barra-valor">
                       {v.cantidadVentas} venta{v.cantidadVentas === 1 ? '' : 's'} · {formatearMoneda(v.total)}
+                      {porcentajeDeLista(v.cantidadVentas, sumaVentasVendedor) !== null && (
+                        <span className="analitica-barra-porcentaje">
+                          {' '}
+                          · {porcentajeDeLista(v.cantidadVentas, sumaVentasVendedor).toFixed(1)}%
+                        </span>
+                      )}
                     </span>
                   </div>
                 ))}
@@ -2644,19 +2765,12 @@ function AnaliticaTab({ sesionToken }) {
             {datos.serieTiempo.length === 0 ? (
               <p className="info-msg">No hay ventas en este rango de fechas.</p>
             ) : (
-              <div className="analitica-tendencia">
-                {datos.serieTiempo.map((d) => (
-                  <div
-                    className="analitica-tendencia-columna"
-                    key={d.fecha}
-                    title={`${d.fecha}: ${formatearMoneda(d.total)}`}
-                  >
-                    <div className="analitica-tendencia-barra" style={{ height: porcentajeBarra(d.total, maxDia) }} />
-                    <span className="analitica-tendencia-fecha">{d.fecha.slice(5)}</span>
-                  </div>
-                ))}
-              </div>
+              <GraficaLineaTendencia serie={datos.serieTiempo} />
             )}
+            <p className="muted">
+              Cada punto es el total neto de ventas de ese día (abonos menos cargos). Pasa el mouse
+              sobre un punto para ver la fecha y el monto exacto.
+            </p>
           </section>
         </>
       )}
