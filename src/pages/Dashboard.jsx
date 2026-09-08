@@ -1935,6 +1935,20 @@ function formatearMoneda(numero) {
   return `$${numero.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+// Versión corta de formatearMoneda, sin centavos y abreviando miles con
+// "k" (por ejemplo $1.2k en vez de $1,234.00) — se usa SOLO en las
+// etiquetas del eje de la gráfica de tendencia, donde no cabe el monto
+// completo. En cualquier otro lado (tarjetas, tablas) se sigue usando
+// formatearMoneda completo.
+function formatearMonedaCorta(numero) {
+  const signo = numero < 0 ? '-' : '';
+  const abs = Math.abs(numero);
+  if (abs >= 1000) {
+    return `${signo}$${(abs / 1000).toFixed(abs >= 10000 ? 0 : 1)}k`;
+  }
+  return `${signo}$${abs.toFixed(0)}`;
+}
+
 // ---- Estado de cuenta (pestaña "📄 Estado de cuenta") ----
 // Cada vez que un pedido pasa a "Pagado" se registra un "Abono" en la hoja
 // Movimientos, y cada vez que pasa a "Reembolsado" se registra un "Cargo".
