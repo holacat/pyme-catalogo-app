@@ -1513,7 +1513,7 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio }) {
   // Sube (dirección -1) o baja (dirección +1) un producto UN lugar dentro
   // de su categoría. Mucho más preciso que arrastrar: cada clic mueve
   // exactamente un lugar, sin riesgo de soltarlo en la fila equivocada.
-  function moverProducto(nombreCategoria, indice, direccion) {
+   function moverProducto(nombreCategoria, indice, direccion) {
     setGruposLocal((prev) => {
       const nuevos = prev.map((g) => ({ ...g, productos: g.productos.slice() }));
       const grupo = nuevos.find((g) => g.nombre === nombreCategoria);
@@ -1525,18 +1525,40 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio }) {
       const [movido] = grupo.productos.splice(indice, 1);
       grupo.productos.splice(destino, 0, movido);
 
-      guardarOrdenDeCategoria(grupo);
+      // Bug reportado por Claudia (2026-09): antes, la Bitácora solo decía
+      // "N producto(s) reordenado(s)" (el total de la categoría, porque se
+      // renumera toda de un jalón), lo cual era confuso al mover UN solo
+      // producto. Aquí armamos un resumen explícito — qué producto se movió
+      // y respecto a cuál otro quedó — y se lo mandamos al backend para que
+      // lo use en la Bitácora en vez de solo el conteo.
+      const nombreMovido = movido.Nombre || 'Este producto';
+      let resumen;
+      if (direccion > 0) {
+        const vecinoArriba = grupo.productos[destino - 1];
+        resumen = vecinoArriba
+          ? `${nombreMovido}: se movió debajo de "${vecinoArriba.Nombre || 'otro producto'}" (categoría ${nombreCategoria})`
+          : `${nombreMovido}: ahora es el último de la categoría ${nombreCategoria}`;
+      } else {
+        const vecinoAbajo = grupo.productos[destino + 1];
+        resumen = vecinoAbajo
+          ? `${nombreMovido}: se movió arriba de "${vecinoAbajo.Nombre || 'otro producto'}" (categoría ${nombreCategoria})`
+          : `${nombreMovido}: ahora es el primero de la categoría ${nombreCategoria}`;
+      }
+
+      guardarOrdenDeCategoria(grupo, resumen);
       return nuevos;
     });
   }
 
   // Renumera 1, 2, 3... toda la categoría según cómo haya quedado
   // acomodada, y manda todos esos números juntos en una sola llamada.
-  function guardarOrdenDeCategoria(grupo) {
+  // `resumen` (texto legible de qué producto se movió y a dónde) se manda
+  // aparte para que la Bitácora sea explícita en vez de solo un conteo.
+  function guardarOrdenDeCategoria(grupo, resumen) {
     const cambios = grupo.productos.map((p, i) => ({ productoId: p.ID, orden: i + 1 }));
     setGuardando(true);
     setMensaje('');
-    actualizarOrdenMultiple({ sesionToken, cambios })
+    actualizarOrdenMultiple({ sesionToken, cambios, resumen })
       .then(() => onCambio())
       .catch((err) => setMensaje(`Error al guardar el orden: ${err.message}`))
       .finally(() => setGuardando(false));
