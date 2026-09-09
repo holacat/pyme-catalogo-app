@@ -212,9 +212,24 @@ const ESTADOS_PEDIDO = ['Sin solicitud', 'En proceso', 'Pagado', 'Reembolsado', 
 // Ya no existe una sola "clave de administrador" compartida: cada persona
 // inicia sesión con su propio usuario y contraseña (hoja "Usuarios"), y el
 // servidor regresa un "token" de sesión que se guarda aquí, junto con el
-// Rol y el Nombre de esa persona. Todo en sessionStorage (no localStorage):
-// se pide de nuevo si cierras el navegador, para que un celular/compu
-// compartido no se quede con la sesión de alguien abierta para siempre.
+// Rol y el Nombre de esa persona.
+//
+// Se guarda en localStorage (no sessionStorage) — cambio hecho el
+// 2026-09-09 para arreglar un bug real en celular: algunos navegadores de
+// Android, al abrir la cámara o la galería desde "Fotos del producto",
+// pueden reciclar en segundo plano la pestaña del navegador (por memoria),
+// y sessionStorage se perdía en ese momento aunque la sesión en el
+// servidor seguía siendo válida — el resultado era el error confuso
+// "Falta iniciar sesión" al subir la foto, estando ya con la sesión
+// iniciada. localStorage no tiene ese problema porque no depende de que la
+// pestaña siga "viva": sigue disponible aunque el navegador recicle la
+// pestaña o se cierre por completo. La sesión sigue siendo segura porque
+// de todas formas expira sola a las 12 horas (`DURACION_SESION_MS` en
+// `Code.gs`) y se invalida al instante si un Administrador inhabilita esa
+// cuenta — cerrar sesión con el botón del panel también la borra de
+// inmediato. Lo único que cambia es que, en un celular/compu compartido,
+// alguien tendría que cerrar sesión a propósito (o esperar a que expire)
+// en vez de que se borre sola al cerrar la pestaña.
 const TOKEN_KEY = 'pyme_sesion_token';
 const ROL_KEY = 'pyme_sesion_rol';
 const NOMBRE_KEY = 'pyme_sesion_nombre';
@@ -226,15 +241,15 @@ function esActivo(valor) {
 }
 
 export default function Dashboard() {
-  const [sesionToken, setSesionToken] = useState(() => sessionStorage.getItem(TOKEN_KEY) || '');
-  const [rol, setRol] = useState(() => sessionStorage.getItem(ROL_KEY) || '');
-  const [nombreSesion, setNombreSesion] = useState(() => sessionStorage.getItem(NOMBRE_KEY) || '');
-  const [autenticado, setAutenticado] = useState(!!sessionStorage.getItem(TOKEN_KEY));
+  const [sesionToken, setSesionToken] = useState(() => localStorage.getItem(TOKEN_KEY) || '');
+  const [rol, setRol] = useState(() => localStorage.getItem(ROL_KEY) || '');
+  const [nombreSesion, setNombreSesion] = useState(() => localStorage.getItem(NOMBRE_KEY) || '');
+  const [autenticado, setAutenticado] = useState(!!localStorage.getItem(TOKEN_KEY));
   // Mientras esto sea true, NO mostramos el panel: estamos comprobando (o
   // volviendo a comprobar) que la sesión guardada todavía sea válida contra
   // el servidor, para no dejar ver la estructura del Dashboard a alguien
   // que en realidad no tiene una sesión correcta.
-  const [verificandoSesion, setVerificandoSesion] = useState(() => !!sessionStorage.getItem(TOKEN_KEY));
+   const [verificandoSesion, setVerificandoSesion] = useState(() => !!localStorage.getItem(TOKEN_KEY));
   const [inputUsuario, setInputUsuario] = useState('');
   const [inputContrasena, setInputContrasena] = useState('');
   const [verificandoLogin, setVerificandoLogin] = useState(false);
@@ -419,9 +434,9 @@ export default function Dashboard() {
     setErrorLogin('');
     login({ usuario: usuarioTexto, contrasena })
       .then((res) => {
-        sessionStorage.setItem(TOKEN_KEY, res.token);
-        sessionStorage.setItem(ROL_KEY, res.rol);
-        sessionStorage.setItem(NOMBRE_KEY, res.nombre);
+                localStorage.setItem(TOKEN_KEY, res.token);
+        localStorage.setItem(ROL_KEY, res.rol);
+        localStorage.setItem(NOMBRE_KEY, res.nombre);
         setSesionToken(res.token);
         setRol(res.rol);
         setNombreSesion(res.nombre);
@@ -435,9 +450,9 @@ export default function Dashboard() {
   }
 
   function handleLogout() {
-    sessionStorage.removeItem(TOKEN_KEY);
-    sessionStorage.removeItem(ROL_KEY);
-    sessionStorage.removeItem(NOMBRE_KEY);
+        localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(ROL_KEY);
+    localStorage.removeItem(NOMBRE_KEY);
     setAutenticado(false);
     setSesionToken('');
     setRol('');
