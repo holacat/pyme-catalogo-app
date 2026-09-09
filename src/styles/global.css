@@ -125,7 +125,7 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
 
 .carousel-dot.activo { background: white; }
 
-.product-body { padding: 0.9rem 1rem 1.1rem; display: flex; flex-direction: column; gap: 0.35rem; }
+.product-body { padding: 0.9rem 1rem 1.1rem; display: flex; flex-direction: column; gap: 0.35rem; flex: 1; }
 .product-body h3 { margin: 0; font-size: 1.05rem; }
 
 .badge {
