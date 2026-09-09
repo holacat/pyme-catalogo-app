@@ -26,7 +26,14 @@ function archivoABase64(archivo) {
  * `value` es un arreglo de URLs ya subidas; `onChange(nuevoArreglo)` se
  * llama cada vez que se agrega o quita una foto.
  */
-export default function ImageUploader({ adminKey, value, onChange }) {
+// Misma llave que usa Dashboard.jsx para guardar el token de sesión. La
+// repetimos aquí (en vez de importarla) para poder leer el valor MÁS
+// RECIENTE directamente de localStorage justo antes de subir cada foto,
+// en lugar de confiar solo en el prop `sesionToken` que llegó de más
+// arriba — ver la nota completa junto a `subirArchivos` de por qué.
+const TOKEN_KEY_LOCAL = 'pyme_sesion_token';
+
+export default function ImageUploader({ sesionToken, value, onChange }) {
   const [subiendo, setSubiendo] = useState(false);
   const [error, setError] = useState('');
   const [sobreZona, setSobreZona] = useState(false);
@@ -36,6 +43,18 @@ export default function ImageUploader({ adminKey, value, onChange }) {
     setError('');
     const lista = Array.from(archivos || []);
     if (lista.length === 0) return;
+
+    // OJO — bug reportado por Claudia (2026-09): en algunos celulares, subir
+    // una foto desde "Fotos del producto" fallaba con "Falta iniciar
+    // sesión" AUNQUE el resto del Dashboard seguía funcionando con sesión
+    // activa (o sea, no era una sesión perdida de verdad). Para no
+    // depender de que el prop `sesionToken` que llegó desde más arriba siga
+    // siendo el más actualizado en ese preciso momento, leemos el valor
+    // directamente de localStorage justo aquí, y solo si por alguna razón
+    // no hay nada guardado ahí usamos el prop como respaldo. Si de todos
+    // modos no hay token disponible, el mensaje de error incluye esa pista
+    // para poder diagnosticarlo con más detalle la próxima vez.
+    const tokenActual = localStorage.getItem(TOKEN_KEY_LOCAL) || sesionToken || '';
 
     const nuevasUrls = [];
     setSubiendo(true);
@@ -50,12 +69,25 @@ export default function ImageUploader({ adminKey, value, onChange }) {
           continue;
         }
         const datosBase64 = await archivoABase64(archivo);
-        const resultado = await subirFoto({
-          adminKey,
-          nombreArchivo: archivo.name,
-          tipoMime: archivo.type,
-          datosBase64,
-        });
+        let resultado;
+        try {
+          resultado = await subirFoto({
+            sesionToken: tokenActual,
+            nombreArchivo: archivo.name,
+            tipoMime: archivo.type,
+            datosBase64,
+          });
+        } catch (errSubida) {
+          // Pista de diagnóstico: si esto vuelve a pasar, este texto nos
+          // dice si el celular SÍ tenía un token guardado en ese momento
+          // (y el problema está entre el celular y el servidor) o si de
+          // plano no había ningún token guardado (y el problema es que la
+          // sesión se perdió de verdad).
+          const pista = tokenActual
+            ? 'sí había un token de sesión guardado en este celular en ese momento'
+            : 'NO había ningún token de sesión guardado en este celular en ese momento';
+          throw new Error(`${errSubida.message} — pista: ${pista}.`);
+        }
         nuevasUrls.push(resultado.url);
       }
       if (nuevasUrls.length > 0) {
