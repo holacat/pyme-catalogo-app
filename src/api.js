@@ -199,8 +199,8 @@ export function subirFoto({ sesionToken, nombreArchivo, tipoMime, datosBase64 })
 // Guarda de un jalón el nuevo número de "Orden" de varios productos a la
 // vez (por ejemplo, todos los de una categoría después de arrastrar uno).
 // cambios = [{ productoId, orden }, ...]
-export function actualizarOrdenMultiple({ sesionToken, cambios }) {
-  return post({ action: 'actualizarOrdenMultiple', sesionToken, cambios });
+export function actualizarOrdenMultiple({ sesionToken, cambios, resumen }) {
+  return post({ action: 'actualizarOrdenMultiple', sesionToken, cambios, resumen });
 }
 
 // Cambia el nombre de una categoría en TODOS los productos que la tengan,
