@@ -15,7 +15,8 @@ import {
   actualizarProducto,
   cambiarDisponibilidad,
   eliminarProducto,
-  actualizarOrdenMultiple,
+    actualizarOrdenMultiple,
+  actualizarOrdenCategorias,
   renombrarCategoria,
   eliminarCategoria,
   listarUsuarios,
@@ -1435,7 +1436,7 @@ function ProductoForm({ sesionToken, opciones = {}, productoExistente, onGuardad
 // haya agregado a propósito (o que ya existiera como opción predeterminada)
 // pero que todavía no tenga ningún producto, para poder renombrarla,
 // ocultarla o borrarla igual que las demás.
-function agruparParaOrden(productos, categoriasPredeterminadas, categoriasOcultas) {
+function agruparParaOrden(productos, categoriasPredeterminadas, categoriasOcultas, categoriaOrdenExplicito) {
   const masNuevosPrimero = productos.slice().reverse();
   const grupos = [];
   const indicePorCategoria = {};
@@ -1462,9 +1463,29 @@ function agruparParaOrden(productos, categoriasPredeterminadas, categoriasOculta
     asegurarGrupo(String(nombreCategoria || '').trim());
   });
 
-  grupos.forEach((g) => {
+   grupos.forEach((g) => {
     g.productos.sort((a, b) => (Number(a.Orden) || 0) - (Number(b.Orden) || 0));
   });
+
+  // Bug reportado por Claudia (2026-09): esta pestaña no tenía forma de
+  // decidir en qué orden aparecen las CATEGORÍAS entre sí (ver las
+  // flechitas ▲/▼ nuevas junto al nombre de cada categoría, más abajo).
+  // Si Claudia ya acomodó ese orden a propósito, lo respetamos aquí tal
+  // cual, para que esta pestaña se vea IGUAL que el catálogo público.
+  // Cualquier categoría que todavía no esté en esa lista (por ejemplo una
+  // recién creada) se queda al final, en el orden en que ya estaba.
+  const explicito = categoriaOrdenExplicito || [];
+  if (explicito.length > 0) {
+    grupos.sort((a, b) => {
+      const iA = explicito.indexOf(a.nombre);
+      const iB = explicito.indexOf(b.nombre);
+      if (iA === -1 && iB === -1) return 0;
+      if (iA === -1) return 1;
+      if (iB === -1) return -1;
+      return iA - iB;
+    });
+  }
+
   return grupos;
 }
 
@@ -1477,9 +1498,10 @@ function agruparParaOrden(productos, categoriasPredeterminadas, categoriasOculta
 function OrdenTab({ productos, opciones, sesionToken, onCambio }) {
   const categoriasPredeterminadas = opciones.categoria || [];
   const categoriasOcultas = opciones.categoriaOculta || [];
+  const categoriaOrdenExplicito = opciones.categoriaOrden || [];
 
   const [gruposLocal, setGruposLocal] = useState(() =>
-    agruparParaOrden(productos, categoriasPredeterminadas, categoriasOcultas)
+    agruparParaOrden(productos, categoriasPredeterminadas, categoriasOcultas, categoriaOrdenExplicito)
   );
   const [guardando, setGuardando] = useState(false);
   const [mensaje, setMensaje] = useState('');
@@ -1505,8 +1527,8 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio }) {
   // Si los productos o las opciones (categorías nuevas, renombradas,
   // ocultas) cambian desde fuera, se vuelve a acomodar la lista con los
   // datos más recientes.
-  useEffect(() => {
-    setGruposLocal(agruparParaOrden(productos, categoriasPredeterminadas, categoriasOcultas));
+    useEffect(() => {
+    setGruposLocal(agruparParaOrden(productos, categoriasPredeterminadas, categoriasOcultas, categoriaOrdenExplicito));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productos, opciones]);
 
@@ -1554,7 +1576,7 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio }) {
   // acomodada, y manda todos esos números juntos en una sola llamada.
   // `resumen` (texto legible de qué producto se movió y a dónde) se manda
   // aparte para que la Bitácora sea explícita en vez de solo un conteo.
-  function guardarOrdenDeCategoria(grupo, resumen) {
+   function guardarOrdenDeCategoria(grupo, resumen) {
     const cambios = grupo.productos.map((p, i) => ({ productoId: p.ID, orden: i + 1 }));
     setGuardando(true);
     setMensaje('');
@@ -1562,6 +1584,40 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio }) {
       .then(() => onCambio())
       .catch((err) => setMensaje(`Error al guardar el orden: ${err.message}`))
       .finally(() => setGuardando(false));
+  }
+
+  // Sube (dirección -1) o baja (dirección +1) una CATEGORÍA COMPLETA un
+  // lugar entre las demás — no confundir con moverProducto, que mueve un
+  // producto DENTRO de su categoría. Bug reportado por Claudia (2026-09):
+  // no existía ninguna forma directa de decidir en qué orden aparecen las
+  // categorías entre sí en el catálogo público. Como el backend guarda
+  // ese orden como una lista completa (ver actualizarOrdenCategorias en
+  // api.js/Code.gs), aquí se manda SIEMPRE la lista de todas las
+  // categorías ya en su nuevo acomodo, igual que guardarOrdenDeCategoria
+  // manda todos los productos de una categoría de un jalón.
+  function moverCategoria(indice, direccion) {
+    setGruposLocal((prev) => {
+      const destino = indice + direccion;
+      if (destino < 0 || destino >= prev.length) return prev;
+
+      const nuevos = prev.slice();
+      const [movida] = nuevos.splice(indice, 1);
+      nuevos.splice(destino, 0, movida);
+
+      const vecina = direccion > 0 ? nuevos[destino - 1] : nuevos[destino + 1];
+      const resumen = vecina
+        ? `Categoría "${movida.nombre}": se movió ${direccion > 0 ? 'debajo' : 'arriba'} de "${vecina.nombre}"`
+        : `Categoría "${movida.nombre}": ahora es la ${direccion > 0 ? 'última' : 'primera'}`;
+
+      setGuardando(true);
+      setMensaje('');
+      actualizarOrdenCategorias({ sesionToken, categorias: nuevos.map((g) => g.nombre), resumen })
+        .then(() => onCambio())
+        .catch((err) => setMensaje(`Error al guardar el orden de categorías: ${err.message}`))
+        .finally(() => setGuardando(false));
+
+      return nuevos;
+    });
   }
 
   function abrirRenombrar(nombreActual) {
@@ -1639,10 +1695,12 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio }) {
 
   return (
     <div className="orden-catalogo">
-      <p className="muted">
-        Usa las flechitas ▲ y ▼ para subir o bajar un producto, un lugar a la vez, dentro de su
-        categoría — así controlas el orden en que se ven en el catálogo público. El cambio se
-        guarda solo, no hace falta darle a ningún botón de "Guardar".
+          <p className="muted">
+        Usa las flechitas ▲ y ▼ chiquitas de cada producto para subirlo o bajarlo, un lugar a la
+        vez, dentro de su categoría. Usa las flechitas ▲ y ▼ grandes, junto al nombre de cada
+        categoría, para cambiar en qué orden aparecen las categorías completas entre sí (cuál se
+        ve primero, cuál al final) en el catálogo público. En ambos casos el cambio se guarda
+        solo, no hace falta darle a ningún botón de "Guardar".
       </p>
 
       <div className="orden-barra-superior">
@@ -1654,9 +1712,31 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio }) {
       {guardando && <p className="info-msg">Guardando orden…</p>}
       {mensaje && <p className="info-msg error">{mensaje}</p>}
 
-      {gruposLocal.map((grupo) => (
+          {gruposLocal.map((grupo, indiceCategoria) => (
         <section key={grupo.nombre} className={`orden-categoria-box ${grupo.oculta ? 'categoria-oculta' : ''}`}>
           <div className="orden-categoria-header">
+            <div className="orden-botones-mover">
+              <button
+                type="button"
+                className="orden-mover-btn"
+                onClick={() => moverCategoria(indiceCategoria, -1)}
+                disabled={indiceCategoria === 0}
+                title="Subir esta categoría un lugar"
+                aria-label="Subir esta categoría un lugar"
+              >
+                ▲
+              </button>
+              <button
+                type="button"
+                className="orden-mover-btn"
+                onClick={() => moverCategoria(indiceCategoria, 1)}
+                disabled={indiceCategoria === gruposLocal.length - 1}
+                title="Bajar esta categoría un lugar"
+                aria-label="Bajar esta categoría un lugar"
+              >
+                ▼
+              </button>
+            </div>
             <h3>
               {grupo.nombre}
               {grupo.oculta && <span className="badge badge-oculto">Oculta del catálogo</span>}
