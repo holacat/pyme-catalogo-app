@@ -71,8 +71,15 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
   flex-direction: column;
 }
 
-.product-photo { aspect-ratio: 4 / 3; background: #f0f0f0; position: relative; }
-.product-photo img { width: 100%; height: 100%; object-fit: cover; display: block; cursor: zoom-in; }
+/* Bug reportado por Claudia (2026-09): con "object-fit: cover" y fondo
+   gris, las fotos que no tenían exactamente proporción 4:3 se veían
+   recortadas o descuadradas (por ejemplo bolsas muy alargadas o muy
+   cuadradas). Ahora usamos "contain" para que la foto SIEMPRE se vea
+   completa, sin recortar ni deformar, y el espacio que sobre alrededor
+   se rellena con fondo blanco (en vez de gris) para que se vea como un
+   marco limpio y no como un "hueco" sin cargar. */
+.product-photo { aspect-ratio: 4 / 3; background: #ffffff; position: relative; }
+.product-photo img { width: 100%; height: 100%; object-fit: contain; display: block; cursor: zoom-in; }
 .product-photo-placeholder {
   width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
   color: var(--muted); font-size: 0.85rem;
@@ -133,7 +140,10 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
 .price { font-size: 1.15rem; font-weight: 700; margin: 0.2rem 0; }
 .stock { font-size: 0.85rem; color: var(--brand); margin: 0; }
 .stock.out { color: var(--danger); font-weight: 600; }
-.description { font-size: 0.85rem; color: var(--muted); margin: 0.2rem 0 0.4rem; }
+/* min-height: respaldo para que la tarjeta reserve el mismo espacio
+   aunque el texto de la descripción sea muy corto o esté vacío (ver el
+   cambio en ProductCard.jsx que ahora siempre dibuja este párrafo). */
+.description { font-size: 0.85rem; color: var(--muted); margin: 0.2rem 0 0.4rem; min-height: 1.2em; }
 
 .product-actions { margin-top: auto; display: flex; flex-direction: column; gap: 0.5rem; }
 
