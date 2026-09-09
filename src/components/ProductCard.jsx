@@ -85,8 +85,15 @@ export default function ProductCard({ producto, onSolicitar, onAgregarCarrito })
         <p className={`stock ${sinStock ? 'out' : ''}`}>
           {sinStock ? 'Agotado' : `Disponible: ${producto.Stock}`}
         </p>
-        {producto.Descripcion && <p className="description">{producto.Descripcion}</p>}
-
+        {/* Bug reportado por Claudia (2026-09): antes este párrafo solo se
+    mostraba SI el producto tenía Descripción, así que en un producto
+    sin descripción todo lo de abajo (el selector de Cantidad) subía
+    un renglón y quedaba desalineado respecto a los productos vecinos
+    que sí tienen descripción. Ahora siempre se dibuja el espacio
+    (vacío si no hay texto) para que la altura sea la misma en todas
+    las tarjetas de la fila — ver el `min-height` de ".description"
+    en global.css. */}
+<p className="description">{producto.Descripcion || ''}</p>
         {!sinStock && (
           <div className="cantidad-selector">
             <span className="cantidad-selector-label">Cantidad:</span>
