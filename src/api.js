@@ -203,6 +203,14 @@ export function actualizarOrdenMultiple({ sesionToken, cambios, resumen }) {
   return post({ action: 'actualizarOrdenMultiple', sesionToken, cambios, resumen });
 }
 
+// Guarda de un jalón el nuevo orden en que aparecen las CATEGORÍAS entre
+// sí (no confundir con actualizarOrdenMultiple, que mueve productos DENTRO
+// de una categoría). `categorias` debe traer TODAS las categorías
+// visibles, ya en el orden nuevo completo — así se guarda de un jalón.
+export function actualizarOrdenCategorias({ sesionToken, categorias, resumen }) {
+  return post({ action: 'actualizarOrdenCategorias', sesionToken, categorias, resumen });
+}
+
 // Cambia el nombre de una categoría en TODOS los productos que la tengan,
 // de un jalón (por ejemplo, "Bolsas" -> "Bolsos").
 export function renombrarCategoria({ sesionToken, categoriaAnterior, categoriaNueva }) {
