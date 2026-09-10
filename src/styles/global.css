@@ -138,6 +138,29 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
 }
 
 .price { font-size: 1.15rem; font-weight: 700; margin: 0.2rem 0; }
+
+/* ---- Bug 10 (Ofertas, 2026-09): sello "🔥 Oferta" sobre la foto (se ve en
+   CUALQUIER producto en oferta, tenga o no Precio de oferta puesto), y
+   precio tachado + precio con descuento SOLO cuando sí tiene Precio de
+   oferta (si el producto solo tiene el interruptor manual activado, el
+   precio se ve normal, sin tachar nada, porque no cambió). ---- */
+.oferta-badge {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
+  background: var(--danger);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  z-index: 1;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+
+.price-oferta { display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; }
+.price-original { font-size: 0.85rem; font-weight: 400; color: var(--muted); text-decoration: line-through; }
+.price-descuento { color: var(--danger); }
 .stock { font-size: 0.85rem; color: var(--brand); margin: 0; }
 .stock.out { color: var(--danger); font-weight: 600; }
 /* min-height: respaldo para que la tarjeta reserve el mismo espacio
@@ -647,6 +670,26 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
 
 .form-grid-wide { grid-column: 1 / -1; }
 
+/* ---- Casilla "En oferta" (Bug 10, 2026-09): a diferencia de los demás
+   campos de .form-grid, aquí el texto va A LA PAR de la casilla, no
+   arriba — por eso se pisa flex-direction a "row" solo para esta fila, y
+   se le quita a la casilla el padding/borde que ".form-grid input" les
+   pone a todos los <input> (que se ve bien en cuadros de texto, pero se
+   vería raro en un checkbox). */
+.form-checkbox-fila {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 0.5rem !important;
+}
+
+.form-checkbox-fila input[type='checkbox'] {
+  width: 1.1rem;
+  height: 1.1rem;
+  padding: 0;
+  border: none;
+  flex-shrink: 0;
+}
+
 /* ---- Fila del nombre de un campo + su botón ⚙️ de opciones predeterminadas ---- */
 .form-label-fila {
   display: flex;
@@ -1021,6 +1064,19 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
 
 .categoria-titulo-completo {
   margin: 1rem 0 1.2rem;
+}
+
+/* ---- Bug 10 (Ofertas, 2026-09): la sección de Ofertas es la MISMA cajita
+   con carrusel que cualquier categoría (reutiliza .categoria-seccion), pero
+   con un tratamiento visual llamativo (estilo Amazon/Mercado Libre) para
+   que salte a la vista sobre las demás — franja de color + borde distinto. ---- */
+.categoria-seccion-ofertas {
+  background: linear-gradient(135deg, #fff7ed, #fef2f2);
+  border: 1px solid #fecaca;
+}
+
+.categoria-titulo-ofertas {
+  color: var(--danger);
 }
 
 /* El carrusel es una fila horizontal que se desliza con el dedo o el
