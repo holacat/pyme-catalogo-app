@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import ProductCard from '../components/ProductCard.jsx';
+import ProductCard, { obtenerInfoOferta } from '../components/ProductCard.jsx';
 import SolicitudModal from '../components/SolicitudModal.jsx';
 import CarritoModal from '../components/CarritoModal.jsx';
 import { listarProductos, crearPedido } from '../api.js';
@@ -317,6 +317,10 @@ export default function Catalog() {
 
   const totalProductosEnCarrito = carrito.length;
   const grupos = agruparPorCategoria(productos);
+  // Bug 10 (Ofertas, 2026-09): un producto en oferta aparece AQUÍ y TAMBIÉN
+  // en su categoría normal de más abajo — no se quita de su categoría, la
+  // zona de Ofertas es solo un acceso rápido a lo más llamativo.
+  const productosEnOferta = productos.filter((p) => obtenerInfoOferta(p).enOferta);
   const grupoAbierto = vista.tipo === 'categoria' ? grupos.find((g) => g.nombre === vista.nombre) : null;
 
   // Chiquita función de ayuda para no repetir el mismo bloque de
@@ -353,9 +357,16 @@ export default function Catalog() {
               className="btn btn-secondary"
               onClick={() => setVista({ tipo: 'todo' })}
             >
-              🗂️ Ver catálogo completo
+                         🗂️ Ver catálogo completo
             </button>
           </div>
+
+          {productosEnOferta.length > 0 && (
+            <section className="categoria-seccion categoria-seccion-ofertas">
+              <h2 className="categoria-titulo categoria-titulo-ofertas">🔥 Ofertas</h2>
+              <CategoriaCarrusel>{tarjetas(productosEnOferta)}</CategoriaCarrusel>
+            </section>
+          )}
 
           {grupos.map((grupo) => (
             <section key={grupo.nombre} className="categoria-seccion">
