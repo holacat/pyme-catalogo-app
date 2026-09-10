@@ -114,9 +114,11 @@ export function crearProducto({
   precioCompra,
   stock,
   stockMinimo,
-  fotoUrl,
+   fotoUrl,
   descripcion,
   codigoPropio,
+  precioOferta,
+  enOferta,
 }) {
   return post({
     action: 'crearProducto',
@@ -133,6 +135,8 @@ export function crearProducto({
     fotoUrl,
     descripcion,
     codigoPropio,
+    precioOferta,
+    enOferta,
   });
 }
 
@@ -154,6 +158,8 @@ export function actualizarProducto({
   disponible,
   codigoPropio,
   orden,
+  precioOferta,
+  enOferta,
 }) {
   return post({
     action: 'actualizarProducto',
@@ -173,6 +179,8 @@ export function actualizarProducto({
     disponible,
     codigoPropio,
     orden,
+    precioOferta,
+    enOferta,
   });
 }
 
