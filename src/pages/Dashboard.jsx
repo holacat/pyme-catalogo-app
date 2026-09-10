@@ -1467,26 +1467,38 @@ function agruparParaOrden(productos, categoriasPredeterminadas, categoriasOculta
     g.productos.sort((a, b) => (Number(a.Orden) || 0) - (Number(b.Orden) || 0));
   });
 
-  // Bug reportado por Claudia (2026-09): esta pestaña no tenía forma de
-  // decidir en qué orden aparecen las CATEGORÍAS entre sí (ver las
-  // flechitas ▲/▼ nuevas junto al nombre de cada categoría, más abajo).
-  // Si Claudia ya acomodó ese orden a propósito, lo respetamos aquí tal
-  // cual, para que esta pestaña se vea IGUAL que el catálogo público.
-  // Cualquier categoría que todavía no esté en esa lista (por ejemplo una
-  // recién creada) se queda al final, en el orden en que ya estaba.
+  // Bug reportado por Claudia (2026-09): el orden de categorías en esta
+  // pestaña no coincidía con el del catálogo público — a esta pestaña le
+  // faltaba aplicar el MISMO criterio de respaldo que ya usa el backend
+  // (`ordenarProductos_` en Code.gs) para las categorías que todavía no
+  // tienen un orden explícito guardado: acomodarlas según el menor
+  // número de "Orden" de sus productos. Sin esto, aquí las categorías se
+  // quedaban en el orden en que aparecía su primer producto al recorrer
+  // la lista del más nuevo al más viejo — que no es necesariamente lo
+  // mismo que "la categoría cuyo producto tiene el Orden más chico".
+  // Las categorías con orden explícito (las que Claudia ya acomodó a
+  // propósito con las flechitas ▲/▼ grandes) van primero, en ese orden;
+  // las demás se acomodan con el criterio de respaldo; y las cajitas de
+  // categorías vacías (sin ningún producto todavía) se quedan al final,
+  // igual que antes.
   const explicito = categoriaOrdenExplicito || [];
-  if (explicito.length > 0) {
-    grupos.sort((a, b) => {
-      const iA = explicito.indexOf(a.nombre);
-      const iB = explicito.indexOf(b.nombre);
-      if (iA === -1 && iB === -1) return 0;
-      if (iA === -1) return 1;
-      if (iB === -1) return -1;
-      return iA - iB;
-    });
-  }
+  const conExplicito = grupos.filter((g) => explicito.indexOf(g.nombre) !== -1);
+  const sinExplicitoConProductos = grupos.filter(
+    (g) => explicito.indexOf(g.nombre) === -1 && g.productos.length > 0
+  );
+  const categoriasVacias = grupos.filter(
+    (g) => explicito.indexOf(g.nombre) === -1 && g.productos.length === 0
+  );
 
-  return grupos;
+  conExplicito.sort((a, b) => explicito.indexOf(a.nombre) - explicito.indexOf(b.nombre));
+
+  sinExplicitoConProductos.sort((a, b) => {
+    const minA = Math.min.apply(null, a.productos.map((p) => Number(p.Orden) || 0));
+    const minB = Math.min.apply(null, b.productos.map((p) => Number(p.Orden) || 0));
+    return minA - minB;
+  });
+
+  return conExplicito.concat(sinExplicitoConProductos, categoriasVacias);
 }
 
 // Pestaña para acomodar en qué orden se ven los productos en el catálogo
