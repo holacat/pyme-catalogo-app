@@ -1021,9 +1021,11 @@ const FORM_INICIAL = {
   precio: '',
   precioCompra: '',
   stock: '',
-  stockMinimo: '',
+    stockMinimo: '',
   descripcion: '',
   codigoPropio: '',
+  precioOferta: '',
+  enOferta: false,
 };
 
 function formDesdeProducto(producto) {
@@ -1037,11 +1039,12 @@ function formDesdeProducto(producto) {
     precioCompra: producto.PrecioCompra ?? '',
     stock: producto.Stock ?? '',
     stockMinimo: producto.StockMinimo ?? '',
-    descripcion: producto.Descripcion || '',
+       descripcion: producto.Descripcion || '',
     codigoPropio: textoSeguro(producto.CodigoPropio),
+    precioOferta: producto.PrecioOferta ?? '',
+    enOferta: !!producto.EnOferta,
   };
 }
-
 function fotosDesdeProducto(producto) {
   return String(producto?.FotoURL || '')
     .split('|')
@@ -1144,6 +1147,12 @@ function ProductoForm({ sesionToken, opciones = {}, productoExistente, onGuardad
     return (e) => setForm((f) => ({ ...f, [campo]: limitarDigitos(e.target.value, maxDigitos) }));
   }
 
+  // Para casillas (checkboxes) como "En oferta": a diferencia de los demás
+  // campos, lo que importa es si está marcada o no (e.target.checked), no
+  // el texto que se escribió.
+  function handleChangeCheckbox(campo) {
+    return (e) => setForm((f) => ({ ...f, [campo]: e.target.checked }));
+  }
   function handleSubmit(e) {
     e.preventDefault();
     if (!form.nombre.trim() || !form.precio) {
@@ -1284,8 +1293,26 @@ function ProductoForm({ sesionToken, opciones = {}, productoExistente, onGuardad
             type="number"
             min="0"
             value={form.precioCompra}
-            onChange={handleChangeNumero('precioCompra', MAX_DIGITOS_PRECIO)}
+                       onChange={handleChangeNumero('precioCompra', MAX_DIGITOS_PRECIO)}
           />
+        </label>
+        <label>
+          Precio de oferta
+          <input
+            type="number"
+            min="0"
+            value={form.precioOferta}
+            onChange={handleChangeNumero('precioOferta', MAX_DIGITOS_PRECIO)}
+            placeholder="Déjalo vacío si no aplica"
+          />
+        </label>
+        <label className="form-checkbox-fila">
+          <input
+            type="checkbox"
+            checked={form.enOferta}
+            onChange={handleChangeCheckbox('enOferta')}
+          />
+          En oferta (aparece en la zona de Ofertas del catálogo)
         </label>
         <label>
           Stock {esEdicion ? '' : 'inicial'}
