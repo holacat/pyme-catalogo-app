@@ -10,6 +10,27 @@ function obtenerFotos(fotoUrl) {
     .filter(Boolean);
 }
 
+// Bug 10 (Ofertas, 2026-09): un producto entra a la zona de "Ofertas" del
+// catálogo público de CUALQUIERA de estas dos formas (Claudia eligió "las
+// dos formas juntas"):
+//   1) Tiene un "Precio de oferta" puesto, y ese precio es MENOR al precio
+//      normal → se muestra el precio tachado + el precio con descuento.
+//   2) Tiene el interruptor manual "En oferta" activado, aunque no tenga
+//      Precio de oferta → se muestra solo el sello/badge, sin tachar nada
+//      (porque el precio de venta no cambió).
+// Se exporta para que Catalog.jsx pueda usarla y armar la sección de
+// Ofertas con la MISMA regla, sin repetir esta lógica en dos lugares.
+export function obtenerInfoOferta(producto) {
+  const precio = Number(producto.Precio) || 0;
+  const precioOferta = Number(producto.PrecioOferta) || 0;
+  const tienePrecioOferta = precioOferta > 0 && precioOferta < precio;
+  const enOferta = tienePrecioOferta || !!producto.EnOferta;
+  return {
+    enOferta,
+    precioOferta: tienePrecioOferta ? precioOferta : null,
+  };
+}
+
 // onSolicitar: pide ESTE producto de inmediato (abre WhatsApp ya).
 // onAgregarCarrito: lo agrega al "pedido" (carrito) para juntarlo con
 // otros productos y mandar un solo WhatsApp al final. Los dos reciben
@@ -18,6 +39,7 @@ export default function ProductCard({ producto, onSolicitar, onAgregarCarrito })
   const stockDisponible = Number(producto.Stock) || 0;
   const sinStock = stockDisponible <= 0;
   const fotos = obtenerFotos(producto.FotoURL);
+  const { enOferta, precioOferta } = obtenerInfoOferta(producto);
   const [indice, setIndice] = useState(0);
   const [zoomAbierto, setZoomAbierto] = useState(false);
   const [cantidad, setCantidad] = useState(1);
@@ -50,6 +72,7 @@ export default function ProductCard({ producto, onSolicitar, onAgregarCarrito })
   return (
     <article className="product-card">
       <div className="product-photo">
+        {enOferta && <span className="oferta-badge">🔥 Oferta</span>}
         {fotos.length > 0 ? (
           <>
             <img
@@ -81,19 +104,27 @@ export default function ProductCard({ producto, onSolicitar, onAgregarCarrito })
       <div className="product-body">
         <h3>{producto.Nombre}</h3>
         {producto.Categoria && <span className="badge">{producto.Categoria}</span>}
-        <p className="price">${Number(producto.Precio).toLocaleString('es-MX')}</p>
+        {precioOferta ? (
+          <p className="price price-oferta">
+            <span className="price-original">${Number(producto.Precio).toLocaleString('es-MX')}</span>
+            <span className="price-descuento">${precioOferta.toLocaleString('es-MX')}</span>
+          </p>
+        ) : (
+          <p className="price">${Number(producto.Precio).toLocaleString('es-MX')}</p>
+        )}
         <p className={`stock ${sinStock ? 'out' : ''}`}>
           {sinStock ? 'Agotado' : `Disponible: ${producto.Stock}`}
         </p>
         {/* Bug reportado por Claudia (2026-09): antes este párrafo solo se
-    mostraba SI el producto tenía Descripción, así que en un producto
-    sin descripción todo lo de abajo (el selector de Cantidad) subía
-    un renglón y quedaba desalineado respecto a los productos vecinos
-    que sí tienen descripción. Ahora siempre se dibuja el espacio
-    (vacío si no hay texto) para que la altura sea la misma en todas
-    las tarjetas de la fila — ver el `min-height` de ".description"
-    en global.css. */}
-<p className="description">{producto.Descripcion || ''}</p>
+            mostraba SI el producto tenía Descripción, así que en un producto
+            sin descripción todo lo de abajo (el selector de Cantidad) subía
+            un renglón y quedaba desalineado respecto a los productos vecinos
+            que sí tienen descripción. Ahora siempre se dibuja el espacio
+            (vacío si no hay texto) para que la altura sea la misma en todas
+            las tarjetas de la fila — ver el `min-height` de ".description"
+            en global.css. */}
+        <p className="description">{producto.Descripcion || ''}</p>
+
         {!sinStock && (
           <div className="cantidad-selector">
             <span className="cantidad-selector-label">Cantidad:</span>
