@@ -2640,7 +2640,7 @@ function UsuariosTab({ usuarios, sesionToken, soyAdminCentral, onCambio }) {
         </div>
       )}
 
-      {cambiandoClave && (
+     
       {cambiandoClave && (  
         <div className="modal-overlay" onClick={() => setCambiandoClave(null)}>
           <form className="modal-box" onClick={(e) => e.stopPropagation()} onSubmit={confirmarCambiarClave}>
