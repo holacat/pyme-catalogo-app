@@ -525,6 +525,25 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
    "Mostrar" no dé la impresión de estar deshabilitado. */
 .fila-oculta td:not(.celda-acciones) { opacity: 0.55; }
 
+/* ---- Funcionalidad 1 (Admin Central, 2026-09): sello junto al nombre de
+   la cuenta marcada como Admin Central en la pestaña "👤 Usuarios". ---- */
+.badge-admin-central {
+  display: inline-block;
+  margin-left: 0.5rem;
+  background: #fef3c7;
+  color: #92400e;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  vertical-align: middle;
+}
+
+/* Nota chiquita bajo un campo de formulario bloqueado (por ejemplo, el Rol
+   de un usuario que no se puede editar) — más chica y sin negritas que el
+   texto normal de ".modal-field", para que se lea como una aclaración, no
+   como parte de la etiqueta del campo. */
+.campo-nota { font-size: 0.75rem; font-weight: 400; }
 /* Fila con un cambio sin guardar: fondo tenue + una barra de color a la
    izquierda, para verla de un vistazo en toda la tabla. */
 .fila-sin-guardar td {
