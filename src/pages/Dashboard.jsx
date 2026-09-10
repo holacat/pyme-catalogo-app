@@ -234,6 +234,13 @@ const ESTADOS_PEDIDO = ['Sin solicitud', 'En proceso', 'Pagado', 'Reembolsado', 
 const TOKEN_KEY = 'pyme_sesion_token';
 const ROL_KEY = 'pyme_sesion_rol';
 const NOMBRE_KEY = 'pyme_sesion_nombre';
+// Funcionalidad 1 (Admin Central, 2026-09): igual que ROL_KEY/NOMBRE_KEY,
+// pero para saber si ESTA cuenta es el Admin Central (ver Code.gs) — se usa
+// para mostrar el sello "👑 Admin Central" y para bloquear en la pantalla
+// las acciones que el backend igual rechazaría (inhabilitar/cambiar el rol
+// de otro Administrador), para que Claudia no le dé clic a algo que de
+// todos modos le va a salir con error.
+const ADMIN_CENTRAL_KEY = 'pyme_sesion_admin_central';
 
 // Normaliza valores de "sí/no" que pueden venir como booleano real
 // (true/false) o como texto ("TRUE", "SI"), igual que hace el backend.
@@ -244,7 +251,8 @@ function esActivo(valor) {
 export default function Dashboard() {
   const [sesionToken, setSesionToken] = useState(() => localStorage.getItem(TOKEN_KEY) || '');
   const [rol, setRol] = useState(() => localStorage.getItem(ROL_KEY) || '');
-  const [nombreSesion, setNombreSesion] = useState(() => localStorage.getItem(NOMBRE_KEY) || '');
+   const [nombreSesion, setNombreSesion] = useState(() => localStorage.getItem(NOMBRE_KEY) || '');
+  const [esAdminCentral, setEsAdminCentral] = useState(() => localStorage.getItem(ADMIN_CENTRAL_KEY) === 'true');
   const [autenticado, setAutenticado] = useState(!!localStorage.getItem(TOKEN_KEY));
   // Mientras esto sea true, NO mostramos el panel: estamos comprobando (o
   // volviendo a comprobar) que la sesión guardada todavía sea válida contra
@@ -435,12 +443,14 @@ export default function Dashboard() {
     setErrorLogin('');
     login({ usuario: usuarioTexto, contrasena })
       .then((res) => {
-                localStorage.setItem(TOKEN_KEY, res.token);
+                    localStorage.setItem(TOKEN_KEY, res.token);
         localStorage.setItem(ROL_KEY, res.rol);
         localStorage.setItem(NOMBRE_KEY, res.nombre);
+        localStorage.setItem(ADMIN_CENTRAL_KEY, res.esAdminCentral ? 'true' : 'false');
         setSesionToken(res.token);
         setRol(res.rol);
         setNombreSesion(res.nombre);
+        setEsAdminCentral(!!res.esAdminCentral);
         setInputContrasena('');
         setTab('stock');
         setAutenticado(true);
@@ -451,13 +461,15 @@ export default function Dashboard() {
   }
 
   function handleLogout() {
-        localStorage.removeItem(TOKEN_KEY);
+           localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(ROL_KEY);
     localStorage.removeItem(NOMBRE_KEY);
+    localStorage.removeItem(ADMIN_CENTRAL_KEY);
     setAutenticado(false);
     setSesionToken('');
     setRol('');
     setNombreSesion('');
+    setEsAdminCentral(false);
     setInputUsuario('');
     setInputContrasena('');
     setTab('stock');
@@ -933,9 +945,10 @@ export default function Dashboard() {
       {tab === 'bitacora' && esAdministrador && <BitacoraTab bitacora={bitacora} />}
 
       {tab === 'usuarios' && esAdministrador && (
-        <UsuariosTab
+               <UsuariosTab
           usuarios={usuarios}
           sesionToken={sesionToken}
+          soyAdminCentral={esAdminCentral}
           onCambio={() => cargarTodo(sesionToken, { silencioso: true })}
         />
       )}
@@ -2347,7 +2360,26 @@ function BitacoraTab({ bitacora }) {
 // nombre/rol, y se activan o inhabilitan sin perder su historial en la
 // Bitácora. El backend vuelve a revisar todo esto por su cuenta — esta
 // pestaña ni siquiera se le muestra a un Vendedor.
-function UsuariosTab({ usuarios, sesionToken, onCambio }) {
+// Funcionalidad 1 (Admin Central, 2026-09): mismo tipo de valor "sí/no" que
+// "Activo" (booleano real o texto "TRUE"/"SI"), así que reutilizamos
+// `esActivo` para leer la columna "EsAdminCentral" — el nombre de la
+// función no encaja perfecto pero la lógica es exactamente la misma.
+function esFilaAdminCentral(u) {
+  return esActivo(u.EsAdminCentral);
+}
+
+// Un Admin ADICIONAL (Administrador normal, sin la bandera EsAdminCentral)
+// no puede tocar el Rol ni el Estado (inhabilitar/habilitar) de NINGÚN otro
+// Administrador — ni del Admin Central ni de otro Admin adicional. Eso solo
+// lo puede hacer el Admin Central. Al Admin Central, además, nadie (ni él
+// mismo desde el panel) le puede tocar su Rol ni su Estado. Se usa para
+// deshabilitar en pantalla justo lo que el backend de todos modos rechazaría.
+function noPuedeTocarAdminDe(u, soyAdminCentral) {
+  if (esFilaAdminCentral(u)) return true;
+  return u.Rol === 'Administrador' && !soyAdminCentral;
+}
+
+function UsuariosTab({ usuarios, sesionToken, soyAdminCentral, onCambio }) {
   const [mensaje, setMensaje] = useState('');
 
   const [agregando, setAgregando] = useState(false);
@@ -2453,10 +2485,13 @@ function UsuariosTab({ usuarios, sesionToken, onCambio }) {
 
   return (
     <div className="usuarios-tab">
-      <p className="muted">
+            <p className="muted">
         Aquí das de alta a tus vendedores/empleados para que puedan entrar al Dashboard con su
         propio usuario y contraseña. Un "Vendedor" puede administrar productos, stock, pedidos y
-        categorías, pero no ve la Bitácora, el Estado de cuenta, ni esta pestaña.
+        categorías, pero no ve la Bitácora, el Estado de cuenta, ni esta pestaña. El sello
+        "👑 Admin Central" marca la cuenta que nadie más puede inhabilitar ni degradar de rol — ni
+        siquiera otro Administrador; solo el propio Admin Central puede tocar el Rol o el Estado
+        de otro Administrador (a un Vendedor lo puede editar cualquier Administrador, como antes).
       </p>
 
       <div className="orden-barra-superior">
@@ -2479,11 +2514,19 @@ function UsuariosTab({ usuarios, sesionToken, onCambio }) {
             </tr>
           </thead>
           <tbody>
-            {usuarios.map((u) => {
+                      {usuarios.map((u) => {
               const activo = esActivo(u.Activo);
+              const bloqueado = noPuedeTocarAdminDe(u, soyAdminCentral);
               return (
                 <tr key={u.ID} className={activo ? '' : 'fila-oculta'}>
-                  <td>{u.Nombre}</td>
+                  <td>
+                    {u.Nombre}
+                    {esFilaAdminCentral(u) && (
+                      <span className="badge-admin-central" title="Nadie puede inhabilitarlo ni cambiarle el rol">
+                        👑 Admin Central
+                      </span>
+                    )}
+                  </td>
                   <td>{u.Usuario}</td>
                   <td>{u.Rol}</td>
                   <td>{activo ? 'Activo' : 'Inhabilitado'}</td>
@@ -2503,7 +2546,8 @@ function UsuariosTab({ usuarios, sesionToken, onCambio }) {
                         type="button"
                         className="btn btn-toggle btn-chip"
                         onClick={() => toggleActivo(u)}
-                        disabled={cambiandoEstadoId === u.ID}
+                        disabled={cambiandoEstadoId === u.ID || bloqueado}
+                        title={bloqueado ? 'Solo el Admin Central puede inhabilitar/habilitar a otro Administrador' : ''}
                       >
                         {activo ? 'Inhabilitar' : 'Habilitar'}
                       </button>
@@ -2511,7 +2555,7 @@ function UsuariosTab({ usuarios, sesionToken, onCambio }) {
                   </td>
                 </tr>
               );
-            })}
+            })} 
           </tbody>
         </table>
         {usuarios.length === 0 && <p className="info-msg">Todavía no hay usuarios registrados.</p>}
@@ -2565,13 +2609,23 @@ function UsuariosTab({ usuarios, sesionToken, onCambio }) {
             <label className="modal-field">
               Nombre
               <input value={editNombre} onChange={(e) => setEditNombre(e.target.value)} autoFocus required />
-            </label>
-            <label className="modal-field">
+                     <label className="modal-field">
               Rol
-              <select value={editRol} onChange={(e) => setEditRol(e.target.value)}>
+              <select
+                value={editRol}
+                onChange={(e) => setEditRol(e.target.value)}
+                disabled={editando && noPuedeTocarAdminDe(editando, soyAdminCentral)}
+              >
                 <option value="Vendedor">Vendedor</option>
                 <option value="Administrador">Administrador</option>
               </select>
+              {editando && noPuedeTocarAdminDe(editando, soyAdminCentral) && (
+                <span className="muted campo-nota">
+                  {esFilaAdminCentral(editando)
+                    ? 'El rol del Admin Central no se puede cambiar.'
+                    : 'Solo el Admin Central puede cambiarle el rol a otro Administrador.'}
+                </span>
+              )}
             </label>
             <div className="modal-actions">
               <button type="button" className="btn btn-secondary" onClick={() => setEditando(null)}>
@@ -2585,7 +2639,7 @@ function UsuariosTab({ usuarios, sesionToken, onCambio }) {
         </div>
       )}
 
-      {cambiandoClave && (
+      {cambiandoClave && (  
         <div className="modal-overlay" onClick={() => setCambiandoClave(null)}>
           <form className="modal-box" onClick={(e) => e.stopPropagation()} onSubmit={confirmarCambiarClave}>
             <h3>Cambiar contraseña de {cambiandoClave.Nombre}</h3>
