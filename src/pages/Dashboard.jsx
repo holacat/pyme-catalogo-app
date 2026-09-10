@@ -2602,14 +2602,15 @@ function UsuariosTab({ usuarios, sesionToken, soyAdminCentral, onCambio }) {
         </div>
       )}
 
-      {editando && (
+           {editando && (
         <div className="modal-overlay" onClick={() => setEditando(null)}>
           <form className="modal-box" onClick={(e) => e.stopPropagation()} onSubmit={confirmarEditar}>
             <h3>Editar usuario</h3>
             <label className="modal-field">
               Nombre
               <input value={editNombre} onChange={(e) => setEditNombre(e.target.value)} autoFocus required />
-                     <label className="modal-field">
+            </label>
+            <label className="modal-field">
               Rol
               <select
                 value={editRol}
@@ -2639,6 +2640,7 @@ function UsuariosTab({ usuarios, sesionToken, soyAdminCentral, onCambio }) {
         </div>
       )}
 
+      {cambiandoClave && (
       {cambiandoClave && (  
         <div className="modal-overlay" onClick={() => setCambiandoClave(null)}>
           <form className="modal-box" onClick={(e) => e.stopPropagation()} onSubmit={confirmarCambiarClave}>
