@@ -1603,3 +1603,55 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
   transform: rotate(180deg);
   max-height: 45px;
 }
+/* ---- Funcionalidad 1, Paso 2 (Permisos de pestañas, 2026-09): pestaña
+   "🔐 Permisos", visible solo para el Admin Central. ---- */
+.permisos-tab h3 {
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.permisos-tabla-roles th,
+.permisos-tabla-roles td {
+  text-align: center;
+}
+
+.permisos-tabla-roles th:first-child,
+.permisos-tabla-roles td:first-child {
+  text-align: left;
+  font-weight: 600;
+}
+
+.permisos-celda-checkbox input[type="checkbox"] {
+  width: 1.1rem;
+  height: 1.1rem;
+  cursor: pointer;
+}
+
+.permisos-form-excepcion {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.8rem;
+  margin: 0.75rem 0 1.25rem;
+  padding: 0.9rem;
+  background: #f9fafb;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.permisos-form-excepcion label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.permisos-form-excepcion select {
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  min-width: 180px;
+}
