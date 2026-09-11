@@ -270,5 +270,32 @@ export function cambiarContrasenaUsuario({ sesionToken, usuarioId, contrasenaNue
   return post({ action: 'cambiarContrasenaUsuario', sesionToken, usuarioId, contrasenaNueva });
 }
 
-export function inhabilitarUsuario({ sesionToken, usuarioId }) {
-  return post({ action:
+
+export function habilitarUsuario({ sesionToken, usuarioId }) {
+  return post({ action: 'habilitarUsuario', sesionToken, usuarioId });
+}
+
+// ---- Funcionalidad 1, Paso 2 (Permisos de pestañas, 2026-09): pestaña
+// "🔐 Permisos", visible solo para el Admin Central (el backend también lo
+// revisa en las 3 acciones de aquí abajo). ----
+
+// Trae los defaults de cada Rol (Administrador/Vendedor) y la lista de
+// excepciones individuales ya guardadas, más la lista fija de pestañas
+// configurables (con su etiqueta para mostrar).
+export function listarPermisos(sesionToken) {
+  return get('listarPermisos', { sesionToken });
+}
+
+// Cambia el default de una pestaña para TODO un Rol (por ejemplo, quitarle
+// "Estado de cuenta" a todos los Vendedores).
+export function actualizarPermisoRol({ sesionToken, rol, pestana, permitido }) {
+  return post({ action: 'actualizarPermisoRol', sesionToken, rol, pestana, permitido });
+}
+
+// Pone (o quita) una excepción para UNA persona en concreto en una pestaña
+// específica. Para poner/cambiar la excepción manda `permitido` (true o
+// false). Para quitarla (que esa persona vuelva a seguir el default de su
+// Rol) manda `quitar: true` en vez de `permitido`.
+export function actualizarPermisoUsuario({ sesionToken, usuarioId, pestana, permitido, quitar }) {
+  return post({ action: 'actualizarPermisoUsuario', sesionToken, usuarioId, pestana, permitido, quitar });
+}
