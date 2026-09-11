@@ -2530,29 +2530,40 @@ function UsuariosTab({ usuarios, sesionToken, soyAdminCentral, onCambio }) {
                   <td>{u.Usuario}</td>
                   <td>{u.Rol}</td>
                   <td>{activo ? 'Activo' : 'Inhabilitado'}</td>
-                  <td className="celda-acciones">
-                    <div className="acciones-producto">
-                      <button type="button" className="btn btn-editar btn-chip" onClick={() => abrirEditar(u)}>
-                        Editar
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-chip"
-                        onClick={() => abrirCambiarClave(u)}
+                                 <td className="celda-acciones">
+                    {esFilaAdminCentral(u) && !soyAdminCentral ? (
+                      <span
+                        className="muted campo-nota"
+                        title="Solo el Admin Central puede editar, cambiar la contraseña o inhabilitar esta cuenta"
                       >
-                        Cambiar contraseña
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-toggle btn-chip"
-                        onClick={() => toggleActivo(u)}
-                        disabled={cambiandoEstadoId === u.ID || bloqueado}
-                        title={bloqueado ? 'Solo el Admin Central puede inhabilitar/habilitar a otro Administrador' : ''}
-                      >
-                        {activo ? 'Inhabilitar' : 'Habilitar'}
-                      </button>
-                    </div>
-                  </td>
+                        🔒 Solo el Admin Central puede administrar esta cuenta
+                      </span>
+                    ) : (
+                      <div className="acciones-producto">
+                        <button type="button" className="btn btn-editar btn-chip" onClick={() => abrirEditar(u)}>
+                          Editar
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-chip"
+                          onClick={() => abrirCambiarClave(u)}
+                        >
+                          Cambiar contraseña
+                        </button>
+                        {!esFilaAdminCentral(u) && (
+                          <button
+                            type="button"
+                            className="btn btn-toggle btn-chip"
+                            onClick={() => toggleActivo(u)}
+                            disabled={cambiandoEstadoId === u.ID || bloqueado}
+                            title={bloqueado ? 'Solo el Admin Central puede inhabilitar/habilitar a otro Administrador' : ''}
+                          >
+                            {activo ? 'Inhabilitar' : 'Habilitar'}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </td>   
                 </tr>
               );
             })} 
