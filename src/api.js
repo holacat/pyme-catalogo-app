@@ -114,7 +114,7 @@ export function crearProducto({
   precioCompra,
   stock,
   stockMinimo,
-   fotoUrl,
+  fotoUrl,
   descripcion,
   codigoPropio,
   precioOferta,
@@ -271,9 +271,4 @@ export function cambiarContrasenaUsuario({ sesionToken, usuarioId, contrasenaNue
 }
 
 export function inhabilitarUsuario({ sesionToken, usuarioId }) {
-  return post({ action: 'inhabilitarUsuario', sesionToken, usuarioId });
-}
-
-export function habilitarUsuario({ sesionToken, usuarioId }) {
-  return post({ action: 'habilitarUsuario', sesionToken, usuarioId });
-}
+  return post({ action:
