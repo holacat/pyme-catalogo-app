@@ -429,9 +429,7 @@ export default function Dashboard() {
   function cargarTodo(token, opciones = {}) {
     const silencioso = !!opciones.silencioso;
     if (!silencioso) setCargando(true);
-    // "Estado de cuenta", "Bitácora" y "Usuarios" solo las puede ver un
-    // Administrador — ni siquiera las pedimos si quien entró es Vendedor,
-    // así el servidor no tiene que rechazarlas una por una.
+  
       // Funcionalidad 1, Paso 2 (Permisos de pestañas, 2026-09): "Estado de
     // cuenta", "Bitácora" y "Usuarios" solo se piden si `permisos` dice que
     // esta cuenta puede verlas — ni siquiera las pedimos si no, así el
@@ -931,7 +929,7 @@ export default function Dashboard() {
         </>
       )}
 
-      {tab === 'pedidos' && (
+           {tab === 'pedidos' && puedeVer('pedidos') && (
         <>
           <div className="filtro-fechas">
             <label>
