@@ -26,6 +26,9 @@ import {
   inhabilitarUsuario,
   habilitarUsuario,
   analiticaVentas,
+  listarPermisos,
+  actualizarPermisoRol,
+  actualizarPermisoUsuario,
 } from '../api.js';
 import ImageUploader from '../components/ImageUploader.jsx';
 import ImageLightbox from '../components/ImageLightbox.jsx';
@@ -242,6 +245,53 @@ const NOMBRE_KEY = 'pyme_sesion_nombre';
 // todos modos le va a salir con error.
 const ADMIN_CENTRAL_KEY = 'pyme_sesion_admin_central';
 
+// Funcionalidad 1, Paso 2 (Permisos de pestañas, 2026-09): igual que las
+// llaves de arriba, pero para guardar qué pestañas puede ver esta cuenta
+// (calculado por el backend a partir de su Rol + cualquier excepción
+// individual). Se guarda como texto JSON, ej. '{"stock":true,"usuarios":false,...}'.
+const PERMISOS_KEY = 'pyme_sesion_permisos';
+
+// Respaldo seguro: si por lo que sea no hay permisos guardados (una sesión
+// vieja de antes de que existiera esta función, o un error al leerlos), se
+// muestran TODAS las pestañas en vez de ninguna — así nadie se queda con el
+// panel vacío por un problema de este tipo; el backend de todos modos sigue
+// revisando el permiso real en cada acción.
+const PESTANAS_TODAS_PERMITIDAS = {
+  stock: true,
+  pedidos: true,
+  alertas: true,
+  cuenta: true,
+  bitacora: true,
+  usuarios: true,
+  analitica: true,
+  orden: true,
+  nuevo: true,
+};
+
+// Al iniciar sesión, se abre la primera pestaña de esta lista que la
+// cuenta SÍ pueda ver (en vez de siempre "stock" a fuerza, por si algún día
+// el Admin Central le quita esa pestaña a un Rol). Si por algo raro no
+// puede ver ninguna, de todos modos cae en "stock" (el panel se lo va a
+// negar y mostrará el aviso correspondiente, ver más abajo).
+const ORDEN_PESTANAS_INICIALES = [
+  'stock', 'pedidos', 'alertas', 'orden', 'nuevo', 'cuenta', 'bitacora', 'usuarios', 'analitica',
+];
+
+function primeraPestanaVisible(permisosCalculados) {
+  return ORDEN_PESTANAS_INICIALES.find((p) => permisosCalculados[p]) || 'stock';
+}
+
+function leerPermisosGuardados() {
+  try {
+    const texto = localStorage.getItem(PERMISOS_KEY);
+    if (!texto) return PESTANAS_TODAS_PERMITIDAS;
+    const parsed = JSON.parse(texto);
+    return parsed && typeof parsed === 'object' ? parsed : PESTANAS_TODAS_PERMITIDAS;
+  } catch (e) {
+    return PESTANAS_TODAS_PERMITIDAS;
+  }
+}
+
 // Normaliza valores de "sí/no" que pueden venir como booleano real
 // (true/false) o como texto ("TRUE", "SI"), igual que hace el backend.
 function esActivo(valor) {
@@ -252,7 +302,8 @@ export default function Dashboard() {
   const [sesionToken, setSesionToken] = useState(() => localStorage.getItem(TOKEN_KEY) || '');
   const [rol, setRol] = useState(() => localStorage.getItem(ROL_KEY) || '');
    const [nombreSesion, setNombreSesion] = useState(() => localStorage.getItem(NOMBRE_KEY) || '');
-  const [esAdminCentral, setEsAdminCentral] = useState(() => localStorage.getItem(ADMIN_CENTRAL_KEY) === 'true');
+   const [esAdminCentral, setEsAdminCentral] = useState(() => localStorage.getItem(ADMIN_CENTRAL_KEY) === 'true');
+  const [permisos, setPermisos] = useState(() => leerPermisosGuardados());
   const [autenticado, setAutenticado] = useState(!!localStorage.getItem(TOKEN_KEY));
   // Mientras esto sea true, NO mostramos el panel: estamos comprobando (o
   // volviendo a comprobar) que la sesión guardada todavía sea válida contra
@@ -270,7 +321,15 @@ export default function Dashboard() {
   const [movimientos, setMovimientos] = useState([]);
   const [bitacora, setBitacora] = useState([]);
   const [usuarios, setUsuarios] = useState([]);
-  const esAdministrador = rol === 'Administrador';
+   const esAdministrador = rol === 'Administrador';
+  // Funcionalidad 1, Paso 2 (Permisos de pestañas, 2026-09): reemplaza los
+  // "esAdministrador &&" que antes decidían a mano qué pestañas se ven. El
+  // Admin Central siempre tiene todo en `true` (el backend ya se lo manda
+  // así calculado); para los demás, `permisos` refleja el default de su Rol
+  // más cualquier excepción individual que le haya puesto el Admin Central.
+  function puedeVer(pestana) {
+    return !!permisos[pestana];
+  }
   // Opciones predeterminadas para los campos de "+ Agregar producto"
   // (Nombre, Código propio, Categoría, Marca, Talla, Color). Se guarda como
   // { categoria: ['Bolsas', 'Zapatos'], color: ['Rojo'], ... }. A propósito
@@ -373,15 +432,20 @@ export default function Dashboard() {
     // "Estado de cuenta", "Bitácora" y "Usuarios" solo las puede ver un
     // Administrador — ni siquiera las pedimos si quien entró es Vendedor,
     // así el servidor no tiene que rechazarlas una por una.
-    const pedirSoloAdmin = rol === 'Administrador';
+      // Funcionalidad 1, Paso 2 (Permisos de pestañas, 2026-09): "Estado de
+    // cuenta", "Bitácora" y "Usuarios" solo se piden si `permisos` dice que
+    // esta cuenta puede verlas — ni siquiera las pedimos si no, así el
+    // servidor no tiene que rechazarlas una por una. Antes esto dependía
+    // solo del Rol; ahora también puede depender de una excepción individual
+    // que le haya puesto el Admin Central.
     return Promise.all([
       listarProductosAdmin(token),
       listarPedidos(token),
       obtenerAlertas(token),
       listarOpciones(token),
-      pedirSoloAdmin ? listarMovimientos(token) : Promise.resolve({ movimientos: [] }),
-      pedirSoloAdmin ? listarBitacora(token) : Promise.resolve({ bitacora: [] }),
-      pedirSoloAdmin ? listarUsuarios(token) : Promise.resolve({ usuarios: [] }),
+      puedeVer('cuenta') ? listarMovimientos(token) : Promise.resolve({ movimientos: [] }),
+      puedeVer('bitacora') ? listarBitacora(token) : Promise.resolve({ bitacora: [] }),
+      puedeVer('usuarios') ? listarUsuarios(token) : Promise.resolve({ usuarios: [] }),
     ])
       .then(([p, o, a, op, mv, b, us]) => {
         setProductos(p.productos);
@@ -429,7 +493,7 @@ export default function Dashboard() {
     }, INTERVALO_REFRESCO_MS);
     return () => clearInterval(intervalo);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autenticado, sesionToken, rol, sinGuardar, productoEditando, tab]);
+  }, [autenticado, sesionToken, rol, permisos, sinGuardar, productoEditando, tab]);
 
   // Entra al Dashboard con usuario y contraseña (hoja "Usuarios"). Si están
   // mal, NUNCA se activa `autenticado` — así nadie que escriba mal sus
@@ -441,18 +505,21 @@ export default function Dashboard() {
     if (!usuarioTexto || !contrasena) return;
     setVerificandoLogin(true);
     setErrorLogin('');
-    login({ usuario: usuarioTexto, contrasena })
+       login({ usuario: usuarioTexto, contrasena })
       .then((res) => {
-                    localStorage.setItem(TOKEN_KEY, res.token);
+        const permisosCalculados = res.permisos || PESTANAS_TODAS_PERMITIDAS;
+        localStorage.setItem(TOKEN_KEY, res.token);
         localStorage.setItem(ROL_KEY, res.rol);
         localStorage.setItem(NOMBRE_KEY, res.nombre);
         localStorage.setItem(ADMIN_CENTRAL_KEY, res.esAdminCentral ? 'true' : 'false');
+        localStorage.setItem(PERMISOS_KEY, JSON.stringify(permisosCalculados));
         setSesionToken(res.token);
         setRol(res.rol);
         setNombreSesion(res.nombre);
         setEsAdminCentral(!!res.esAdminCentral);
+        setPermisos(permisosCalculados);
         setInputContrasena('');
-        setTab('stock');
+        setTab(primeraPestanaVisible(permisosCalculados));
         setAutenticado(true);
         setVerificandoSesion(false);
       })
@@ -464,12 +531,14 @@ export default function Dashboard() {
            localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(ROL_KEY);
     localStorage.removeItem(NOMBRE_KEY);
-    localStorage.removeItem(ADMIN_CENTRAL_KEY);
+      localStorage.removeItem(ADMIN_CENTRAL_KEY);
+    localStorage.removeItem(PERMISOS_KEY);
     setAutenticado(false);
     setSesionToken('');
     setRol('');
     setNombreSesion('');
     setEsAdminCentral(false);
+    setPermisos(PESTANAS_TODAS_PERMITIDAS);
     setInputUsuario('');
     setInputContrasena('');
     setTab('stock');
@@ -683,43 +752,64 @@ export default function Dashboard() {
         </div>
       )}
 
-      <div className="tabs">
-        <button className={tab === 'stock' ? 'active' : ''} onClick={() => cambiarTab('stock')}>Stock</button>
-        <button className={tab === 'pedidos' ? 'active' : ''} onClick={() => cambiarTab('pedidos')}>
-          Pedidos ({pedidos.length})
-        </button>
-        <button className={tab === 'alertas' ? 'active' : ''} onClick={() => cambiarTab('alertas')}>
-          Alertas ({alertas.length})
-        </button>
-        {esAdministrador && (
+         <div className="tabs">
+        {puedeVer('stock') && (
+          <button className={tab === 'stock' ? 'active' : ''} onClick={() => cambiarTab('stock')}>Stock</button>
+        )}
+        {puedeVer('pedidos') && (
+          <button className={tab === 'pedidos' ? 'active' : ''} onClick={() => cambiarTab('pedidos')}>
+            Pedidos ({pedidos.length})
+          </button>
+        )}
+        {puedeVer('alertas') && (
+          <button className={tab === 'alertas' ? 'active' : ''} onClick={() => cambiarTab('alertas')}>
+            Alertas ({alertas.length})
+          </button>
+        )}
+        {puedeVer('cuenta') && (
           <button className={tab === 'cuenta' ? 'active' : ''} onClick={() => cambiarTab('cuenta')}>
             📄 Estado de cuenta
           </button>
         )}
-        {esAdministrador && (
+        {puedeVer('bitacora') && (
           <button className={tab === 'bitacora' ? 'active' : ''} onClick={() => cambiarTab('bitacora')}>
             🗒️ Bitácora
           </button>
         )}
-        {esAdministrador && (
+        {puedeVer('usuarios') && (
           <button className={tab === 'usuarios' ? 'active' : ''} onClick={() => cambiarTab('usuarios')}>
             👤 Usuarios
           </button>
         )}
-        {esAdministrador && (
+        {puedeVer('analitica') && (
           <button className={tab === 'analitica' ? 'active' : ''} onClick={() => cambiarTab('analitica')}>
             📈 Analítica de ventas
           </button>
         )}
-        <button className={tab === 'orden' ? 'active' : ''} onClick={() => cambiarTab('orden')}>
-          🔀 Orden del catálogo
-        </button>
-        <button className={tab === 'nuevo' ? 'active' : ''} onClick={() => cambiarTab('nuevo')}>
-          + Agregar producto
-        </button>
+        {puedeVer('orden') && (
+          <button className={tab === 'orden' ? 'active' : ''} onClick={() => cambiarTab('orden')}>
+            🔀 Orden del catálogo
+          </button>
+        )}
+        {puedeVer('nuevo') && (
+          <button className={tab === 'nuevo' ? 'active' : ''} onClick={() => cambiarTab('nuevo')}>
+            + Agregar producto
+          </button>
+        )}
+        {esAdminCentral && (
+          <button className={tab === 'permisos' ? 'active' : ''} onClick={() => cambiarTab('permisos')}>
+            🔐 Permisos
+          </button>
+        )}
       </div>
 
-      {tab === 'stock' && (
+      {!puedeVer(tab) && tab !== 'permisos' && (
+        <p className="info-msg">
+          Ya no tienes acceso a esta pestaña. Elige otra de arriba, o pídele al Admin Central que revise tus permisos.
+        </p>
+      )}
+
+      {tab === 'stock' && puedeVer('stock') && (
         <>
           <div className="filtro-fechas">
             <label>
@@ -927,7 +1017,7 @@ export default function Dashboard() {
         </>
       )}
 
-      {tab === 'alertas' && (
+           {tab === 'alertas' && puedeVer('alertas') && (
         <ul className="alert-list">
           {alertas.length === 0 && <li>Sin alertas de bajo inventario 🎉</li>}
           {alertas.map((a) => (
@@ -938,14 +1028,14 @@ export default function Dashboard() {
         </ul>
       )}
 
-      {tab === 'cuenta' && esAdministrador && (
+      {tab === 'cuenta' && puedeVer('cuenta') && (
         <EstadoCuentaTab movimientos={movimientos} pedidos={pedidos} productos={productos} />
       )}
 
-      {tab === 'bitacora' && esAdministrador && <BitacoraTab bitacora={bitacora} />}
+      {tab === 'bitacora' && puedeVer('bitacora') && <BitacoraTab bitacora={bitacora} />}
 
-      {tab === 'usuarios' && esAdministrador && (
-               <UsuariosTab
+      {tab === 'usuarios' && puedeVer('usuarios') && (
+        <UsuariosTab
           usuarios={usuarios}
           sesionToken={sesionToken}
           soyAdminCentral={esAdminCentral}
@@ -953,9 +1043,9 @@ export default function Dashboard() {
         />
       )}
 
-      {tab === 'analitica' && esAdministrador && <AnaliticaTab sesionToken={sesionToken} />}
+      {tab === 'analitica' && puedeVer('analitica') && <AnaliticaTab sesionToken={sesionToken} />}
 
-      {tab === 'orden' && (
+      {tab === 'orden' && puedeVer('orden') && (
         <OrdenTab
           productos={productos}
           opciones={opciones}
@@ -964,7 +1054,7 @@ export default function Dashboard() {
         />
       )}
 
-      {tab === 'nuevo' && (
+      {tab === 'nuevo' && puedeVer('nuevo') && (
         <ProductoForm
           sesionToken={sesionToken}
           opciones={opciones}
@@ -974,6 +1064,10 @@ export default function Dashboard() {
             setTab('stock');
           }}
         />
+      )}
+
+      {tab === 'permisos' && esAdminCentral && (
+        <PermisosTab sesionToken={sesionToken} usuarios={usuarios} />
       )}
 
       {productoEditando && (
@@ -2675,12 +2769,218 @@ function UsuariosTab({ usuarios, sesionToken, soyAdminCentral, onCambio }) {
                 {guardandoClave ? 'Guardando…' : 'Cambiar contraseña'}
               </button>
             </div>
-          </form>
+                 </form>
         </div>
       )}
     </div>
   );
 }
+
+// ---- Permisos de pestañas (pestaña "🔐 Permisos", Funcionalidad 1 Paso 2,
+// 2026-09) — visible SOLO para el Admin Central; ni siquiera un
+// Administrador adicional la ve ni puede llegar a ella. Deja: (1) una
+// tabla Rol × Pestaña con casillas para el default de cada Rol, y (2) una
+// lista de excepciones por persona (dar o quitar UNA pestaña puntual a
+// alguien en concreto, sin tocar el default de su Rol). ----
+function PermisosTab({ sesionToken, usuarios }) {
+  const [pestanas, setPestanas] = useState([]);
+  const [rolDefaults, setRolDefaults] = useState({ Administrador: {}, Vendedor: {} });
+  const [overrides, setOverrides] = useState([]);
+  const [cargando, setCargando] = useState(true);
+  const [mensaje, setMensaje] = useState('');
+  const [celdaGuardando, setCeldaGuardando] = useState(''); // "Rol:pestana" en curso, o ''
+
+  const [nuevoUsuarioId, setNuevoUsuarioId] = useState('');
+  const [nuevaPestana, setNuevaPestana] = useState('');
+  const [nuevoPermitido, setNuevoPermitido] = useState('true');
+  const [guardandoExcepcion, setGuardandoExcepcion] = useState(false);
+
+  function cargar() {
+    setCargando(true);
+    listarPermisos(sesionToken)
+      .then((res) => {
+        setPestanas(res.pestanas || []);
+        setRolDefaults(res.rolDefaults || { Administrador: {}, Vendedor: {} });
+        setOverrides(res.overrides || []);
+        setMensaje('');
+      })
+      .catch((err) => setMensaje(`Error al cargar permisos: ${err.message}`))
+      .finally(() => setCargando(false));
+  }
+
+  useEffect(() => {
+    cargar();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function toggleRolPermiso(rol, pestanaClave, valorActual) {
+    const llave = `${rol}:${pestanaClave}`;
+    setCeldaGuardando(llave);
+    actualizarPermisoRol({ sesionToken, rol, pestana: pestanaClave, permitido: !valorActual })
+      .then(cargar)
+      .catch((err) => setMensaje(`Error al guardar: ${err.message}`))
+      .finally(() => setCeldaGuardando(''));
+  }
+
+  // Solo tiene sentido poner una excepción a alguien que no sea el Admin
+  // Central (a él el backend de todos modos la rechazaría) y que esté
+  // activo (a alguien inhabilitado no le sirve de nada, no puede entrar).
+  const usuariosElegibles = (usuarios || []).filter((u) => !esFilaAdminCentral(u) && esActivo(u.Activo));
+
+  function agregarExcepcion(e) {
+    e.preventDefault();
+    if (!nuevoUsuarioId || !nuevaPestana) return;
+    setGuardandoExcepcion(true);
+    actualizarPermisoUsuario({
+      sesionToken,
+      usuarioId: nuevoUsuarioId,
+      pestana: nuevaPestana,
+      permitido: nuevoPermitido === 'true',
+    })
+      .then(() => {
+        setNuevoUsuarioId('');
+        setNuevaPestana('');
+        setNuevoPermitido('true');
+        cargar();
+      })
+      .catch((err) => setMensaje(`Error al guardar la excepción: ${err.message}`))
+      .finally(() => setGuardandoExcepcion(false));
+  }
+
+  function quitarExcepcion(usuarioId, pestanaClave) {
+    actualizarPermisoUsuario({ sesionToken, usuarioId, pestana: pestanaClave, quitar: true })
+      .then(cargar)
+      .catch((err) => setMensaje(`Error al quitar la excepción: ${err.message}`));
+  }
+
+  function etiquetaDe(pestanaClave) {
+    const encontrada = pestanas.find((p) => p.clave === pestanaClave);
+    return encontrada ? encontrada.etiqueta : pestanaClave;
+  }
+
+  if (cargando) return <p className="info-msg">Cargando permisos…</p>;
+
+  return (
+    <div className="permisos-tab">
+      <p className="muted">
+        Aquí decides qué pestañas puede ver y usar cada Rol, y puedes hacer
+        excepciones para una persona en concreto. Tú (Admin Central) siempre
+        ves todas las pestañas, sin importar lo que configures aquí.
+      </p>
+
+      {mensaje && <p className="info-msg error">{mensaje}</p>}
+
+      <h3>Por Rol</h3>
+      <div className="table-scroll">
+        <table className="data-table permisos-tabla-roles">
+          <thead>
+            <tr>
+              <th>Rol</th>
+              {pestanas.map((p) => (
+                <th key={p.clave}>{p.etiqueta}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {['Administrador', 'Vendedor'].map((rol) => (
+              <tr key={rol}>
+                <td>{rol}</td>
+                {pestanas.map((p) => {
+                  const valor = !!(rolDefaults[rol] && rolDefaults[rol][p.clave]);
+                  const guardandoEstaCelda = celdaGuardando === `${rol}:${p.clave}`;
+                  return (
+                    <td key={p.clave} className="permisos-celda-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={valor}
+                        disabled={guardandoEstaCelda}
+                        onChange={() => toggleRolPermiso(rol, p.clave, valor)}
+                        title={`${rol} — ${p.etiqueta}: ${valor ? 'permitido' : 'restringido'}`}
+                      />
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Excepciones por persona</h3>
+      <p className="muted">
+        Usa esto solo para casos especiales: dar o quitar UNA pestaña
+        puntual a alguien, sin cambiar el default de todo su Rol.
+      </p>
+
+      <form className="permisos-form-excepcion" onSubmit={agregarExcepcion}>
+        <label>
+          Persona
+          <select value={nuevoUsuarioId} onChange={(e) => setNuevoUsuarioId(e.target.value)} required>
+            <option value="">Elige…</option>
+            {usuariosElegibles.map((u) => (
+              <option key={u.ID} value={u.ID}>{u.Nombre} ({u.Rol})</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Pestaña
+          <select value={nuevaPestana} onChange={(e) => setNuevaPestana(e.target.value)} required>
+            <option value="">Elige…</option>
+            {pestanas.map((p) => (
+              <option key={p.clave} value={p.clave}>{p.etiqueta}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Excepción
+          <select value={nuevoPermitido} onChange={(e) => setNuevoPermitido(e.target.value)}>
+            <option value="true">Permitir (aunque su Rol no la tenga)</option>
+            <option value="false">Restringir (aunque su Rol sí la tenga)</option>
+          </select>
+        </label>
+        <button type="submit" className="btn btn-secondary" disabled={guardandoExcepcion}>
+          {guardandoExcepcion ? 'Guardando…' : 'Agregar excepción'}
+        </button>
+      </form>
+
+      {overrides.length === 0 ? (
+        <p className="info-msg">No hay ninguna excepción individual guardada.</p>
+      ) : (
+        <div className="table-scroll">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Persona</th>
+                <th>Pestaña</th>
+                <th>Excepción</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {overrides.map((o) => (
+                <tr key={`${o.usuarioId}:${o.pestana}`}>
+                  <td>{o.nombre}</td>
+                  <td>{etiquetaDe(o.pestana)}</td>
+                  <td>{o.permitido ? 'Permitido' : 'Restringido'}</td>
+                  <td className="celda-acciones">
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-chip"
+                      onClick={() => quitarExcepcion(o.usuarioId, o.pestana)}
+                    >
+                      Quitar (volver al default de su Rol)
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ---- Analítica de ventas (pestaña "📈 Analítica de ventas", solo
 // Administrador) ----
 // Toda la información viene de UNA sola llamada al backend (`analiticaVentas`,
