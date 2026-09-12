@@ -270,6 +270,9 @@ export function cambiarContrasenaUsuario({ sesionToken, usuarioId, contrasenaNue
   return post({ action: 'cambiarContrasenaUsuario', sesionToken, usuarioId, contrasenaNueva });
 }
 
+export function inhabilitarUsuario({ sesionToken, usuarioId }) {
+  return post({ action: 'inhabilitarUsuario', sesionToken, usuarioId });
+}
 
 export function habilitarUsuario({ sesionToken, usuarioId }) {
   return post({ action: 'habilitarUsuario', sesionToken, usuarioId });
