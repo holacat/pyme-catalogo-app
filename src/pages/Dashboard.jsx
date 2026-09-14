@@ -436,11 +436,17 @@ export default function Dashboard() {
     // servidor no tiene que rechazarlas una por una. Antes esto dependía
     // solo del Rol; ahora también puede depender de una excepción individual
     // que le haya puesto el Admin Central.
-    return Promise.all([
-      listarProductosAdmin(token),
-      listarPedidos(token),
-      obtenerAlertas(token),
-      listarOpciones(token),
+      return Promise.all([
+      (puedeVer('stock') || puedeVer('pedidos') || puedeVer('orden') || puedeVer('cuenta'))
+        ? listarProductosAdmin(token)
+        : Promise.resolve({ productos: [] }),
+      (puedeVer('pedidos') || puedeVer('cuenta'))
+        ? listarPedidos(token)
+        : Promise.resolve({ pedidos: [] }),
+      puedeVer('alertas') ? obtenerAlertas(token) : Promise.resolve({ alertas: [] }),
+      (puedeVer('stock') || puedeVer('nuevo') || puedeVer('orden'))
+        ? listarOpciones(token)
+        : Promise.resolve({ opciones: {} }),
       puedeVer('cuenta') ? listarMovimientos(token) : Promise.resolve({ movimientos: [] }),
       puedeVer('bitacora') ? listarBitacora(token) : Promise.resolve({ bitacora: [] }),
       puedeVer('usuarios') ? listarUsuarios(token) : Promise.resolve({ usuarios: [] }),
