@@ -29,6 +29,11 @@ import {
   listarPermisos,
   actualizarPermisoRol,
   actualizarPermisoUsuario,
+  listarTransferencias,
+  solicitarTransferencia,
+  responderTransferencia,
+  marcarTransferenciaVista,
+  asignarStockDueno,
 } from '../api.js';
 import ImageUploader from '../components/ImageUploader.jsx';
 import ImageLightbox from '../components/ImageLightbox.jsx';
@@ -243,7 +248,7 @@ const NOMBRE_KEY = 'pyme_sesion_nombre';
 // las acciones que el backend igual rechazaría (inhabilitar/cambiar el rol
 // de otro Administrador), para que Claudia no le dé clic a algo que de
 // todos modos le va a salir con error.
-const ADMIN_CENTRAL_KEY = 'pyme_sesion_admin_central';
+const ADMIN_CENTRAL_KEY = 'pyme_sesion_admin_central';  // Funcionalidad 2 (Stock personal, 2026-09): el ID de la propia cuenta (el // mismo que usa "Duenos" en cada producto y "SolicitanteID"/"DuenoID" en // las transferencias) — hacía falta para poder saber, en el navegador, // cuál fila de stock es "mía". El backend no lo mandaba antes porque no // hacía falta para nada más. const USUARIO_ID_KEY = 'pyme_sesion_usuario_id';
 
 // Funcionalidad 1, Paso 2 (Permisos de pestañas, 2026-09): igual que las
 // llaves de arriba, pero para guardar qué pestañas puede ver esta cuenta
@@ -302,7 +307,8 @@ export default function Dashboard() {
   const [sesionToken, setSesionToken] = useState(() => localStorage.getItem(TOKEN_KEY) || '');
   const [rol, setRol] = useState(() => localStorage.getItem(ROL_KEY) || '');
    const [nombreSesion, setNombreSesion] = useState(() => localStorage.getItem(NOMBRE_KEY) || '');
-   const [esAdminCentral, setEsAdminCentral] = useState(() => localStorage.getItem(ADMIN_CENTRAL_KEY) === 'true');
+     const [esAdminCentral, setEsAdminCentral] = useState(() => localStorage.getItem(ADMIN_CENTRAL_KEY) === 'true');
+  const [usuarioId, setUsuarioId] = useState(() => localStorage.getItem(USUARIO_ID_KEY) || '');
   const [permisos, setPermisos] = useState(() => leerPermisosGuardados());
   const [autenticado, setAutenticado] = useState(!!localStorage.getItem(TOKEN_KEY));
   // Mientras esto sea true, NO mostramos el panel: estamos comprobando (o
@@ -320,7 +326,18 @@ export default function Dashboard() {
   const [alertas, setAlertas] = useState([]);
   const [movimientos, setMovimientos] = useState([]);
   const [bitacora, setBitacora] = useState([]);
-  const [usuarios, setUsuarios] = useState([]);
+    const [usuarios, setUsuarios] = useState([]);
+  // Funcionalidad 2 (Stock personal + transferencias, 2026-09): lista
+  // completa de solicitudes (para el historial de Admin/Admin Central), y
+  // las que llegan ya calculadas dentro de "alertas": las pendientes
+  // dirigidas a mí (para el panel de arriba de Stock) y las mías ya
+  // resueltas que todavía no he visto (para el aviso en Alertas).
+  const [transferencias, setTransferencias] = useState([]);
+  const [transferenciasPendientes, setTransferenciasPendientes] = useState([]);
+  const [transferenciasResueltas, setTransferenciasResueltas] = useState([]);
+  // 'todo' muestra el stock completo (con el dueño de cada quien); 'mio'
+  // filtra solo los productos donde yo tengo algo asignado.
+  const [filtroStockPersonal, setFiltroStockPersonal] = useState('todo');
    const esAdministrador = rol === 'Administrador';
   // Funcionalidad 1, Paso 2 (Permisos de pestañas, 2026-09): reemplaza los
   // "esAdministrador &&" que antes decidían a mano qué pestañas se ven. El
@@ -436,29 +453,35 @@ export default function Dashboard() {
     // servidor no tiene que rechazarlas una por una. Antes esto dependía
     // solo del Rol; ahora también puede depender de una excepción individual
     // que le haya puesto el Admin Central.
-      return Promise.all([
+           return Promise.all([
       (puedeVer('stock') || puedeVer('pedidos') || puedeVer('orden') || puedeVer('cuenta'))
         ? listarProductosAdmin(token)
         : Promise.resolve({ productos: [] }),
       (puedeVer('pedidos') || puedeVer('cuenta'))
         ? listarPedidos(token)
         : Promise.resolve({ pedidos: [] }),
-      puedeVer('alertas') ? obtenerAlertas(token) : Promise.resolve({ alertas: [] }),
+      (puedeVer('alertas') || puedeVer('stock'))
+        ? obtenerAlertas(token)
+        : Promise.resolve({ alertas: [], transferenciasPendientes: [], transferenciasResueltas: [] }),
       (puedeVer('stock') || puedeVer('nuevo') || puedeVer('orden'))
         ? listarOpciones(token)
         : Promise.resolve({ opciones: {} }),
       puedeVer('cuenta') ? listarMovimientos(token) : Promise.resolve({ movimientos: [] }),
       puedeVer('bitacora') ? listarBitacora(token) : Promise.resolve({ bitacora: [] }),
       puedeVer('usuarios') ? listarUsuarios(token) : Promise.resolve({ usuarios: [] }),
+      puedeVer('stock') ? listarTransferencias(token) : Promise.resolve({ transferencias: [] }),
     ])
-      .then(([p, o, a, op, mv, b, us]) => {
+      .then(([p, o, a, op, mv, b, us, tr]) => {
         setProductos(p.productos);
         setPedidos(o.pedidos);
-        setAlertas(a.alertas);
+        setAlertas(a.alertas || []);
+        setTransferenciasPendientes(a.transferenciasPendientes || []);
+        setTransferenciasResueltas(a.transferenciasResueltas || []);
         setOpciones(op.opciones || {});
         setMovimientos(mv.movimientos || []);
         setBitacora(b.bitacora || []);
         setUsuarios(us.usuarios || []);
+        setTransferencias(tr.transferencias || []);
         if (!silencioso) setMensaje('');
       })
       .catch((err) => {
@@ -509,18 +532,20 @@ export default function Dashboard() {
     if (!usuarioTexto || !contrasena) return;
     setVerificandoLogin(true);
     setErrorLogin('');
-       login({ usuario: usuarioTexto, contrasena })
+        login({ usuario: usuarioTexto, contrasena })
       .then((res) => {
         const permisosCalculados = res.permisos || PESTANAS_TODAS_PERMITIDAS;
         localStorage.setItem(TOKEN_KEY, res.token);
         localStorage.setItem(ROL_KEY, res.rol);
         localStorage.setItem(NOMBRE_KEY, res.nombre);
         localStorage.setItem(ADMIN_CENTRAL_KEY, res.esAdminCentral ? 'true' : 'false');
+        localStorage.setItem(USUARIO_ID_KEY, res.id || '');
         localStorage.setItem(PERMISOS_KEY, JSON.stringify(permisosCalculados));
         setSesionToken(res.token);
         setRol(res.rol);
         setNombreSesion(res.nombre);
         setEsAdminCentral(!!res.esAdminCentral);
+        setUsuarioId(res.id || '');
         setPermisos(permisosCalculados);
         setInputContrasena('');
         setTab(primeraPestanaVisible(permisosCalculados));
@@ -531,17 +556,19 @@ export default function Dashboard() {
       .finally(() => setVerificandoLogin(false));
   }
 
-  function handleLogout() {
+   function handleLogout() {
            localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(ROL_KEY);
     localStorage.removeItem(NOMBRE_KEY);
       localStorage.removeItem(ADMIN_CENTRAL_KEY);
+    localStorage.removeItem(USUARIO_ID_KEY);
     localStorage.removeItem(PERMISOS_KEY);
     setAutenticado(false);
     setSesionToken('');
     setRol('');
     setNombreSesion('');
     setEsAdminCentral(false);
+    setUsuarioId('');
     setPermisos(PESTANAS_TODAS_PERMITIDAS);
     setInputUsuario('');
     setInputContrasena('');
@@ -567,7 +594,7 @@ export default function Dashboard() {
       .catch((err) => setMensaje(`Error al cambiar visibilidad: ${err.message}`));
   }
 
-  function handleEliminarProducto(producto) {
+   function handleEliminarProducto(producto) {
     const confirmar = window.confirm(
       `¿Seguro que quieres eliminar "${producto.Nombre}" para siempre? Esta acción no se puede deshacer desde la app.`
     );
@@ -575,6 +602,52 @@ export default function Dashboard() {
     eliminarProducto({ sesionToken, productoId: producto.ID })
       .then(() => cargarTodo(sesionToken))
       .catch((err) => setMensaje(`Error al eliminar producto: ${err.message}`));
+  }
+
+  // ---- Funcionalidad 2 (Stock personal + transferencias, 2026-09) ----
+  function handleSolicitarTransferencia(producto, dueno, cantidad) {
+    return solicitarTransferencia({
+      sesionToken,
+      productoId: producto.ID,
+      duenoId: dueno.usuarioId,
+      duenoNombre: dueno.nombre,
+      cantidad,
+    })
+      .then(() => cargarTodo(sesionToken))
+      .catch((err) => {
+        setMensaje(`Error al solicitar stock: ${err.message}`);
+        throw err;
+      });
+  }
+
+  function handleResponderTransferencia(transferenciaId, aceptar) {
+    responderTransferencia({ sesionToken, transferenciaId, aceptar })
+      .then(() => cargarTodo(sesionToken))
+      .catch((err) => setMensaje(`Error al responder la solicitud: ${err.message}`));
+  }
+
+  function handleMarcarTransferenciaVista(transferenciaId) {
+    marcarTransferenciaVista({ sesionToken, transferenciaId })
+      .then(() => cargarTodo(sesionToken, { silencioso: true }))
+      .catch((err) => setMensaje(`Error: ${err.message}`));
+  }
+
+  // Solo un Administrador puede usar esto (el backend también lo revisa):
+  // pone en EXACTAMENTE `cantidad` la porción de este producto que le
+  // toca a esa persona.
+  function handleAsignarStockDueno(producto, destinoUsuarioId, destinoUsuarioNombre, cantidad) {
+    return asignarStockDueno({
+      sesionToken,
+      productoId: producto.ID,
+      usuarioId: destinoUsuarioId,
+      usuarioNombre: destinoUsuarioNombre,
+      cantidad,
+    })
+      .then(() => cargarTodo(sesionToken))
+      .catch((err) => {
+        setMensaje(`Error al asignar stock: ${err.message}`);
+        throw err;
+      });
   }
 
   if (!autenticado) {
@@ -657,11 +730,23 @@ export default function Dashboard() {
   const productosPorCategoria = filtroCategoriaStock
     ? productosPorFecha.filter((p) => categoriaDeProducto(p) === filtroCategoriaStock)
     : productosPorFecha;
-  const productosBuscados = productosPorCategoria.filter((p) => coincideBusquedaStock(p, busquedaStock));
-  const productosFiltrados = ordenarProductosStock(productosBuscados, ordenStock);
+   const productosBuscados = productosPorCategoria.filter((p) => coincideBusquedaStock(p, busquedaStock));
+  const productosOrdenadosPorColumna = ordenarProductosStock(productosBuscados, ordenStock);
+
+  // Funcionalidad 2 (Stock personal, 2026-09): con "Mi stock personal"
+  // activo, solo se muestran los productos donde YO tengo algo asignado
+  // (mi propia porción, no la de nadie más).
+  function esDuenoDelProducto(producto) {
+    return (producto.Duenos || []).some((d) => String(d.usuarioId) === String(usuarioId) && d.cantidad > 0);
+  }
+  const productosFiltrados =
+    filtroStockPersonal === 'mio'
+      ? productosOrdenadosPorColumna.filter(esDuenoDelProducto)
+      : productosOrdenadosPorColumna;
 
   const filtroFechaActivo = !!(filtroDesde || filtroHasta);
-  const hayFiltrosStockActivos = filtroFechaActivo || !!filtroCategoriaStock || !!busquedaStock.trim();
+  const hayFiltrosStockActivos =
+    filtroFechaActivo || !!filtroCategoriaStock || !!busquedaStock.trim() || filtroStockPersonal === 'mio';
 
   // Al darle clic a un encabezado de columna ordenable: 1er clic ordena de
   // menor a mayor, 2do clic de mayor a menor, 3er clic quita ese orden y
@@ -674,13 +759,13 @@ export default function Dashboard() {
     });
   }
 
-  function limpiarFiltrosStock() {
+    function limpiarFiltrosStock() {
     setFiltroDesde('');
     setFiltroHasta('');
     setBusquedaStock('');
     setFiltroCategoriaStock('');
+    setFiltroStockPersonal('todo');
   }
-
   // Pedidos: igual que los productos, más recientes primero. Además se
   // pueden filtrar por fecha (Desde/Hasta) y por Estado con la tablita de
   // conteos de la derecha.
@@ -813,8 +898,58 @@ export default function Dashboard() {
         </p>
       )}
 
-      {tab === 'stock' && puedeVer('stock') && (
+           {tab === 'stock' && puedeVer('stock') && (
         <>
+          {transferenciasPendientes.length > 0 && (
+            <div className="transferencias-pendientes-panel">
+              <p className="transferencias-pendientes-titulo">
+                📥 Tienes {transferenciasPendientes.length} solicitud{transferenciasPendientes.length === 1 ? '' : 'es'} de stock pendiente{transferenciasPendientes.length === 1 ? '' : 's'}:
+              </p>
+              <ul className="transferencias-pendientes-lista">
+                {transferenciasPendientes.map((t) => (
+                  <li key={t.ID} className="transferencias-pendientes-item">
+                    <span>
+                      <strong>{t.SolicitanteNombre}</strong> te solicita <strong>{t.Cantidad}</strong> de "{t.Producto}"
+                    </span>
+                    <div className="transferencias-pendientes-botones">
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-small"
+                        onClick={() => handleResponderTransferencia(t.ID, true)}
+                      >
+                        Aceptar
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-small"
+                        onClick={() => handleResponderTransferencia(t.ID, false)}
+                      >
+                        Rechazar
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <div className="stock-personal-toggle">
+            <button
+              type="button"
+              className={`resumen-btn ${filtroStockPersonal === 'todo' ? 'activo' : ''}`}
+              onClick={() => setFiltroStockPersonal('todo')}
+            >
+              Todo el stock
+            </button>
+            <button
+              type="button"
+              className={`resumen-btn ${filtroStockPersonal === 'mio' ? 'activo' : ''}`}
+              onClick={() => setFiltroStockPersonal('mio')}
+            >
+              Mi stock personal
+            </button>
+          </div>
+
           <div className="filtro-fechas">
             <label>
               Buscar
@@ -907,6 +1042,7 @@ export default function Dashboard() {
                       Stock <span className="orden-header-flecha">{indicadorOrdenStock(ordenStock, 'stock')}</span>
                     </button>
                   </th>
+                  <th>Dueño</th>
                   <th>Mínimo</th>
                   <th>Actualizar stock</th>
                   <th>Acciones</th>
@@ -918,12 +1054,17 @@ export default function Dashboard() {
                     key={`${p.ID}-${resetToken}`}
                     producto={p}
                     categoria={categoriaDeProducto(p)}
+                    usuarioId={usuarioId}
+                    controlTotal={esAdministrador}
+                    usuarios={usuarios}
                     onActualizar={handleActualizarStock}
                     onDirtyChange={marcarSucio}
                     onEditar={setProductoEditando}
                     onCambiarDisponibilidad={handleCambiarDisponibilidad}
                     onEliminar={handleEliminarProducto}
                     onVerFoto={setFotoAmpliada}
+                    onSolicitar={handleSolicitarTransferencia}
+                    onAsignarDueno={handleAsignarStockDueno}
                   />
                 ))}
               </tbody>
@@ -932,6 +1073,8 @@ export default function Dashboard() {
               <p className="info-msg">Ningún producto coincide con la búsqueda o los filtros de arriba.</p>
             )}
           </div>
+
+          {esAdministrador && <TransferenciasHistorialTab transferencias={transferencias} />}
         </>
       )}
 
@@ -1021,15 +1164,39 @@ export default function Dashboard() {
         </>
       )}
 
-           {tab === 'alertas' && puedeVer('alertas') && (
-        <ul className="alert-list">
-          {alertas.length === 0 && <li>Sin alertas de bajo inventario 🎉</li>}
-          {alertas.map((a) => (
-            <li key={a.ID}>
-              <strong>{a.Nombre}</strong> — quedan {a.Stock} (mínimo {a.StockMinimo})
-            </li>
-          ))}
-        </ul>
+                 {tab === 'alertas' && puedeVer('alertas') && (
+        <>
+          {transferenciasResueltas.length > 0 && (
+            <ul className="transferencias-resueltas-lista">
+              {transferenciasResueltas.map((t) => (
+                <li
+                  key={t.ID}
+                  className={t.Estado === 'Aceptada' ? 'transferencia-aceptada' : 'transferencia-rechazada'}
+                >
+                  <span>
+                    <strong>{t.DuenoNombre}</strong> {t.Estado === 'Aceptada' ? 'aceptó' : 'rechazó'} tu solicitud de{' '}
+                    <strong>{t.Cantidad}</strong> de "{t.Producto}"
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-small"
+                    onClick={() => handleMarcarTransferenciaVista(t.ID)}
+                  >
+                    Entendido
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <ul className="alert-list">
+            {alertas.length === 0 && <li>Sin alertas de bajo inventario 🎉</li>}
+            {alertas.map((a) => (
+              <li key={a.ID}>
+                <strong>{a.Nombre}</strong> — quedan {a.Stock} (mínimo {a.StockMinimo})
+              </li>
+            ))}
+          </ul>
+        </>
       )}
 
       {tab === 'cuenta' && puedeVer('cuenta') && (
@@ -1058,10 +1225,12 @@ export default function Dashboard() {
         />
       )}
 
-      {tab === 'nuevo' && puedeVer('nuevo') && (
+          {tab === 'nuevo' && puedeVer('nuevo') && (
         <ProductoForm
           sesionToken={sesionToken}
           opciones={opciones}
+          usuarios={usuarios}
+          esAdministrador={esAdministrador}
           onOpcionesActualizadas={() => cargarTodo(sesionToken, { silencioso: true })}
           onGuardado={() => {
             cargarTodo(sesionToken);
@@ -1137,6 +1306,7 @@ const FORM_INICIAL = {
   codigoPropio: '',
   precioOferta: '',
   enOferta: false,
+  duenoId: '',
 };
 
 function formDesdeProducto(producto) {
@@ -1179,7 +1349,7 @@ const CAMPOS_CON_OPCIONES = [
 // Sirve tanto para dar de alta un producto nuevo como para editar uno que
 // ya existe: si le pasas `productoExistente`, precarga sus datos y guarda
 // con "actualizarProducto" en vez de "crearProducto".
-function ProductoForm({ sesionToken, opciones = {}, productoExistente, onGuardado, onOpcionesActualizadas, onCancelar }) {
+function ProductoForm({ sesionToken, opciones = {}, usuarios = [], esAdministrador = false, productoExistente, onGuardado, onOpcionesActualizadas, onCancelar }) {
   const esEdicion = !!productoExistente;
   const [form, setForm] = useState(() => (esEdicion ? formDesdeProducto(productoExistente) : FORM_INICIAL));
   const [fotos, setFotos] = useState(() => (esEdicion ? fotosDesdeProducto(productoExistente) : []));
@@ -1264,7 +1434,7 @@ function ProductoForm({ sesionToken, opciones = {}, productoExistente, onGuardad
   function handleChangeCheckbox(campo) {
     return (e) => setForm((f) => ({ ...f, [campo]: e.target.checked }));
   }
-  function handleSubmit(e) {
+   function handleSubmit(e) {
     e.preventDefault();
     if (!form.nombre.trim() || !form.precio) {
       setMensaje('Error: el nombre y el precio de venta son obligatorios.');
@@ -1273,7 +1443,17 @@ function ProductoForm({ sesionToken, opciones = {}, productoExistente, onGuardad
     setEnviando(true);
     setMensaje('');
 
-    const datos = { sesionToken, ...form, fotoUrl: fotos.join('|') };
+    // Funcionalidad 2 (Stock personal, 2026-09): si un Administrador eligió
+    // a alguien en "Asignar a" al crear el producto, mandamos también su
+    // nombre (el backend lo necesita para guardarlo en "StockPersonal"). Si
+    // no se eligió a nadie, el backend asigna todo al Admin Central solo.
+    const duenoSeleccionado = usuarios.find((u) => u.ID === form.duenoId);
+    const datos = {
+      sesionToken,
+      ...form,
+      duenoNombre: duenoSeleccionado ? duenoSeleccionado.Nombre : '',
+      fotoUrl: fotos.join('|'),
+    };
     const promesa = esEdicion
       ? actualizarProducto({ ...datos, productoId: productoExistente.ID })
       : crearProducto(datos);
@@ -1374,7 +1554,7 @@ function ProductoForm({ sesionToken, opciones = {}, productoExistente, onGuardad
             ))}
           </datalist>
         </label>
-        <label>
+              <label>
           <span className="form-label-fila">
             Color
             <button type="button" className="gestor-opciones-btn" onClick={() => abrirGestor('color')} title="Administrar opciones predeterminadas de Color">
@@ -1388,6 +1568,17 @@ function ProductoForm({ sesionToken, opciones = {}, productoExistente, onGuardad
             ))}
           </datalist>
         </label>
+        {esAdministrador && !esEdicion && (
+          <label>
+            Asignar a
+            <select value={form.duenoId} onChange={handleChange('duenoId')}>
+              <option value="">Admin Central (default)</option>
+              {usuarios.filter((u) => esActivo(u.Activo)).map((u) => (
+                <option key={u.ID} value={u.ID}>{u.Nombre}</option>
+              ))}
+            </select>
+          </label>
+        )}
         <label>
           Precio de venta*
           <input
@@ -2095,13 +2286,78 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio }) {
   );
 }
 
-function StockRow({ producto, categoria, onActualizar, onDirtyChange, onEditar, onCambiarDisponibilidad, onEliminar, onVerFoto }) {
+function StockRow({
+  producto,
+  categoria,
+  usuarioId,
+  controlTotal,
+  usuarios = [],
+  onActualizar,
+  onDirtyChange,
+  onEditar,
+  onCambiarDisponibilidad,
+  onEliminar,
+  onVerFoto,
+  onSolicitar,
+  onAsignarDueno,
+}) {
   const [valor, setValor] = useState(producto.Stock);
   const stockConocido = useRef(producto.Stock);
   const sinGuardar = Number(valor) !== Number(producto.Stock);
   const llave = `stock:${producto.ID}`;
   const visible = esProductoVisible(producto);
   const foto = primeraFoto(producto.FotoURL);
+
+  // Funcionalidad 2 (Stock personal, 2026-09): a quién(es) le pertenece
+  // este producto (puede estar repartido entre varias personas). Si el
+  // Admin/Admin Central tiene control total, o si YO soy uno de los
+  // dueños, puedo editar esta fila con normalidad. Si el producto todavía
+  // no tiene ningún dueño registrado (no debería pasar después de la
+  // migración de la Etapa 1), tampoco se bloquea nada, para no dejar una
+  // fila inutilizable por un dato faltante.
+  const duenos = producto.Duenos || [];
+  const soyDueno = duenos.some((d) => String(d.usuarioId) === String(usuarioId) && d.cantidad > 0);
+  const puedoEditar = controlTotal || soyDueno || duenos.length === 0;
+
+  // "Solicitar": a quién se le está pidiendo una cantidad (guarda el
+  // dueño completo, para mostrar el mini-formulario justo debajo de esa
+  // persona) y qué cantidad se escribió.
+  const [solicitandoA, setSolicitandoA] = useState(null);
+  const [cantidadSolicitud, setCantidadSolicitud] = useState('');
+  const [enviandoSolicitud, setEnviandoSolicitud] = useState(false);
+
+  function abrirSolicitar(dueno) {
+    setSolicitandoA(dueno);
+    setCantidadSolicitud('');
+  }
+
+  function confirmarSolicitar() {
+    const cantidad = Number(cantidadSolicitud) || 0;
+    if (cantidad <= 0 || !solicitandoA) return;
+    setEnviandoSolicitud(true);
+    onSolicitar(producto, solicitandoA, cantidad)
+      .then(() => setSolicitandoA(null))
+      .catch(() => {})
+      .finally(() => setEnviandoSolicitud(false));
+  }
+
+  // Solo para Admin/Admin Central: asignar o reasignar de un jalón a quién
+  // le toca una cantidad de este producto.
+  const [asignarUsuarioId, setAsignarUsuarioId] = useState('');
+  const [asignarCantidad, setAsignarCantidad] = useState('');
+  const [asignando, setAsignando] = useState(false);
+
+  function confirmarAsignar() {
+    const usuarioElegido = usuarios.find((u) => u.ID === asignarUsuarioId);
+    setAsignando(true);
+    onAsignarDueno(producto, asignarUsuarioId, usuarioElegido ? usuarioElegido.Nombre : '', Number(asignarCantidad) || 0)
+      .then(() => {
+        setAsignarUsuarioId('');
+        setAsignarCantidad('');
+      })
+      .catch(() => {})
+      .finally(() => setAsignando(false));
+  }
 
   // Si el Stock del producto cambió por FUERA de este cuadrito (por ejemplo,
   // lo editaste desde el formulario de "Editar" y se guardó ahí), sincroniza
@@ -2154,6 +2410,77 @@ function StockRow({ producto, categoria, onActualizar, onDirtyChange, onEditar, 
       <td>{producto.CodigoPropio || '—'}</td>
       <td>${Number(producto.Precio).toLocaleString('es-MX')}</td>
       <td>{producto.Stock}</td>
+      <td>
+        {duenos.length === 0 ? (
+          <span className="muted">Sin asignar</span>
+        ) : (
+          <ul className="stock-duenos-lista">
+            {duenos.map((d) => {
+              const esMio = String(d.usuarioId) === String(usuarioId);
+              return (
+                <li key={d.usuarioId} className={esMio ? 'stock-dueno-mio' : ''}>
+                  <span>
+                    {esMio ? 'Yo' : d.nombre}: <strong>{d.cantidad}</strong>
+                  </span>
+                  {!controlTotal && !esMio && (
+                    <button type="button" className="btn btn-secondary btn-chip" onClick={() => abrirSolicitar(d)}>
+                      Solicitar
+                    </button>
+                  )}
+                  {solicitandoA && solicitandoA.usuarioId === d.usuarioId && (
+                    <div className="stock-solicitar-caja">
+                      <input
+                        type="number"
+                        min="1"
+                        max={d.cantidad}
+                        placeholder="Cantidad"
+                        value={cantidadSolicitud}
+                        onChange={(e) => setCantidadSolicitud(limitarDigitos(e.target.value, MAX_DIGITOS_STOCK))}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-small"
+                        disabled={enviandoSolicitud || !cantidadSolicitud}
+                        onClick={confirmarSolicitar}
+                      >
+                        {enviandoSolicitud ? 'Enviando…' : 'Enviar'}
+                      </button>
+                      <button type="button" className="btn btn-secondary btn-small" onClick={() => setSolicitandoA(null)}>
+                        Cancelar
+                      </button>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        {controlTotal && (
+          <div className="stock-asignar-caja">
+            <select value={asignarUsuarioId} onChange={(e) => setAsignarUsuarioId(e.target.value)}>
+              <option value="">Asignar/cambiar a…</option>
+              {usuarios.filter((u) => esActivo(u.Activo)).map((u) => (
+                <option key={u.ID} value={u.ID}>{u.Nombre}</option>
+              ))}
+            </select>
+            <input
+              type="number"
+              min="0"
+              placeholder="Cantidad"
+              value={asignarCantidad}
+              onChange={(e) => setAsignarCantidad(limitarDigitos(e.target.value, MAX_DIGITOS_STOCK))}
+            />
+            <button
+              type="button"
+              className="btn btn-secondary btn-small"
+              disabled={asignando || !asignarUsuarioId || !asignarCantidad}
+              onClick={confirmarAsignar}
+            >
+              {asignando ? 'Guardando…' : 'Asignar'}
+            </button>
+          </div>
+        )}
+      </td>
       <td>{producto.StockMinimo}</td>
       <td>
         <div className="stock-editor">
@@ -2162,31 +2489,83 @@ function StockRow({ producto, categoria, onActualizar, onDirtyChange, onEditar, 
             min="0"
             className={sinGuardar ? 'campo-modificado' : ''}
             value={valor}
+            disabled={!puedoEditar}
             onChange={(e) => setValor(limitarDigitos(e.target.value, MAX_DIGITOS_STOCK))}
           />
           <button
             className="btn btn-small"
             onClick={() => onActualizar(producto.ID, valor)}
-            disabled={!sinGuardar}
+            disabled={!sinGuardar || !puedoEditar}
           >
             Guardar
           </button>
         </div>
+        {!puedoEditar && <p className="muted campo-nota">🔒 No es tuyo — usa "Solicitar" junto al dueño.</p>}
       </td>
       <td className="celda-acciones">
         <div className="acciones-producto">
-          <button type="button" className="btn btn-editar btn-chip" onClick={() => onEditar(producto)}>
+          <button type="button" className="btn btn-editar btn-chip" onClick={() => onEditar(producto)} disabled={!puedoEditar}>
             Editar
           </button>
-          <button type="button" className="btn btn-toggle btn-chip" onClick={() => onCambiarDisponibilidad(producto)}>
+          <button
+            type="button"
+            className="btn btn-toggle btn-chip"
+            onClick={() => onCambiarDisponibilidad(producto)}
+            disabled={!puedoEditar}
+          >
             {visible ? 'Ocultar' : 'Mostrar'}
           </button>
-          <button type="button" className="btn btn-eliminar btn-chip" onClick={() => onEliminar(producto)}>
+          <button type="button" className="btn btn-eliminar btn-chip" onClick={() => onEliminar(producto)} disabled={!puedoEditar}>
             Eliminar
           </button>
         </div>
       </td>
     </tr>
+  );
+}
+
+// ---- Historial de transferencias (solo Administrador/Admin Central,
+// dentro de la pestaña Stock) — lista completa de solicitudes, más
+// reciente primero, con un botón para mostrarla/ocultarla. ----
+function TransferenciasHistorialTab({ transferencias }) {
+  const [abierto, setAbierto] = useState(false);
+  const ordenadas = (transferencias || []).slice().reverse();
+
+  return (
+    <div className="transferencias-historial">
+      <button type="button" className="btn btn-secondary btn-small" onClick={() => setAbierto((a) => !a)}>
+        {abierto ? '▲ Ocultar historial de transferencias' : '▼ Ver historial de transferencias'}
+      </button>
+      {abierto && (
+        <div className="table-scroll">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Solicitante</th>
+                <th>Dueño</th>
+                <th>Producto</th>
+                <th>Cantidad</th>
+                <th>Estado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ordenadas.map((t) => (
+                <tr key={t.ID}>
+                  <td>{formatearFechaHora(t.Fecha)}</td>
+                  <td>{t.SolicitanteNombre}</td>
+                  <td>{t.DuenoNombre}</td>
+                  <td>{t.Producto}</td>
+                  <td>{t.Cantidad}</td>
+                  <td>{t.Estado}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {ordenadas.length === 0 && <p className="info-msg">Todavía no hay transferencias registradas.</p>}
+        </div>
+      )}
+    </div>
   );
 }
 // Precio guardado en el pedido (fijado al momento del pedido). Los pedidos
