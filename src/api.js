@@ -302,3 +302,40 @@ export function actualizarPermisoRol({ sesionToken, rol, pestana, permitido }) {
 export function actualizarPermisoUsuario({ sesionToken, usuarioId, pestana, permitido, quitar }) {
   return post({ action: 'actualizarPermisoUsuario', sesionToken, usuarioId, pestana, permitido, quitar });
 }
+
+// ---- Funcionalidad 2 (Stock personal + transferencias, 2026-09): stock
+// repartido entre personas, con solicitudes de traspaso entre ellas. Todas
+// estas acciones viven bajo el mismo permiso 'stock' que ya existía — no
+// se agregó ningún permiso nuevo (el backend también lo revisa). ----
+
+// Solo un Administrador puede usar esto: pone en EXACTAMENTE `cantidad` la
+// porción de este producto que le toca a `usuarioId` (crea, cambia o
+// borra su fila en "StockPersonal" según haga falta), sin tocar lo que
+// tengan asignado los demás dueños de ese mismo producto.
+export function asignarStockDueno({ sesionToken, productoId, usuarioId, usuarioNombre, cantidad }) {
+  return post({ action: 'asignarStockDueno', sesionToken, productoId, usuarioId, usuarioNombre, cantidad });
+}
+
+// El historial completo de solicitudes de transferencia (un Administrador
+// ve todas; cualquier otra persona solo ve las suyas, como solicitante o
+// como dueño).
+export function listarTransferencias(sesionToken) {
+  return get('listarTransferencias', { sesionToken });
+}
+
+// Le pide a `duenoId` una `cantidad` de un producto que él tiene asignado.
+export function solicitarTransferencia({ sesionToken, productoId, duenoId, duenoNombre, cantidad }) {
+  return post({ action: 'solicitarTransferencia', sesionToken, productoId, duenoId, duenoNombre, cantidad });
+}
+
+// Acepta o rechaza una solicitud dirigida a mí (o, si soy Administrador,
+// cualquier solicitud pendiente).
+export function responderTransferencia({ sesionToken, transferenciaId, aceptar }) {
+  return post({ action: 'responderTransferencia', sesionToken, transferenciaId, aceptar });
+}
+
+// Marca como "ya la vi" una solicitud mía que ya fue aceptada o rechazada,
+// para que deje de aparecer en el aviso de Alertas.
+export function marcarTransferenciaVista({ sesionToken, transferenciaId }) {
+  return post({ action: 'marcarTransferenciaVista', sesionToken, transferenciaId });
+}
