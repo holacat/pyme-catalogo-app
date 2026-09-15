@@ -248,7 +248,7 @@ const NOMBRE_KEY = 'pyme_sesion_nombre';
 // las acciones que el backend igual rechazaría (inhabilitar/cambiar el rol
 // de otro Administrador), para que Claudia no le dé clic a algo que de
 // todos modos le va a salir con error.
-const ADMIN_CENTRAL_KEY = 'pyme_sesion_admin_central';  // Funcionalidad 2 (Stock personal, 2026-09): el ID de la propia cuenta (el // mismo que usa "Duenos" en cada producto y "SolicitanteID"/"DuenoID" en // las transferencias) — hacía falta para poder saber, en el navegador, // cuál fila de stock es "mía". El backend no lo mandaba antes porque no // hacía falta para nada más. const USUARIO_ID_KEY = 'pyme_sesion_usuario_id';
+const ADMIN_CENTRAL_KEY = 'pyme_sesion_admin_central';  // Funcionalidad 2 (Stock personal, 2026-09): el ID de la propia cuenta. const USUARIO_ID_KEY = 'pyme_sesion_usuario_id';
 
 // Funcionalidad 1, Paso 2 (Permisos de pestañas, 2026-09): igual que las
 // llaves de arriba, pero para guardar qué pestañas puede ver esta cuenta
