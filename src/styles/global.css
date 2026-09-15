@@ -1655,3 +1655,116 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
   font-size: 0.85rem;
   min-width: 180px;
 }
+/* Funcionalidad 2 (Stock personal + transferencias, 2026-09) */
+.stock-personal-toggle {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.transferencias-pendientes-panel {
+  background: #fff8e1;
+  border: 1px solid #f0c14b;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 12px;
+}
+
+.transferencias-pendientes-titulo {
+  font-weight: 600;
+  margin: 0 0 8px 0;
+}
+
+.transferencias-pendientes-lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.transferencias-pendientes-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  background: #fff;
+  border-radius: 6px;
+  padding: 8px 12px;
+}
+
+.transferencias-pendientes-botones {
+  display: flex;
+  gap: 6px;
+}
+
+.stock-duenos-lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 160px;
+}
+
+.stock-duenos-lista li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.stock-dueno-mio {
+  color: #1a7a3c;
+}
+
+.stock-solicitar-caja,
+.stock-asignar-caja {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+
+.stock-solicitar-caja input,
+.stock-asignar-caja input,
+.stock-asignar-caja select {
+  max-width: 100px;
+}
+
+.transferencias-resueltas-lista {
+  list-style: none;
+  margin: 0 0 16px 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.transferencias-resueltas-lista li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  border-radius: 6px;
+  padding: 8px 12px;
+}
+
+.transferencia-aceptada {
+  background: #e6f6ea;
+  border: 1px solid #8fd19e;
+}
+
+.transferencia-rechazada {
+  background: #fdecea;
+  border: 1px solid #f1a9a0;
+}
+
+.transferencias-historial {
+  margin-top: 16px;
+}
