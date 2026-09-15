@@ -1768,3 +1768,19 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
 .transferencias-historial {
   margin-top: 16px;
 }
+/* Funcionalidad 2 (Stock personal, 2026-09): que un botón o campo
+   deshabilitado se vea claramente apagado/gris, en vez de verse igual
+   que cuando sí lo puedes usar. Aplica a toda la app (Editar, Ocultar,
+   Eliminar, Guardar, etc.), no solo a Stock. */
+.btn:disabled {
+  opacity: 0.45;
+  filter: grayscale(70%);
+  cursor: not-allowed;
+}
+
+input:disabled,
+select:disabled {
+  background: #f0f0f0;
+  color: #888;
+  cursor: not-allowed;
+}
