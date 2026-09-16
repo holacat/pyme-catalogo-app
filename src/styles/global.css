@@ -1784,3 +1784,18 @@ select:disabled {
   color: #888;
   cursor: not-allowed;
 }
+.transferencias-en-proceso-lista {
+  list-style: none;
+  margin: 0 0 16px 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.transferencias-en-proceso-lista li {
+  background: #eef3fb;
+  border: 1px solid #b9cdf0;
+  border-radius: 6px;
+  padding: 8px 12px;
+}
