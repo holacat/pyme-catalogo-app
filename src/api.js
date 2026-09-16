@@ -122,27 +122,7 @@ export function crearProducto({
   duenoId,
   duenoNombre,
 }) {
-  return post({
-    action: 'crearProducto',
-    sesionToken,
-    nombre,
-    categoria,
-    marca,
-    talla,
-    color,
-    precio,
-    precioCompra,
-    stock,
-    stockMinimo,
-    fotoUrl,
-    descripcion,
-    codigoPropio,
-    precioOferta,
-    enOferta,
-    duenoId,
-    duenoNombre,
-  });
-}
+
   return post({
     action: 'crearProducto',
     sesionToken,
