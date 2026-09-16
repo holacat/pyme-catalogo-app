@@ -338,6 +338,10 @@ export default function Dashboard() {
   const [transferencias, setTransferencias] = useState([]);
   const [transferenciasPendientes, setTransferenciasPendientes] = useState([]);
   const [transferenciasResueltas, setTransferenciasResueltas] = useState([]);
+  // Solicitudes que YO mandé y siguen sin respuesta (para avisarte en
+  // Alertas que sí se enviaron, y para no dejarte mandar la misma dos
+  // veces desde el botón "Solicitar").
+  const [transferenciasEnProceso, setTransferenciasEnProceso] = useState([]);
   // 'todo' muestra el stock completo (con el dueño de cada quien); 'mio'
   // filtra solo los productos donde yo tengo algo asignado.
   const [filtroStockPersonal, setFiltroStockPersonal] = useState('todo');
@@ -456,7 +460,7 @@ export default function Dashboard() {
     // servidor no tiene que rechazarlas una por una. Antes esto dependía
     // solo del Rol; ahora también puede depender de una excepción individual
     // que le haya puesto el Admin Central.
-           return Promise.all([
+                   return Promise.all([
       (puedeVer('stock') || puedeVer('pedidos') || puedeVer('orden') || puedeVer('cuenta'))
         ? listarProductosAdmin(token)
         : Promise.resolve({ productos: [] }),
@@ -465,7 +469,7 @@ export default function Dashboard() {
         : Promise.resolve({ pedidos: [] }),
       (puedeVer('alertas') || puedeVer('stock'))
         ? obtenerAlertas(token)
-        : Promise.resolve({ alertas: [], transferenciasPendientes: [], transferenciasResueltas: [] }),
+        : Promise.resolve({ alertas: [], transferenciasPendientes: [], transferenciasResueltas: [], transferenciasEnProceso: [] }),
       (puedeVer('stock') || puedeVer('nuevo') || puedeVer('orden'))
         ? listarOpciones(token)
         : Promise.resolve({ opciones: {} }),
@@ -480,6 +484,7 @@ export default function Dashboard() {
         setAlertas(a.alertas || []);
         setTransferenciasPendientes(a.transferenciasPendientes || []);
         setTransferenciasResueltas(a.transferenciasResueltas || []);
+        setTransferenciasEnProceso(a.transferenciasEnProceso || []);
         setOpciones(op.opciones || {});
         setMovimientos(mv.movimientos || []);
         setBitacora(b.bitacora || []);
@@ -1053,13 +1058,14 @@ export default function Dashboard() {
               </thead>
               <tbody>
                 {productosFiltrados.map((p) => (
-                  <StockRow
+                                   <StockRow
                     key={`${p.ID}-${resetToken}`}
                     producto={p}
                     categoria={categoriaDeProducto(p)}
                     usuarioId={usuarioId}
                     controlTotal={esAdministrador}
                     usuarios={usuarios}
+                    misSolicitudesEnProceso={transferenciasEnProceso}
                     onActualizar={handleActualizarStock}
                     onDirtyChange={marcarSucio}
                     onEditar={setProductoEditando}
@@ -1167,8 +1173,17 @@ export default function Dashboard() {
         </>
       )}
 
-                 {tab === 'alertas' && puedeVer('alertas') && (
+                      {tab === 'alertas' && puedeVer('alertas') && (
         <>
+          {transferenciasEnProceso.length > 0 && (
+            <ul className="transferencias-en-proceso-lista">
+              {transferenciasEnProceso.map((t) => (
+                <li key={t.ID}>
+                  ⏳ Esperando respuesta de <strong>{t.DuenoNombre}</strong> por <strong>{t.Cantidad}</strong> de "{t.Producto}"
+                </li>
+              ))}
+            </ul>
+          )}
           {transferenciasResueltas.length > 0 && (
             <ul className="transferencias-resueltas-lista">
               {transferenciasResueltas.map((t) => (
@@ -2295,6 +2310,7 @@ function StockRow({
   usuarioId,
   controlTotal,
   usuarios = [],
+  misSolicitudesEnProceso = [],
   onActualizar,
   onDirtyChange,
   onEditar,
@@ -2413,22 +2429,33 @@ function StockRow({
       <td>{producto.CodigoPropio || '—'}</td>
       <td>${Number(producto.Precio).toLocaleString('es-MX')}</td>
       <td>{producto.Stock}</td>
-      <td>
+          <td>
         {duenos.length === 0 ? (
           <span className="muted">Sin asignar</span>
         ) : (
           <ul className="stock-duenos-lista">
             {duenos.map((d) => {
               const esMio = String(d.usuarioId) === String(usuarioId);
+              // Funcionalidad 2 (Stock personal, 2026-09): si ya le mandé una
+              // solicitud a este dueño por este producto y sigue pendiente,
+              // no se ve el botón "Solicitar" — se ve un aviso de que ya se
+              // envió, para que quede claro que sí funcionó y no haga falta
+              // adivinar ni mandarla dos veces.
+              const solicitudEnProceso = misSolicitudesEnProceso.find(
+                (t) => String(t.ProductoID) === String(producto.ID) && String(t.DuenoID) === String(d.usuarioId)
+              );
               return (
                 <li key={d.usuarioId} className={esMio ? 'stock-dueno-mio' : ''}>
                   <span>
                     {esMio ? 'Yo' : d.nombre}: <strong>{d.cantidad}</strong>
                   </span>
-                  {!controlTotal && !esMio && (
+                  {!controlTotal && !esMio && !solicitudEnProceso && (
                     <button type="button" className="btn btn-secondary btn-chip" onClick={() => abrirSolicitar(d)}>
                       Solicitar
                     </button>
+                  )}
+                  {!controlTotal && !esMio && solicitudEnProceso && (
+                    <span className="muted campo-nota">⏳ Enviada, esperando respuesta</span>
                   )}
                   {solicitandoA && solicitandoA.usuarioId === d.usuarioId && (
                     <div className="stock-solicitar-caja">
