@@ -307,7 +307,8 @@ function esActivo(valor) {
 }
 
 export default function Dashboard() {
-  const [sesionToken, setSesionToken] = useState(() => localStorage.getItem(TOKEN_KEY) || '');   // Fix "switcheo" de sesión (2026-09): cambia cada vez que se inicia o se cierra sesión, para poder ignorar respuestas del servidor que ya quedaron viejas.   const sesionIdRef = useRef(0);   // Fix "switcheo" de sesión (2026-09): cambia cada vez que se inicia o se cierra sesión, para poder ignorar respuestas del servidor que ya quedaron viejas.   const sesionIdRef = useRef(0);   // Fix "switcheo" de sesión (2026-09): cambia cada vez que se inicia o se cierra sesión, para poder ignorar respuestas del servidor que ya quedaron viejas.   const sesionIdRef = useRef(0);   // Fix "switcheo" de sesión (2026-09): cambia cada vez que se inicia o se cierra sesión, para poder ignorar respuestas del servidor que ya quedaron viejas.   const sesionIdRef = useRef(0);   // Fix "switcheo" de sesión (2026-09): cambia cada vez que se inicia o se cierra sesión, para poder ignorar respuestas del servidor que ya quedaron viejas.   const sesionIdRef = useRef(0);
+  const [sesionToken, setSesionToken] = useState(() => localStorage.getItem(TOKEN_KEY) || '');
+  const sesionIdRef = useRef(0);
   const [rol, setRol] = useState(() => localStorage.getItem(ROL_KEY) || '');
    const [nombreSesion, setNombreSesion] = useState(() => localStorage.getItem(NOMBRE_KEY) || '');
      const [esAdminCentral, setEsAdminCentral] = useState(() => localStorage.getItem(ADMIN_CENTRAL_KEY) === 'true');
