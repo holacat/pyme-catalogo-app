@@ -306,6 +306,10 @@ export function actualizarPermisoUsuario({ sesionToken, usuarioId, pestana, perm
   return post({ action: 'actualizarPermisoUsuario', sesionToken, usuarioId, pestana, permitido, quitar });
 }
 
+export function ofrecerTransferencia({ sesionToken, productoId, duenoId, duenoNombre, destinatarioId, destinatarioNombre, cantidad }) {
+  return post({ action: 'ofrecerTransferencia', sesionToken, productoId, duenoId, duenoNombre, destinatarioId, destinatarioNombre, cantidad });
+}
+
 // ---- Funcionalidad 2 (Stock personal + transferencias, 2026-09): stock
 // repartido entre personas, con solicitudes de traspaso entre ellas. Todas
 // estas acciones viven bajo el mismo permiso 'stock' que ya existía — no
