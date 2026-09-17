@@ -2574,8 +2574,9 @@ function StockRow({
                   ))}
                 </li>
               );
-            })}
-            
+                    })}
+          </ul>
+        )}
       </td>
       <td>{producto.StockMinimo}</td>
       <td>
