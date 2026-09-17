@@ -307,7 +307,7 @@ function esActivo(valor) {
 }
 
 export default function Dashboard() {
-  const [sesionToken, setSesionToken] = useState(() => localStorage.getItem(TOKEN_KEY) || '');
+  const [sesionToken, setSesionToken] = useState(() => localStorage.getItem(TOKEN_KEY) || '');   // Fix "switcheo" de sesión (2026-09): cambia cada vez que se inicia o se cierra sesión, para poder ignorar respuestas del servidor que ya quedaron viejas.   const sesionIdRef = useRef(0);   // Fix "switcheo" de sesión (2026-09): cambia cada vez que se inicia o se cierra sesión, para poder ignorar respuestas del servidor que ya quedaron viejas.   const sesionIdRef = useRef(0);   // Fix "switcheo" de sesión (2026-09): cambia cada vez que se inicia o se cierra sesión, para poder ignorar respuestas del servidor que ya quedaron viejas.   const sesionIdRef = useRef(0);   // Fix "switcheo" de sesión (2026-09): cambia cada vez que se inicia o se cierra sesión, para poder ignorar respuestas del servidor que ya quedaron viejas.   const sesionIdRef = useRef(0);   // Fix "switcheo" de sesión (2026-09): cambia cada vez que se inicia o se cierra sesión, para poder ignorar respuestas del servidor que ya quedaron viejas.   const sesionIdRef = useRef(0);
   const [rol, setRol] = useState(() => localStorage.getItem(ROL_KEY) || '');
    const [nombreSesion, setNombreSesion] = useState(() => localStorage.getItem(NOMBRE_KEY) || '');
      const [esAdminCentral, setEsAdminCentral] = useState(() => localStorage.getItem(ADMIN_CENTRAL_KEY) === 'true');
@@ -450,8 +450,10 @@ export default function Dashboard() {
   // muestra "Actualizando…" ni mensajes de error a cada rato, para no ser
   // molesto. Los refrescos que sí pide Claudia directamente (guardar algo,
   // iniciar sesión) siguen mostrando el aviso normal.
-  function cargarTodo(token, opciones = {}) {
+   function cargarTodo(token, opciones = {}) {
     const silencioso = !!opciones.silencioso;
+    // Fix "switcheo" de sesión (2026-09): "número de turno" de quien pidió estos datos.
+    const miSesionId = sesionIdRef.current;
     if (!silencioso) setCargando(true);
   
       // Funcionalidad 1, Paso 2 (Permisos de pestañas, 2026-09): "Estado de
@@ -478,7 +480,9 @@ export default function Dashboard() {
       puedeVer('usuarios') ? listarUsuarios(token) : Promise.resolve({ usuarios: [] }),
       puedeVer('stock') ? listarTransferencias(token) : Promise.resolve({ transferencias: [] }),
     ])
-      .then(([p, o, a, op, mv, b, us, tr]) => {
+          .then(([p, o, a, op, mv, b, us, tr]) => {
+        // Fix "switcheo" de sesión (2026-09): si ya cambiamos de sesión, ignoramos esta respuesta vieja.
+        if (miSesionId !== sesionIdRef.current) return;
         setProductos(p.productos);
         setPedidos(o.pedidos);
         setAlertas(a.alertas || []);
@@ -492,7 +496,9 @@ export default function Dashboard() {
         setTransferencias(tr.transferencias || []);
         if (!silencioso) setMensaje('');
       })
-      .catch((err) => {
+            .catch((err) => {
+        // Fix "switcheo" de sesión (2026-09): mismo control que arriba, para no reaccionar a una respuesta vieja.
+        if (miSesionId !== sesionIdRef.current) return;
         // Si el servidor dice que la sesión ya no es válida (expiró, la
         // cuenta se inhabilitó, o quedó guardado un token viejo de otra
         // sesión), cerramos sesión automáticamente en vez de dejar el
@@ -504,7 +510,9 @@ export default function Dashboard() {
         }
         if (!silencioso) setMensaje(`Error al cargar datos: ${err.message}`);
       })
-      .finally(() => {
+           .finally(() => {
+        // Fix "switcheo" de sesión (2026-09): igual, ignoramos si ya no es la sesión activa.
+        if (miSesionId !== sesionIdRef.current) return;
         if (!silencioso) setCargando(false);
         setVerificandoSesion(false);
       });
@@ -541,7 +549,9 @@ export default function Dashboard() {
     setVerificandoLogin(true);
     setErrorLogin('');
         login({ usuario: usuarioTexto, contrasena })
-      .then((res) => {
+         .then((res) => {
+        // Fix "switcheo" de sesión (2026-09): "nueva sesión", para que las respuestas de la sesión anterior ya no cuenten.
+        sesionIdRef.current += 1;
         const permisosCalculados = res.permisos || PESTANAS_TODAS_PERMITIDAS;
         localStorage.setItem(TOKEN_KEY, res.token);
         localStorage.setItem(ROL_KEY, res.rol);
@@ -565,6 +575,7 @@ export default function Dashboard() {
   }
 
    function handleLogout() {
+           sesionIdRef.current += 1;
            localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(ROL_KEY);
     localStorage.removeItem(NOMBRE_KEY);
