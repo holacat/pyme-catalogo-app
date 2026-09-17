@@ -31,6 +31,7 @@ import {
   actualizarPermisoUsuario,
   listarTransferencias,
   solicitarTransferencia,
+  ofrecerTransferencia,
   responderTransferencia,
   marcarTransferenciaVista,
   asignarStockDueno,
@@ -640,7 +641,7 @@ export default function Dashboard() {
       });
   }
 
-  function handleResponderTransferencia(transferenciaId, aceptar) {
+  function handleOfrecerTransferencia(producto, dueno, destinatarioId, destinatarioNombre, cantidad) {     return ofrecerTransferencia({       sesionToken,       productoId: producto.ID,       duenoId: dueno.usuarioId,       duenoNombre: dueno.nombre,       destinatarioId,       destinatarioNombre,       cantidad,     })       .then(() => cargarTodo(sesionToken))       .catch((err) => {         setMensaje(`Error al transferir stock: ${err.message}`);         throw err;       });   }    function handleResponderTransferencia(transferenciaId, aceptar) {
     responderTransferencia({ sesionToken, transferenciaId, aceptar })
       .then(() => cargarTodo(sesionToken))
       .catch((err) => setMensaje(`Error al responder la solicitud: ${err.message}`));
@@ -925,11 +926,15 @@ export default function Dashboard() {
               <p className="transferencias-pendientes-titulo">
                 📥 Tienes {transferenciasPendientes.length} solicitud{transferenciasPendientes.length === 1 ? '' : 'es'} de stock pendiente{transferenciasPendientes.length === 1 ? '' : 's'}:
               </p>
-              <ul className="transferencias-pendientes-lista">
+                           <ul className="transferencias-pendientes-lista">
                 {transferenciasPendientes.map((t) => (
                   <li key={t.ID} className="transferencias-pendientes-item">
                     <span>
-                      <strong>{t.SolicitanteNombre}</strong> te solicita <strong>{t.Cantidad}</strong> de "{t.Producto}"
+                      {t.Tipo === 'Oferta' ? (
+                        <><strong>{t.DuenoNombre}</strong> te asignó <strong>{t.Cantidad}</strong> de "{t.Producto}"</>
+                      ) : (
+                        <><strong>{t.SolicitanteNombre}</strong> te solicita <strong>{t.Cantidad}</strong> de "{t.Producto}"</>
+                      )}
                     </span>
                     <div className="transferencias-pendientes-botones">
                       <button
@@ -1084,7 +1089,8 @@ export default function Dashboard() {
                     onCambiarDisponibilidad={handleCambiarDisponibilidad}
                     onEliminar={handleEliminarProducto}
                     onVerFoto={setFotoAmpliada}
-                    onSolicitar={handleSolicitarTransferencia}
+                                      onSolicitar={handleSolicitarTransferencia}
+                    onOfrecer={handleOfrecerTransferencia}
                     onAsignarDueno={handleAsignarStockDueno}
                   />
                 ))}
@@ -1187,11 +1193,15 @@ export default function Dashboard() {
 
                       {tab === 'alertas' && puedeVer('alertas') && (
         <>
-          {transferenciasEnProceso.length > 0 && (
+                   {transferenciasEnProceso.length > 0 && (
             <ul className="transferencias-en-proceso-lista">
               {transferenciasEnProceso.map((t) => (
                 <li key={t.ID}>
-                  ⏳ Esperando respuesta de <strong>{t.DuenoNombre}</strong> por <strong>{t.Cantidad}</strong> de "{t.Producto}"
+                  {t.Tipo === 'Oferta' ? (
+                    <>⏳ Le asignaste <strong>{t.Cantidad}</strong> de "{t.Producto}" a <strong>{t.SolicitanteNombre}</strong>, esperando que acepte</>
+                  ) : (
+                    <>⏳ Esperando respuesta de <strong>{t.DuenoNombre}</strong> por <strong>{t.Cantidad}</strong> de "{t.Producto}"</>
+                  )}
                 </li>
               ))}
             </ul>
@@ -1203,9 +1213,14 @@ export default function Dashboard() {
                   key={t.ID}
                   className={t.Estado === 'Aceptada' ? 'transferencia-aceptada' : 'transferencia-rechazada'}
                 >
-                  <span>
-                    <strong>{t.DuenoNombre}</strong> {t.Estado === 'Aceptada' ? 'aceptó' : 'rechazó'} tu solicitud de{' '}
-                    <strong>{t.Cantidad}</strong> de "{t.Producto}"
+                                   <span>
+                    {t.Tipo === 'Oferta' ? (
+                      <><strong>{t.SolicitanteNombre}</strong> {t.Estado === 'Aceptada' ? 'aceptó' : 'rechazó'} lo que le asignaste de{' '}
+                      <strong>{t.Cantidad}</strong> de "{t.Producto}"</>
+                    ) : (
+                      <><strong>{t.DuenoNombre}</strong> {t.Estado === 'Aceptada' ? 'aceptó' : 'rechazó'} tu solicitud de{' '}
+                      <strong>{t.Cantidad}</strong> de "{t.Producto}"</>
+                    )}
                   </span>
                   <button
                     type="button"
@@ -2322,7 +2337,7 @@ function StockRow({
   usuarioId,
   controlTotal,
   usuarios = [],
-  misSolicitudesEnProceso = [],
+   misSolicitudesEnProceso = [],
   onActualizar,
   onDirtyChange,
   onEditar,
@@ -2330,6 +2345,7 @@ function StockRow({
   onEliminar,
   onVerFoto,
   onSolicitar,
+  onOfrecer,
   onAsignarDueno,
 }) {
   const [valor, setValor] = useState(producto.Stock);
@@ -2372,6 +2388,31 @@ function StockRow({
       .finally(() => setEnviandoSolicitud(false));
   }
 
+  const [ofreciendoDe, setOfreciendoDe] = useState(null);
+  const [destinatarioOferta, setDestinatarioOferta] = useState('');
+  const [cantidadOferta, setCantidadOferta] = useState('');
+  const [enviandoOferta, setEnviandoOferta] = useState(false);
+
+  function abrirOfrecer(dueno) {
+    setOfreciendoDe(dueno);
+    setDestinatarioOferta('');
+    setCantidadOferta('');
+  }
+
+  function confirmarOfrecer() {
+    const cantidad = Number(cantidadOferta) || 0;
+    if (cantidad <= 0 || !destinatarioOferta || !ofreciendoDe) return;
+    const usuarioElegido = usuarios.find((u) => u.ID === destinatarioOferta);
+    setEnviandoOferta(true);
+    onOfrecer(producto, ofreciendoDe, destinatarioOferta, usuarioElegido ? usuarioElegido.Nombre : '', cantidad)
+      .then(() => setOfreciendoDe(null))
+      .catch(() => {})
+      .finally(() => setEnviandoOferta(false));
+  }
+
+  const misOfertasEnProceso = misSolicitudesEnProceso.filter(
+    (t) => t.Tipo === 'Oferta' && String(t.ProductoID) === String(producto.ID)
+  );
   // Solo para Admin/Admin Central: asignar o reasignar de un jalón a quién
   // le toca una cantidad de este producto.
   const [asignarUsuarioId, setAsignarUsuarioId] = useState('');
@@ -2469,7 +2510,7 @@ function StockRow({
                   {!controlTotal && !esMio && solicitudEnProceso && (
                     <span className="muted campo-nota">⏳ Enviada, esperando respuesta</span>
                   )}
-                  {solicitandoA && solicitandoA.usuarioId === d.usuarioId && (
+                                {solicitandoA && solicitandoA.usuarioId === d.usuarioId && (
                     <div className="stock-solicitar-caja">
                       <input
                         type="number"
@@ -2492,36 +2533,49 @@ function StockRow({
                       </button>
                     </div>
                   )}
+                  {(esMio || controlTotal) && (
+                    <button type="button" className="btn btn-secondary btn-chip" onClick={() => abrirOfrecer(d)}>
+                      Asignar a…
+                    </button>
+                  )}
+                  {ofreciendoDe && ofreciendoDe.usuarioId === d.usuarioId && (
+                    <div className="stock-solicitar-caja">
+                      <select value={destinatarioOferta} onChange={(e) => setDestinatarioOferta(e.target.value)}>
+                        <option value="">¿A quién?</option>
+                        {usuarios.filter((u) => esActivo(u.Activo) && String(u.ID) !== String(d.usuarioId)).map((u) => (
+                          <option key={u.ID} value={u.ID}>{u.Nombre}</option>
+                        ))}
+                      </select>
+                      <input
+                        type="number"
+                        min="1"
+                        max={d.cantidad}
+                        placeholder="Cantidad"
+                        value={cantidadOferta}
+                        onChange={(e) => setCantidadOferta(limitarDigitos(e.target.value, MAX_DIGITOS_STOCK))}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-small"
+                        disabled={enviandoOferta || !destinatarioOferta || !cantidadOferta}
+                        onClick={confirmarOfrecer}
+                      >
+                        {enviandoOferta ? 'Enviando…' : 'Enviar'}
+                      </button>
+                      <button type="button" className="btn btn-secondary btn-small" onClick={() => setOfreciendoDe(null)}>
+                        Cancelar
+                      </button>
+                    </div>
+                  )}
+                  {misOfertasEnProceso.filter((t) => String(t.DuenoID) === String(d.usuarioId)).map((t) => (
+                    <div key={t.ID} className="muted campo-nota">
+                      ⏳ Le asignaste {t.Cantidad} a {t.SolicitanteNombre}, esperando que acepte
+                    </div>
+                  ))}
                 </li>
               );
             })}
-          </ul>
-        )}
-        {controlTotal && (
-          <div className="stock-asignar-caja">
-            <select value={asignarUsuarioId} onChange={(e) => setAsignarUsuarioId(e.target.value)}>
-              <option value="">Asignar/cambiar a…</option>
-              {usuarios.filter((u) => esActivo(u.Activo)).map((u) => (
-                <option key={u.ID} value={u.ID}>{u.Nombre}</option>
-              ))}
-            </select>
-            <input
-              type="number"
-              min="0"
-              placeholder="Cantidad"
-              value={asignarCantidad}
-              onChange={(e) => setAsignarCantidad(limitarDigitos(e.target.value, MAX_DIGITOS_STOCK))}
-            />
-            <button
-              type="button"
-              className="btn btn-secondary btn-small"
-              disabled={asignando || !asignarUsuarioId || !asignarCantidad}
-              onClick={confirmarAsignar}
-            >
-              {asignando ? 'Guardando…' : 'Asignar'}
-            </button>
-          </div>
-        )}
+            
       </td>
       <td>{producto.StockMinimo}</td>
       <td>
