@@ -2543,10 +2543,13 @@ function StockRow({
                       Asignar a…
                     </button>
                   )}
-                  {ofreciendoDe && ofreciendoDe.usuarioId === d.usuarioId && (
+                                   {ofreciendoDe && ofreciendoDe.usuarioId === d.usuarioId && (
                     <div className="stock-solicitar-caja">
+                      <span className="muted campo-nota">
+                        Transferir lo de <strong>{esMio ? 'Yo' : d.nombre}</strong> a:
+                      </span>
                       <select value={destinatarioOferta} onChange={(e) => setDestinatarioOferta(e.target.value)}>
-                        <option value="">¿A quién?</option>
+                        <option value="">Elige una persona…</option>
                         {usuarios.filter((u) => esActivo(u.Activo) && String(u.ID) !== String(d.usuarioId)).map((u) => (
                           <option key={u.ID} value={u.ID}>{u.Nombre}</option>
                         ))}
