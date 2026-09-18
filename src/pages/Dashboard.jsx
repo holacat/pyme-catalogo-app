@@ -347,7 +347,7 @@ export default function Dashboard() {
   // Avisos de "Aplicada" (Admin movió stock de una persona a otra sin
   // pedir Aceptar/Rechazar): le llegan a ambas personas, solo para
   // dárselos por entendido.
-  const [transferenciasAplicadas, setTransferenciasAplicadas] = useState([]);
+
   // 'todo' muestra el stock completo (con el dueño de cada quien); 'mio'
   // filtra solo los productos donde yo tengo algo asignado.
   const [filtroStockPersonal, setFiltroStockPersonal] = useState('todo');
@@ -483,7 +483,7 @@ export default function Dashboard() {
         : Promise.resolve({ opciones: {} }),
       puedeVer('cuenta') ? listarMovimientos(token) : Promise.resolve({ movimientos: [] }),
       puedeVer('bitacora') ? listarBitacora(token) : Promise.resolve({ bitacora: [] }),
-      puedeVer('usuarios') ? listarUsuarios(token) : Promise.resolve({ usuarios: [] }),
+      (puedeVer('usuarios') || puedeVer('stock')) ? listarUsuarios(token) : Promise.resolve({ usuarios: [] }),
       puedeVer('stock') ? listarTransferencias(token) : Promise.resolve({ transferencias: [] }),
     ])
           .then(([p, o, a, op, mv, b, us, tr]) => {
@@ -544,6 +544,14 @@ export default function Dashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autenticado, sesionToken, rol, permisos, sinGuardar, productoEditando, tab]);
 
+   // Hace scroll hasta la fila resaltada (ver irAStockYResaltar) para que se
+  // vea aunque esté más abajo en la tabla, sin tener que buscarla a mano.
+  useEffect(() => {
+    if (!productoResaltadoId || tab !== 'stock') return;
+    const fila = document.getElementById(`stock-fila-${productoResaltadoId}`);
+    if (fila) fila.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [productoResaltadoId, tab]);
+
   // Entra al Dashboard con usuario y contraseña (hoja "Usuarios"). Si están
   // mal, NUNCA se activa `autenticado` — así nadie que escriba mal sus
   // datos llega a ver la estructura del Dashboard, aunque sea sin datos.
@@ -580,7 +588,7 @@ export default function Dashboard() {
       .finally(() => setVerificandoLogin(false));
   }
 
-   function handleLogout() {
+    function handleLogout() {
            sesionIdRef.current += 1;
            localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(ROL_KEY);
@@ -598,6 +606,23 @@ export default function Dashboard() {
     setInputUsuario('');
     setInputContrasena('');
     setTab('stock');
+    // Bug reportado por Claudia (2026-09): al cambiar de cuenta se veía un
+    // "flash" con las notificaciones/datos de la cuenta anterior mientras
+    // cargaban los de la nueva. Faltaba limpiar estos datos aquí — ahora se
+    // vacían de inmediato al cerrar sesión, así la pantalla de login nunca
+    // se queda con datos de otra persona.
+    setProductos([]);
+    setPedidos([]);
+    setAlertas([]);
+    setMovimientos([]);
+    setBitacora([]);
+    setUsuarios([]);
+    setTransferencias([]);
+    setTransferenciasPendientes([]);
+    setTransferenciasResueltas([]);
+    setTransferenciasEnProceso([]);
+    setTransferenciasAplicadas([]);
+    setOpciones({});
   }
 
   function handleActualizarStock(productoId, nuevoStock) {
@@ -648,17 +673,41 @@ export default function Dashboard() {
       });
   }
 
-  function handleOfrecerTransferencia(producto, dueno, destinatarioId, destinatarioNombre, cantidad) {     return ofrecerTransferencia({       sesionToken,       productoId: producto.ID,       duenoId: dueno.usuarioId,       duenoNombre: dueno.nombre,       destinatarioId,       destinatarioNombre,       cantidad,     })       .then(() => { cargarTodo(sesionToken, { silencioso: true }); })       .catch((err) => {         setMensaje(`Error al transferir stock: ${err.message}`);         throw err;       });   }    function handleResponderTransferencia(transferenciaId, aceptar) {
+  function handleOfrecerTransferencia(producto, dueno, destinatarioId, destinatarioNombre, cantidad) {     return ofrecerTransferencia({       sesionToken,       productoId: producto.ID,       duenoId: dueno.usuarioId,       duenoNombre: dueno.nombre,       destinatarioId,       destinatarioNombre,       cantidad,     })       .then(() => { cargarTodo(sesionToken, { silencioso: true }); })       .catch((err) => {         setMensaje(`Error al transferir stock: ${err.message}`);         throw err;       });   }   function handleResponderTransferencia(transferenciaId, aceptar) {
+    setTransferenciasEnAccion((prev) => new Set(prev).add(transferenciaId));
     responderTransferencia({ sesionToken, transferenciaId, aceptar })
       .then(() => cargarTodo(sesionToken))
-      .catch((err) => setMensaje(`Error al responder la solicitud: ${err.message}`));
+      .catch((err) => setMensaje(`Error al responder la solicitud: ${err.message}`))
+      .finally(() => {
+        setTransferenciasEnAccion((prev) => {
+          const siguiente = new Set(prev);
+          siguiente.delete(transferenciaId);
+          return siguiente;
+        });
+      });
   }
 
   function handleMarcarTransferenciaVista(transferenciaId) {
+    setTransferenciasEnAccion((prev) => new Set(prev).add(transferenciaId));
     marcarTransferenciaVista({ sesionToken, transferenciaId })
       .then(() => cargarTodo(sesionToken, { silencioso: true }))
-      .catch((err) => setMensaje(`Error: ${err.message}`));
+      .catch((err) => setMensaje(`Error: ${err.message}`))
+      .finally(() => {
+        setTransferenciasEnAccion((prev) => {
+          const siguiente = new Set(prev);
+          siguiente.delete(transferenciaId);
+          return siguiente;
+        });
+      });
   }
+
+  // Feature pedido por Claudia (2026-09): cambia a la pestaña Stock y marca
+  // el producto para que su fila se resalte en amarillo un momento.
+  function irAStockYResaltar(productoId) {
+    setTab('stock');
+    setProductoResaltadoId(productoId);
+    setTimeout(() => setProductoResaltadoId(null), 4000);
+  }  
 
   // Solo un Administrador puede usar esto (el backend también lo revisa):
   // pone en EXACTAMENTE `cantidad` la porción de este producto que le
@@ -935,19 +984,26 @@ export default function Dashboard() {
                 📥 Tienes {transferenciasPendientes.length} solicitud{transferenciasPendientes.length === 1 ? '' : 'es'} de stock pendiente{transferenciasPendientes.length === 1 ? '' : 's'}:
               </p>
                            <ul className="transferencias-pendientes-lista">
-                {transferenciasPendientes.map((t) => (
+                             {transferenciasPendientes.map((t) => (
                   <li key={t.ID} className="transferencias-pendientes-item">
                     <span>
                       {t.Tipo === 'Oferta' ? (
-                        <><strong>{t.DuenoNombre}</strong> te asignó <strong>{t.Cantidad}</strong> de "{t.Producto}"</>
+                        <><strong>{t.DuenoNombre}</strong> te asignó <strong>{t.Cantidad}</strong> de{' '}
+                        <button type="button" className="link-button" onClick={() => irAStockYResaltar(t.ProductoID)}>
+                          "{t.Producto}"{codigoPorProductoId[t.ProductoID] ? ` (${codigoPorProductoId[t.ProductoID]})` : ''}
+                        </button></>
                       ) : (
-                        <><strong>{t.SolicitanteNombre}</strong> te solicita <strong>{t.Cantidad}</strong> de "{t.Producto}"</>
+                        <><strong>{t.SolicitanteNombre}</strong> te solicita <strong>{t.Cantidad}</strong> de{' '}
+                        <button type="button" className="link-button" onClick={() => irAStockYResaltar(t.ProductoID)}>
+                          "{t.Producto}"{codigoPorProductoId[t.ProductoID] ? ` (${codigoPorProductoId[t.ProductoID]})` : ''}
+                        </button></>
                       )}
                     </span>
                     <div className="transferencias-pendientes-botones">
                       <button
                         type="button"
                         className="btn btn-primary btn-small"
+                        disabled={transferenciasEnAccion.has(t.ID)}
                         onClick={() => handleResponderTransferencia(t.ID, true)}
                       >
                         Aceptar
@@ -955,6 +1011,7 @@ export default function Dashboard() {
                       <button
                         type="button"
                         className="btn btn-secondary btn-small"
+                        disabled={transferenciasEnAccion.has(t.ID)}
                         onClick={() => handleResponderTransferencia(t.ID, false)}
                       >
                         Rechazar
@@ -1083,7 +1140,7 @@ export default function Dashboard() {
               </thead>
               <tbody>
                 {productosFiltrados.map((p) => (
-                                   <StockRow
+                                                                    <StockRow
                     key={`${p.ID}-${resetToken}`}
                     producto={p}
                     categoria={categoriaDeProducto(p)}
@@ -1091,6 +1148,7 @@ export default function Dashboard() {
                     controlTotal={esAdministrador}
                     usuarios={usuarios}
                     misSolicitudesEnProceso={transferenciasEnProceso}
+                    resaltado={p.ID === productoResaltadoId}
                     onActualizar={handleActualizarStock}
                     onDirtyChange={marcarSucio}
                     onEditar={setProductoEditando}
@@ -1232,7 +1290,10 @@ export default function Dashboard() {
                   </span>
                   <button
                     type="button"
+                                    <button
+                    type="button"
                     className="btn btn-secondary btn-small"
+                    disabled={transferenciasEnAccion.has(t.ID)}
                     onClick={() => handleMarcarTransferenciaVista(t.ID)}
                   >
                     Entendido
@@ -1252,9 +1313,10 @@ export default function Dashboard() {
                       <>↪️ Se movieron <strong>{t.Cantidad}</strong> de "{t.Producto}" que tenías, a <strong>{t.SolicitanteNombre}</strong></>
                     )}
                   </span>
-                  <button
+                                 <button
                     type="button"
                     className="btn btn-secondary btn-small"
+                    disabled={transferenciasEnAccion.has(t.ID)}
                     onClick={() => handleMarcarTransferenciaVista(t.ID)}
                   >
                     Entendido
@@ -2368,6 +2430,7 @@ function StockRow({
   controlTotal,
   usuarios = [],
    misSolicitudesEnProceso = [],
+  resaltado = false,
   onActualizar,
   onDirtyChange,
   onEditar,
@@ -2484,10 +2547,10 @@ function StockRow({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sinGuardar, llave, valor]);
 
-  const clasesFila = [!visible && 'fila-oculta', sinGuardar && 'fila-sin-guardar'].filter(Boolean).join(' ');
+    const clasesFila = [!visible && 'fila-oculta', sinGuardar && 'fila-sin-guardar', resaltado && 'fila-resaltada'].filter(Boolean).join(' ');
 
   return (
-    <tr className={clasesFila}>
+    <tr id={`stock-fila-${producto.ID}`} className={clasesFila}>
       <td>{formatearFechaSolo(producto.FechaCreacion)}</td>
       <td>{formatearHoraSolo(producto.FechaCreacion)}</td>
       <td>
