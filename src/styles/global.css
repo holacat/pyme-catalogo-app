@@ -464,6 +464,12 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
   max-width: 110px;
 }
 
+.stock-table th:nth-child(8),
+.stock-table td:nth-child(8) {
+  white-space: normal;
+  max-width: 190px;
+}
+
 /* Encabezados de columna que se pueden ordenar con un clic (Fecha,
    Producto, Categoría, Código, Precio, Stock en la pestaña Stock). Se ven
    igual que un encabezado normal, pero con "cursor: pointer" y una
@@ -1717,6 +1723,12 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
   flex-wrap: wrap;
 }
 
+.stock-duenos-lista .stock-solicitar-caja,
+.stock-duenos-lista .stock-asignar-caja,
+.stock-duenos-lista .campo-nota {
+  flex-basis: 100%;
+}
+
 .stock-dueno-mio {
   color: #1a7a3c;
 }
@@ -1770,6 +1782,11 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
 .transferencia-rechazada {
   background: #fdecea;
   border: 1px solid #f1a9a0;
+}
+
+.transferencia-aplicada {
+  background: #eef3fb;
+  border: 1px solid #b9cdf0;
 }
 
 .transferencias-historial {
