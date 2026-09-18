@@ -497,7 +497,7 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
 .stock-table .stock-editor .btn-small { padding: 0.25rem 0.4rem; font-size: 0.7rem; }
 
 .stock-table .acciones-producto { min-width: 70px; gap: 0.25rem; }
-.stock-table .btn-chip { padding: 0.25rem 0.35rem; font-size: 0.66rem; }
+.stock-table .btn-chip { padding: 0.25rem 0.35rem; font-size: 0.66rem; width: auto; }
 
 .stock-editor { display: flex; gap: 0.4rem; align-items: center; }
 .stock-editor input { width: 100px; padding: 0.3rem; border: 1px solid var(--border); border-radius: 6px; }
@@ -1731,11 +1731,18 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
 }
 
 .stock-solicitar-caja input,
-.stock-asignar-caja input,
-.stock-asignar-caja select {
-  max-width: 100px;
+.stock-asignar-caja input {
+  width: 70px;
+  padding: 0.3rem 0.4rem;
+  font-size: 0.85rem;
 }
 
+.stock-solicitar-caja select,
+.stock-asignar-caja select {
+  max-width: 160px;
+  padding: 0.3rem 0.4rem;
+  font-size: 0.85rem;
+}
 .transferencias-resueltas-lista {
   list-style: none;
   margin: 0 0 16px 0;
