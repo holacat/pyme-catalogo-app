@@ -2523,9 +2523,7 @@ function StockRow({
                         value={cantidadSolicitud}
                         onChange={(e) => setCantidadSolicitud(limitarDigitos(e.target.value, MAX_DIGITOS_STOCK))}
                       />
-                      <button
-                        type="button"
-                      <button type="button" className="btn btn-secondary btn-small" onClick={() => setSolicitandoA(null)}>
+                                          <button type="button" className="btn btn-secondary btn-small" onClick={() => setSolicitandoA(null)}>
                         Cancelar
                       </button>
                       <button
