@@ -598,8 +598,11 @@ export default function Dashboard() {
 
   function handleActualizarStock(productoId, nuevoStock) {
     actualizarStock({ sesionToken, productoId, nuevoStock })
-      .then(() => cargarTodo(sesionToken))
-      .catch((err) => setMensaje(`Error al actualizar stock: ${err.message}`));
+         .then(() => { cargarTodo(sesionToken, { silencioso: true }); })
+      .catch((err) => {
+        setMensaje(`Error al solicitar stock: ${err.message}`);
+        throw err;
+      });
   }
 
   function handleGuardarPedido(pedidoId, { cantidad, telefono, notas, estado, montoReembolso }) {
@@ -641,7 +644,7 @@ export default function Dashboard() {
       });
   }
 
-  function handleOfrecerTransferencia(producto, dueno, destinatarioId, destinatarioNombre, cantidad) {     return ofrecerTransferencia({       sesionToken,       productoId: producto.ID,       duenoId: dueno.usuarioId,       duenoNombre: dueno.nombre,       destinatarioId,       destinatarioNombre,       cantidad,     })       .then(() => cargarTodo(sesionToken))       .catch((err) => {         setMensaje(`Error al transferir stock: ${err.message}`);         throw err;       });   }    function handleResponderTransferencia(transferenciaId, aceptar) {
+  function handleOfrecerTransferencia(producto, dueno, destinatarioId, destinatarioNombre, cantidad) {     return ofrecerTransferencia({       sesionToken,       productoId: producto.ID,       duenoId: dueno.usuarioId,       duenoNombre: dueno.nombre,       destinatarioId,       destinatarioNombre,       cantidad,     })       .then(() => { cargarTodo(sesionToken, { silencioso: true }); })       .catch((err) => {         setMensaje(`Error al transferir stock: ${err.message}`);         throw err;       });   }    function handleResponderTransferencia(transferenciaId, aceptar) {
     responderTransferencia({ sesionToken, transferenciaId, aceptar })
       .then(() => cargarTodo(sesionToken))
       .catch((err) => setMensaje(`Error al responder la solicitud: ${err.message}`));
@@ -2522,14 +2525,16 @@ function StockRow({
                       />
                       <button
                         type="button"
+                      <button type="button" className="btn btn-secondary btn-small" onClick={() => setSolicitandoA(null)}>
+                        Cancelar
+                      </button>
+                      <button
+                        type="button"
                         className="btn btn-primary btn-small"
                         disabled={enviandoSolicitud || !cantidadSolicitud}
                         onClick={confirmarSolicitar}
                       >
                         {enviandoSolicitud ? 'Enviando…' : 'Enviar'}
-                      </button>
-                      <button type="button" className="btn btn-secondary btn-small" onClick={() => setSolicitandoA(null)}>
-                        Cancelar
                       </button>
                     </div>
                   )}
@@ -2554,6 +2559,9 @@ function StockRow({
                         value={cantidadOferta}
                         onChange={(e) => setCantidadOferta(limitarDigitos(e.target.value, MAX_DIGITOS_STOCK))}
                       />
+                                           <button type="button" className="btn btn-secondary btn-small" onClick={() => setOfreciendoDe(null)}>
+                        Cancelar
+                      </button>
                       <button
                         type="button"
                         className="btn btn-primary btn-small"
@@ -2561,9 +2569,6 @@ function StockRow({
                         onClick={confirmarOfrecer}
                       >
                         {enviandoOferta ? 'Enviando…' : 'Enviar'}
-                      </button>
-                      <button type="button" className="btn btn-secondary btn-small" onClick={() => setOfreciendoDe(null)}>
-                        Cancelar
                       </button>
                     </div>
                   )}
