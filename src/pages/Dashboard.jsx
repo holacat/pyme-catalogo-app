@@ -830,9 +830,10 @@ export default function Dashboard() {
       <div className="dashboard-header">
         <h2>Panel de administración</h2>
         <div className="dashboard-header-acciones">
-          <span className="muted texto-usuario-conectado">
+                    <span className="muted texto-usuario-conectado">
             Sesión: <strong>{nombreSesion || 'Sin nombre'}</strong> · {rol || '—'}
           </span>
+          <button className="btn btn-secondary" onClick={() => cargarTodo(sesionToken)}>🔄 Actualizar</button>
           <button className="btn btn-secondary" onClick={handleLogout}>Cerrar sesión</button>
         </div>
       </div>
