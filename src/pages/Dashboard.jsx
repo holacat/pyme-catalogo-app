@@ -215,7 +215,7 @@ const MAX_DIGITOS_PRECIO = 9; // hasta 999,999,999 (con hasta 2 decimales)
 const MAX_DIGITOS_CANTIDAD = 4; // hasta 9,999 piezas por pedido
 
 // Cada cuánto se refresca solo el Dashboard en segundo plano (milisegundos).
-const INTERVALO_REFRESCO_MS = 5000;
+const INTERVALO_REFRESCO_MS = 15000;
 
 const ESTADOS_PEDIDO = ['Sin solicitud', 'En proceso', 'Pagado', 'Reembolsado', 'Cancelado'];
 
@@ -344,6 +344,10 @@ export default function Dashboard() {
   // Alertas que sí se enviaron, y para no dejarte mandar la misma dos
   // veces desde el botón "Solicitar").
   const [transferenciasEnProceso, setTransferenciasEnProceso] = useState([]);
+  // Avisos de "Aplicada" (Admin movió stock de una persona a otra sin
+  // pedir Aceptar/Rechazar): le llegan a ambas personas, solo para
+  // dárselos por entendido.
+  const [transferenciasAplicadas, setTransferenciasAplicadas] = useState([]);
   // 'todo' muestra el stock completo (con el dueño de cada quien); 'mio'
   // filtra solo los productos donde yo tengo algo asignado.
   const [filtroStockPersonal, setFiltroStockPersonal] = useState('todo');
@@ -473,7 +477,7 @@ export default function Dashboard() {
         : Promise.resolve({ pedidos: [] }),
       (puedeVer('alertas') || puedeVer('stock'))
         ? obtenerAlertas(token)
-        : Promise.resolve({ alertas: [], transferenciasPendientes: [], transferenciasResueltas: [], transferenciasEnProceso: [] }),
+              : Promise.resolve({ alertas: [], transferenciasPendientes: [], transferenciasResueltas: [], transferenciasEnProceso: [], transferenciasAplicadas: [] }),
       (puedeVer('stock') || puedeVer('nuevo') || puedeVer('orden'))
         ? listarOpciones(token)
         : Promise.resolve({ opciones: {} }),
@@ -490,7 +494,7 @@ export default function Dashboard() {
         setAlertas(a.alertas || []);
         setTransferenciasPendientes(a.transferenciasPendientes || []);
         setTransferenciasResueltas(a.transferenciasResueltas || []);
-        setTransferenciasEnProceso(a.transferenciasEnProceso || []);
+        setTransferenciasEnProceso(a.transferenciasEnProceso || []);         setTransferenciasAplicadas(a.transferenciasAplicadas || []);
         setOpciones(op.opciones || {});
         setMovimientos(mv.movimientos || []);
         setBitacora(b.bitacora || []);
@@ -1209,7 +1213,7 @@ export default function Dashboard() {
               ))}
             </ul>
           )}
-          {transferenciasResueltas.length > 0 && (
+                  {transferenciasResueltas.length > 0 && (
             <ul className="transferencias-resueltas-lista">
               {transferenciasResueltas.map((t) => (
                 <li
@@ -1223,6 +1227,28 @@ export default function Dashboard() {
                     ) : (
                       <><strong>{t.DuenoNombre}</strong> {t.Estado === 'Aceptada' ? 'aceptó' : 'rechazó'} tu solicitud de{' '}
                       <strong>{t.Cantidad}</strong> de "{t.Producto}"</>
+                    )}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-small"
+                    onClick={() => handleMarcarTransferenciaVista(t.ID)}
+                  >
+                    Entendido
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {transferenciasAplicadas.length > 0 && (
+            <ul className="transferencias-resueltas-lista">
+              {transferenciasAplicadas.map((t) => (
+                <li key={t.ID} className="transferencia-aplicada">
+                  <span>
+                    {String(t.SolicitanteID) === String(usuarioId) ? (
+                      <>✅ Recibiste <strong>{t.Cantidad}</strong> de "{t.Producto}" (venía de <strong>{t.DuenoNombre}</strong>)</>
+                    ) : (
+                      <>↪️ Se movieron <strong>{t.Cantidad}</strong> de "{t.Producto}" que tenías, a <strong>{t.SolicitanteNombre}</strong></>
                     )}
                   </span>
                   <button
