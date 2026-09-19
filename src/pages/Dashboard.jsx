@@ -343,10 +343,21 @@ export default function Dashboard() {
   // Solicitudes que YO mandé y siguen sin respuesta (para avisarte en
   // Alertas que sí se enviaron, y para no dejarte mandar la misma dos
   // veces desde el botón "Solicitar").
-  const [transferenciasEnProceso, setTransferenciasEnProceso] = useState([]);
+   const [transferenciasEnProceso, setTransferenciasEnProceso] = useState([]);
   // Avisos de "Aplicada" (Admin movió stock de una persona a otra sin
   // pedir Aceptar/Rechazar): le llegan a ambas personas, solo para
   // dárselos por entendido.
+  const [transferenciasAplicadas, setTransferenciasAplicadas] = useState([]);
+  // Regresión reportada por Claudia (2026-09): Aceptar/Rechazar/Entendido no
+  // daban ninguna señal visual al tocarlos, parecía que el click no había
+  // funcionado y a veces se tocaban dos veces. Este Set guarda los IDs de
+  // transferencia "en camino" (ya se mandó la petición, todavía no responde
+  // el servidor) para poner sus botones en gris mientras tanto.
+  const [transferenciasEnAccion, setTransferenciasEnAccion] = useState(new Set());
+  // Feature pedido por Claudia (2026-09): al tocar el aviso de una solicitud
+  // pendiente en Stock, salta a la fila de ese producto y la resalta unos
+  // segundos en amarillo.
+  const [productoResaltadoId, setProductoResaltadoId] = useState(null);
 
   // 'todo' muestra el stock completo (con el dueño de cada quien); 'mio'
   // filtra solo los productos donde yo tengo algo asignado.
@@ -1288,9 +1299,7 @@ export default function Dashboard() {
                       <strong>{t.Cantidad}</strong> de "{t.Producto}"</>
                     )}
                   </span>
-                  <button
-                    type="button"
-                                    <button
+                                   <button
                     type="button"
                     className="btn btn-secondary btn-small"
                     disabled={transferenciasEnAccion.has(t.ID)}
