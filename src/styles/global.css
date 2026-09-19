@@ -1789,6 +1789,14 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
   border: 1px solid #b9cdf0;
 }
 
+.fila-resaltada {
+  animation: destacarFila 4s ease-out;
+}
+@keyframes destacarFila {
+  0% { background-color: #fff59d; }
+  100% { background-color: transparent; }
+}
+
 .transferencias-historial {
   margin-top: 16px;
 }
