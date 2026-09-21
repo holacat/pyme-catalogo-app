@@ -1274,10 +1274,10 @@ export default function Dashboard() {
             <ul className="transferencias-en-proceso-lista">
               {transferenciasEnProceso.map((t) => (
                 <li key={t.ID}>
-                  {t.Tipo === 'Oferta' ? (
-                    <>⏳ Le asignaste <strong>{t.Cantidad}</strong> de "{t.Producto}" a <strong>{t.SolicitanteNombre}</strong>, esperando que acepte</>
+                                  {t.Tipo === 'Oferta' ? (
+                    <>⏳ Le asignaste <strong>{t.Cantidad}</strong> de "{t.Producto}"{codigoPorProductoId[t.ProductoID] ? ` (${codigoPorProductoId[t.ProductoID]})` : ''} a <strong>{t.SolicitanteNombre}</strong>, esperando que acepte</>
                   ) : (
-                    <>⏳ Esperando respuesta de <strong>{t.DuenoNombre}</strong> por <strong>{t.Cantidad}</strong> de "{t.Producto}"</>
+                    <>⏳ Esperando respuesta de <strong>{t.DuenoNombre}</strong> por <strong>{t.Cantidad}</strong> de "{t.Producto}"{codigoPorProductoId[t.ProductoID] ? ` (${codigoPorProductoId[t.ProductoID]})` : ''}</>
                   )}
                 </li>
               ))}
@@ -1291,12 +1291,12 @@ export default function Dashboard() {
                   className={t.Estado === 'Aceptada' ? 'transferencia-aceptada' : 'transferencia-rechazada'}
                 >
                                    <span>
-                    {t.Tipo === 'Oferta' ? (
+                                       {t.Tipo === 'Oferta' ? (
                       <><strong>{t.SolicitanteNombre}</strong> {t.Estado === 'Aceptada' ? 'aceptó' : 'rechazó'} lo que le asignaste de{' '}
-                      <strong>{t.Cantidad}</strong> de "{t.Producto}"</>
+                      <strong>{t.Cantidad}</strong> de "{t.Producto}"{codigoPorProductoId[t.ProductoID] ? ` (${codigoPorProductoId[t.ProductoID]})` : ''}</>
                     ) : (
                       <><strong>{t.DuenoNombre}</strong> {t.Estado === 'Aceptada' ? 'aceptó' : 'rechazó'} tu solicitud de{' '}
-                      <strong>{t.Cantidad}</strong> de "{t.Producto}"</>
+                      <strong>{t.Cantidad}</strong> de "{t.Producto}"{codigoPorProductoId[t.ProductoID] ? ` (${codigoPorProductoId[t.ProductoID]})` : ''}</>
                     )}
                   </span>
                                    <button
@@ -1316,10 +1316,10 @@ export default function Dashboard() {
               {transferenciasAplicadas.map((t) => (
                 <li key={t.ID} className="transferencia-aplicada">
                   <span>
-                    {String(t.SolicitanteID) === String(usuarioId) ? (
-                      <>✅ Recibiste <strong>{t.Cantidad}</strong> de "{t.Producto}" (venía de <strong>{t.DuenoNombre}</strong>)</>
+                                      {String(t.SolicitanteID) === String(usuarioId) ? (
+                      <>✅ Recibiste <strong>{t.Cantidad}</strong> de "{t.Producto}"{codigoPorProductoId[t.ProductoID] ? ` (${codigoPorProductoId[t.ProductoID]})` : ''} (venía de <strong>{t.DuenoNombre}</strong>)</>
                     ) : (
-                      <>↪️ Se movieron <strong>{t.Cantidad}</strong> de "{t.Producto}" que tenías, a <strong>{t.SolicitanteNombre}</strong></>
+                      <>↪️ Se movieron <strong>{t.Cantidad}</strong> de "{t.Producto}"{codigoPorProductoId[t.ProductoID] ? ` (${codigoPorProductoId[t.ProductoID]})` : ''} que tenías, a <strong>{t.SolicitanteNombre}</strong></>
                     )}
                   </span>
                                  <button
@@ -2614,7 +2614,7 @@ function StockRow({
                   )}
                                 {solicitandoA && solicitandoA.usuarioId === d.usuarioId && (
                     <div className="stock-solicitar-caja">
-                      <input
+                                           <input
                         type="number"
                         min="1"
                         max={d.cantidad}
@@ -2628,11 +2628,14 @@ function StockRow({
                       <button
                         type="button"
                         className="btn btn-primary btn-small"
-                        disabled={enviandoSolicitud || !cantidadSolicitud}
+                        disabled={enviandoSolicitud || !cantidadSolicitud || Number(cantidadSolicitud) > d.cantidad || Number(cantidadSolicitud) <= 0}
                         onClick={confirmarSolicitar}
                       >
                         {enviandoSolicitud ? 'Enviando…' : 'Enviar'}
                       </button>
+                      {Number(cantidadSolicitud) > d.cantidad && (
+                        <span className="muted campo-nota">Máximo disponible: {d.cantidad}</span>
+                      )}
                     </div>
                   )}
                   {(esMio || controlTotal) && (
@@ -2651,7 +2654,7 @@ function StockRow({
                           <option key={u.ID} value={u.ID}>{u.Nombre}</option>
                         ))}
                       </select>
-                      <input
+                                           <input
                         type="number"
                         min="1"
                         max={d.cantidad}
@@ -2665,11 +2668,14 @@ function StockRow({
                       <button
                         type="button"
                         className="btn btn-primary btn-small"
-                        disabled={enviandoOferta || !destinatarioOferta || !cantidadOferta}
+                        disabled={enviandoOferta || !destinatarioOferta || !cantidadOferta || Number(cantidadOferta) > d.cantidad || Number(cantidadOferta) <= 0}
                         onClick={confirmarOfrecer}
                       >
                         {enviandoOferta ? 'Enviando…' : 'Enviar'}
                       </button>
+                      {Number(cantidadOferta) > d.cantidad && (
+                        <span className="muted campo-nota">Máximo disponible: {d.cantidad}</span>
+                      )}
                     </div>
                   )}
                   {misOfertasEnProceso.filter((t) => String(t.DuenoID) === String(d.usuarioId)).map((t) => (
