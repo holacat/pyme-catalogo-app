@@ -102,8 +102,8 @@ export default function ProductCard({ producto, onSolicitar, onAgregarCarrito })
         )}
       </div>
       <div className="product-body">
-        <h3>{producto.Nombre}</h3>
-        {producto.Categoria && <span className="badge">{producto.Categoria}</span>}
+       {producto.Categoria && <span className="badge">{producto.Categoria}</span>}
+        {producto.Color && <p className="product-color">Color: {producto.Color}</p>}
         {precioOferta ? (
           <p className="price price-oferta">
             <span className="price-original">${Number(producto.Precio).toLocaleString('es-MX')}</span>
