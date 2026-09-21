@@ -1330,10 +1330,10 @@ export default function Dashboard() {
               {transferenciasAplicadas.map((t) => (
                 <li key={t.ID} className="transferencia-aplicada">
                   <span>
-                                      {String(t.SolicitanteID) === String(usuarioId) ? (
-                      <>✅ Recibiste <strong>{t.Cantidad}</strong> de "{t.Producto}"{codigoPorProductoId[t.ProductoID] ? ` (${codigoPorProductoId[t.ProductoID]})` : ''} (venía de <strong>{t.DuenoNombre}</strong>)</>
+                                                                          {String(t.SolicitanteID) === String(usuarioId) ? (
+                      <>✅ Recibiste <strong>{t.Cantidad}</strong> de "{t.Producto}"{codigoPorProductoId[t.ProductoID] ? ` (${codigoPorProductoId[t.ProductoID]})` : ''} (venía de <strong>{t.DuenoNombre}</strong>){t.RealizadoPor ? <> — lo asignó <strong>{t.RealizadoPor}</strong> el {formatearFechaSolo(t.FechaRespuesta)} a las {formatearHoraSolo(t.FechaRespuesta)}</> : null}</>
                     ) : (
-                      <>↪️ Se movieron <strong>{t.Cantidad}</strong> de "{t.Producto}"{codigoPorProductoId[t.ProductoID] ? ` (${codigoPorProductoId[t.ProductoID]})` : ''} que tenías, a <strong>{t.SolicitanteNombre}</strong></>
+                      <>↪️ Se movieron <strong>{t.Cantidad}</strong> de "{t.Producto}"{codigoPorProductoId[t.ProductoID] ? ` (${codigoPorProductoId[t.ProductoID]})` : ''} que tenías, a <strong>{t.SolicitanteNombre}</strong>{t.RealizadoPor ? <> — lo hizo <strong>{t.RealizadoPor}</strong> el {formatearFechaSolo(t.FechaRespuesta)} a las {formatearHoraSolo(t.FechaRespuesta)}</> : null}</>
                     )}
                   </span>
                                  <button
@@ -1348,11 +1348,13 @@ export default function Dashboard() {
               ))}
             </ul>
           )}
-          <ul className="alert-list">
+                   <ul className="alert-list">
             {alertas.length === 0 && <li>Sin alertas de bajo inventario 🎉</li>}
             {alertas.map((a) => (
               <li key={a.ID}>
-                <strong>{a.Nombre}</strong> — quedan {a.Stock} (mínimo {a.StockMinimo})
+                <button type="button" className="link-button" onClick={() => irAStockYResaltar(a.ID)}>
+                  <strong>{a.Nombre}</strong>{a.CodigoPropio ? ` (${a.CodigoPropio})` : ''} — quedan {a.Stock} (mínimo {a.StockMinimo})
+                </button>
               </li>
             ))}
           </ul>
@@ -2597,7 +2599,10 @@ function StockRow({
       <td>{categoria}</td>
       <td>{producto.CodigoPropio || '—'}</td>
       <td>${Number(producto.Precio).toLocaleString('es-MX')}</td>
-      <td>{producto.Stock}</td>
+         <td>
+        {producto.Stock}
+        {Number(producto.Stock) === 0 && <span className="badge badge-agotado">AGOTADO</span>}
+      </td>
           <td>
         {duenos.length === 0 ? (
           <span className="muted">Sin asignar</span>
