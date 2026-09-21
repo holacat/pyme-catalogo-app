@@ -634,6 +634,20 @@ export default function Dashboard() {
     setTransferenciasEnProceso([]);
     setTransferenciasAplicadas([]);
     setOpciones({});
+    // Bug reportado por Claudia (2026-09): un filtro que dejaba puesto una
+    // persona (búsqueda, categoría, fechas, estado, orden de columnas...) se
+    // le quedaba "pegado" a la siguiente que entrara en esa misma pantalla,
+    // porque el arreglo anterior solo limpiaba los DATOS, no las casillas
+    // de filtro. Ahora también se resetean al cerrar sesión.
+    setFiltroStockPersonal('todo');
+    setFiltroDesde('');
+    setFiltroHasta('');
+    setBusquedaStock('');
+    setFiltroCategoriaStock('');
+    setOrdenStock(null);
+    setFiltroEstado('');
+    setFiltroPedidoDesde('');
+    setFiltroPedidoHasta('');
   }
 
   function handleActualizarStock(productoId, nuevoStock) {
