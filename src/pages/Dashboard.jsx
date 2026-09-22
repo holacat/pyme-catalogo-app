@@ -1397,11 +1397,12 @@ export default function Dashboard() {
       )}
 
           {tab === 'nuevo' && puedeVer('nuevo') && (
-        <ProductoForm
+             <ProductoForm
           sesionToken={sesionToken}
           opciones={opciones}
           usuarios={usuarios}
           esAdministrador={esAdministrador}
+          usuarioId={usuarioId}
           onOpcionesActualizadas={() => cargarTodo(sesionToken, { silencioso: true })}
           onGuardado={() => {
             cargarTodo(sesionToken);
@@ -1520,9 +1521,9 @@ const CAMPOS_CON_OPCIONES = [
 // Sirve tanto para dar de alta un producto nuevo como para editar uno que
 // ya existe: si le pasas `productoExistente`, precarga sus datos y guarda
 // con "actualizarProducto" en vez de "crearProducto".
-function ProductoForm({ sesionToken, opciones = {}, usuarios = [], esAdministrador = false, productoExistente, onGuardado, onOpcionesActualizadas, onCancelar }) {
+function ProductoForm({ sesionToken, opciones = {}, usuarios = [], esAdministrador = false, usuarioId = '', productoExistente, onGuardado, onOpcionesActualizadas, onCancelar }) {
   const esEdicion = !!productoExistente;
-  const [form, setForm] = useState(() => (esEdicion ? formDesdeProducto(productoExistente) : FORM_INICIAL));
+  const [form, setForm] = useState(() => (esEdicion ? formDesdeProducto(productoExistente) : { ...FORM_INICIAL, duenoId: usuarioId || '' }));
   const [fotos, setFotos] = useState(() => (esEdicion ? fotosDesdeProducto(productoExistente) : []));
   const [enviando, setEnviando] = useState(false);
   const [mensaje, setMensaje] = useState('');
