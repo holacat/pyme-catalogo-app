@@ -648,6 +648,7 @@ export default function Dashboard() {
     setFiltroEstado('');
     setFiltroPedidoDesde('');
     setFiltroPedidoHasta('');
+    setMensaje('');
   }
 
   function handleActualizarStock(productoId, nuevoStock) {
@@ -914,7 +915,15 @@ export default function Dashboard() {
 
       {alertas.length > 0 && (
         <div className="alert-banner">
-          ⚠️ {alertas.length} producto(s) con bajo inventario: {alertas.map((a) => a.Nombre).join(', ')}
+          ⚠️ {alertas.length} producto(s) con bajo inventario:{' '}
+          {alertas.map((a, i) => (
+            <span key={a.ID}>
+              <button type="button" className="link-button" onClick={() => irAStockYResaltar(a.ID)}>
+                {a.Nombre}{a.CodigoPropio ? ` (${a.CodigoPropio})` : ''}
+              </button>
+              {i < alertas.length - 1 ? ', ' : ''}
+            </span>
+          ))}
         </div>
       )}
 
@@ -2618,10 +2627,19 @@ function StockRow({
               const solicitudEnProceso = misSolicitudesEnProceso.find(
                 (t) => String(t.ProductoID) === String(producto.ID) && String(t.DuenoID) === String(d.usuarioId)
               );
+              // Funcionalidad (2026-09-22): "disponible" ya no es solo lo
+              // que esta persona tiene asignado (d.cantidad) — el backend
+              // le resta lo que ya comprometió en otras asignaciones
+              // pendientes, para que NADIE, sin importar quién tenga la
+              // sesión abierta ni de quién sea la fila, pueda solicitar o
+              // asignar más de lo que en verdad queda libre. Si el backend
+              // aún no manda ese dato (por ejemplo si no se ha vuelto a
+              // desplegar Code.gs), se usa d.cantidad de respaldo.
+              const disponibleD = d.disponible !== undefined ? d.disponible : d.cantidad;
               return (
                 <li key={d.usuarioId} className={esMio ? 'stock-dueno-mio' : ''}>
                   <span>
-                    {esMio ? 'Yo' : d.nombre}: <strong>{d.cantidad}</strong>
+                    {esMio ? 'Yo' : d.nombre}: <strong>{disponibleD}</strong>
                   </span>
                   {!controlTotal && !esMio && !solicitudEnProceso && (
                     <button type="button" className="btn btn-secondary btn-chip" onClick={() => abrirSolicitar(d)}>
@@ -2636,7 +2654,7 @@ function StockRow({
                                            <input
                         type="number"
                         min="1"
-                        max={d.cantidad}
+                        max={disponibleD}
                         placeholder="Cantidad"
                         value={cantidadSolicitud}
                         onChange={(e) => setCantidadSolicitud(limitarDigitos(e.target.value, MAX_DIGITOS_STOCK))}
@@ -2647,13 +2665,13 @@ function StockRow({
                       <button
                         type="button"
                         className="btn btn-primary btn-small"
-                        disabled={enviandoSolicitud || !cantidadSolicitud || Number(cantidadSolicitud) > d.cantidad || Number(cantidadSolicitud) <= 0}
+                        disabled={enviandoSolicitud || !cantidadSolicitud || Number(cantidadSolicitud) > disponibleD || Number(cantidadSolicitud) <= 0}
                         onClick={confirmarSolicitar}
                       >
                         {enviandoSolicitud ? 'Enviando…' : 'Enviar'}
                       </button>
-                      {Number(cantidadSolicitud) > d.cantidad && (
-                        <span className="muted campo-nota">Máximo disponible: {d.cantidad}</span>
+                      {Number(cantidadSolicitud) > disponibleD && (
+                        <span className="muted campo-nota">Máximo disponible: {disponibleD}</span>
                       )}
                     </div>
                   )}
@@ -2676,7 +2694,7 @@ function StockRow({
                                            <input
                         type="number"
                         min="1"
-                        max={d.cantidad}
+                        max={disponibleD}
                         placeholder="Cantidad"
                         value={cantidadOferta}
                         onChange={(e) => setCantidadOferta(limitarDigitos(e.target.value, MAX_DIGITOS_STOCK))}
@@ -2687,13 +2705,13 @@ function StockRow({
                       <button
                         type="button"
                         className="btn btn-primary btn-small"
-                        disabled={enviandoOferta || !destinatarioOferta || !cantidadOferta || Number(cantidadOferta) > d.cantidad || Number(cantidadOferta) <= 0}
+                        disabled={enviandoOferta || !destinatarioOferta || !cantidadOferta || Number(cantidadOferta) > disponibleD || Number(cantidadOferta) <= 0}
                         onClick={confirmarOfrecer}
                       >
                         {enviandoOferta ? 'Enviando…' : 'Enviar'}
                       </button>
-                      {Number(cantidadOferta) > d.cantidad && (
-                        <span className="muted campo-nota">Máximo disponible: {d.cantidad}</span>
+                      {Number(cantidadOferta) > disponibleD && (
+                        <span className="muted campo-nota">Máximo disponible: {disponibleD}</span>
                       )}
                     </div>
                   )}
