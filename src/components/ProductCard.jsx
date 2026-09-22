@@ -101,9 +101,9 @@ export default function ProductCard({ producto, onSolicitar, onAgregarCarrito })
           <div className="product-photo-placeholder">Sin foto</div>
         )}
       </div>
-      <div className="product-body">
-       {producto.Categoria && <span className="badge">{producto.Categoria}</span>}
-        {producto.Color && <p className="product-color">Color: {producto.Color}</p>}
+          <div className="product-body">
+        <h3 className="product-nombre">{producto.Nombre}</h3>
+        {producto.Categoria && <span className="badge">{producto.Categoria}</span>}
         {precioOferta ? (
           <p className="price price-oferta">
             <span className="price-original">${Number(producto.Precio).toLocaleString('es-MX')}</span>
@@ -123,7 +123,9 @@ export default function ProductCard({ producto, onSolicitar, onAgregarCarrito })
             (vacío si no hay texto) para que la altura sea la misma en todas
             las tarjetas de la fila — ver el `min-height` de ".description"
             en global.css. */}
-        <p className="description">{producto.Descripcion || ''}</p>
+             <p className="description">{producto.Descripcion || ''}</p>
+
+        {producto.Color && <p className="product-color">Color: {producto.Color}</p>}
 
         {!sinStock && (
           <div className="cantidad-selector">
