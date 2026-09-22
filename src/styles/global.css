@@ -167,6 +167,7 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
    aunque el texto de la descripción sea muy corto o esté vacío (ver el
    cambio en ProductCard.jsx que ahora siempre dibuja este párrafo). */
 .description { font-size: 0.85rem; color: var(--muted); margin: 0.2rem 0 0.4rem; min-height: 1.2em; }
+.product-color { font-size: 0.85rem; color: var(--muted); margin: 0; }
 
 .product-actions { margin-top: auto; display: flex; flex-direction: column; gap: 0.5rem; }
 
