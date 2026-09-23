@@ -799,6 +799,10 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
 }
 
 .form-actions { display: flex; gap: 0.6rem; }
+/* Botón "Cancelar" de "+ Agregar producto" (2026-09-23): va del lado
+   opuesto al de "Agregar producto", para que no se puedan confundir ni dar
+   clic sin querer en el que no era. */
+.btn-cancelar-nuevo { margin-left: auto; }
 
 /* ---- Subida de fotos (arrastrar o buscar archivo) ---- */
 .dropzone {
