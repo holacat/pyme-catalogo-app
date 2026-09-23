@@ -140,6 +140,15 @@ export function crearProducto({
     codigoPropio,
     precioOferta,
     enOferta,
+    // Arreglo (2026-09-23): esta función SÍ recibía duenoId/duenoNombre en
+    // sus parámetros (arriba), pero se quedaban sin usar — nunca se
+    // mandaban dentro del post(), así que el backend jamás los recibía y
+    // por eso el producto siempre terminaba asignado a Admin Central sin
+    // importar qué tan bien estuviera el resto del código. Este era el
+    // verdadero motivo por el que "asignar al creador por default" nunca
+    // funcionó, en los tres intentos anteriores.
+    duenoId,
+    duenoNombre,
   });
 }
 
