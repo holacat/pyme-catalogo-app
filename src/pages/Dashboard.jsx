@@ -1567,6 +1567,15 @@ function ProductoForm({ sesionToken, opciones = {}, setOpciones, usuarios = [], 
   const [enviando, setEnviando] = useState(false);
   const [mensaje, setMensaje] = useState('');
 
+  const duenosEdicion = esEdicion ? (productoExistente.Duenos || []) : [];
+  const miPropioEdicion = duenosEdicion.find((d) => String(d.usuarioId) === String(usuarioId));
+  const miCantidadPropiaEdicion = miPropioEdicion ? miPropioEdicion.cantidad : 0;
+  const stockOriginalEdicion = esEdicion ? Number(productoExistente.Stock) || 0 : 0;
+  const minimoPermitidoEdicion =
+    duenosEdicion.length > 0 ? Math.max(0, stockOriginalEdicion - miCantidadPropiaEdicion) : 0;
+  const excedeMiPropioEdicion =
+    esEdicion && duenosEdicion.length > 0 && form.stock !== '' && Number(form.stock) < minimoPermitidoEdicion;
+
   // Actualiza YA (sin esperar el refresco completo de datos) la lista de
   // opciones predeterminadas visible en este formulario, para que agregar o
   // quitar una opción se vea al instante y no tarde varios segundos —
@@ -1862,9 +1871,16 @@ function ProductoForm({ sesionToken, opciones = {}, setOpciones, usuarios = [], 
           <input
             type="number"
             min="0"
+            className={excedeMiPropioEdicion ? 'campo-modificado' : ''}
             value={form.stock}
             onChange={handleChangeNumero('stock', MAX_DIGITOS_STOCK)}
           />
+          {excedeMiPropioEdicion && (
+            <span className="muted campo-nota aviso-stock-propio">
+              Solo puedes bajar hasta {minimoPermitidoEdicion} — de este producto tienes {miCantidadPropiaEdicion}{' '}
+              asignado a ti, y bajar más afectaría el stock de alguien más.
+            </span>
+          )}
         </label>
         <label>
           Stock mínimo
@@ -1877,7 +1893,7 @@ function ProductoForm({ sesionToken, opciones = {}, setOpciones, usuarios = [], 
         </label>
         <label className="form-grid-wide">
           Descripción
-          <input value={form.descripcion} onChange={handleChange('descripcion')} maxLength={500} />
+          <input value={form.descripcion} onChange={handleChange('descripcion')} maxLength={200} />
         </label>
       </div>
 
@@ -1891,7 +1907,7 @@ function ProductoForm({ sesionToken, opciones = {}, setOpciones, usuarios = [], 
       )}
 
       <div className="form-actions">
-        <button type="submit" className="btn btn-primary" disabled={enviando}>
+        <button type="submit" className="btn btn-primary" disabled={enviando || excedeMiPropioEdicion}>
           {enviando ? 'Guardando…' : esEdicion ? 'Guardar cambios' : 'Agregar producto'}
         </button>
         {esEdicion && (
@@ -2588,6 +2604,16 @@ function StockRow({
   const soyDueno = duenos.some((d) => String(d.usuarioId) === String(usuarioId) && d.cantidad > 0);
   const puedoEditar = controlTotal || soyDueno || duenos.length === 0;
 
+  // Aviso en tiempo real (2026-09-23, pedido por Claudia): calcula lo mismo
+  // que valida Code.gs (solo puedes bajar hasta lo tuyo) para avisar/​
+  // bloquear el botón "Guardar" ANTES de mandar la petición, en vez de que
+  // se entere hasta que el backend la rechace.
+  const miPropioStock = duenos.find((d) => String(d.usuarioId) === String(usuarioId));
+  const miCantidadPropiaStock = miPropioStock ? miPropioStock.cantidad : 0;
+  const minimoPermitidoStock =
+    duenos.length > 0 ? Math.max(0, Number(producto.Stock) - miCantidadPropiaStock) : 0;
+  const excedeMiPropioStock = duenos.length > 0 && Number(valor) < minimoPermitidoStock;
+
   // "Solicitar": a quién se le está pidiendo una cantidad (guarda el
   // dueño completo, para mostrar el mini-formulario justo debajo de esa
   // persona) y qué cantidad se escribió.
@@ -2827,25 +2853,31 @@ function StockRow({
           <input
             type="number"
             min="0"
-            className={sinGuardar ? 'campo-modificado' : ''}
+            className={excedeMiPropioStock ? 'campo-modificado' : sinGuardar ? 'campo-modificado' : ''}
             value={valor}
             disabled={!puedoEditar || guardandoStock}
             onChange={(e) => setValor(limitarDigitos(e.target.value, MAX_DIGITOS_STOCK))}
           />
           <button
-            className="btn btn-small"
+            className={`btn btn-small ${guardandoStock ? 'btn-guardando' : ''}`}
             onClick={() => {
               setGuardandoStock(true);
               onActualizar(producto.ID, valor)
                 .catch(() => {})
                 .finally(() => setGuardandoStock(false));
             }}
-            disabled={!sinGuardar || !puedoEditar || guardandoStock}
+            disabled={!sinGuardar || !puedoEditar || guardandoStock || excedeMiPropioStock}
           >
             {guardandoStock ? 'Guardando…' : 'Guardar'}
           </button>
         </div>
         {!puedoEditar && <p className="muted campo-nota">🔒 No es tuyo — usa "Solicitar" junto al dueño.</p>}
+        {puedoEditar && excedeMiPropioStock && (
+          <p className="muted campo-nota aviso-stock-propio">
+            Solo puedes bajar hasta {minimoPermitidoStock} — de este producto tienes {miCantidadPropiaStock} asignado
+            a ti, y bajar más afectaría el stock de alguien más.
+          </p>
+        )}
       </td>
       <td className="celda-acciones">
         <div className="acciones-producto">
