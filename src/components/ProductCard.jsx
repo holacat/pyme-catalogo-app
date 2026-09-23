@@ -43,6 +43,16 @@ export default function ProductCard({ producto, onSolicitar, onAgregarCarrito })
   const [indice, setIndice] = useState(0);
   const [zoomAbierto, setZoomAbierto] = useState(false);
   const [cantidad, setCantidad] = useState(1);
+  // Funcionalidad (2026-09-22, pedido por Claudia): una descripción muy
+  // larga ya no rompe la tarjeta — se corta a 120 caracteres y aparece un
+  // "Ver más" para desplegarla completa si el cliente quiere leerla.
+  const [descripcionAbierta, setDescripcionAbierta] = useState(false);
+  const descripcionCompleta = producto.Descripcion || '';
+  const descripcionEsLarga = descripcionCompleta.length > 120;
+  const descripcionMostrada =
+    !descripcionEsLarga || descripcionAbierta
+      ? descripcionCompleta
+      : descripcionCompleta.slice(0, 120) + '…';
 
   function fotoAnterior(e) {
     e.stopPropagation();
@@ -123,7 +133,18 @@ export default function ProductCard({ producto, onSolicitar, onAgregarCarrito })
             (vacío si no hay texto) para que la altura sea la misma en todas
             las tarjetas de la fila — ver el `min-height` de ".description"
             en global.css. */}
-             <p className="description">{producto.Descripcion || ''}</p>
+             <p className="description">
+          {descripcionMostrada}
+          {descripcionEsLarga && (
+            <button
+              type="button"
+              className="link-button descripcion-ver-mas"
+              onClick={() => setDescripcionAbierta((v) => !v)}
+            >
+              {descripcionAbierta ? ' Ver menos' : ' Ver más'}
+            </button>
+          )}
+        </p>
 
         {producto.Color && <p className="product-color">Color: {producto.Color}</p>}
 
