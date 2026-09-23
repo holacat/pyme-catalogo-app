@@ -125,8 +125,15 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
 
 .carousel-dot.activo { background: white; }
 
-.product-body { padding: 0.9rem 1rem 1.1rem; display: flex; flex-direction: column; gap: 0.35rem; flex: 1; }
-.product-body h3 { margin: 0; font-size: 1.15rem; font-weight: 700; }
+.product-body { padding: 0.9rem 1rem 1.1rem; display: flex; flex-direction: column; gap: 0.35rem; flex: 1; min-width: 0; }
+/* Arreglo (2026-09-23, pedido por Claudia): un nombre de producto muy largo
+   y SIN espacios (por ejemplo un código pegado, o el caso extremo que
+   probó: puro "AAAAAAAA...") no tenía forma de partirse en varias líneas y
+   se salía de la tarjeta, empujando o tapando todo lo demás — sobre todo
+   dentro del carrusel de Ofertas, donde la tarjeta tiene un ancho fijo. Con
+   "overflow-wrap: anywhere" el texto se parte donde haga falta para
+   quedarse siempre dentro de la tarjeta, aunque no tenga espacios. */
+.product-body h3 { margin: 0; font-size: 1.15rem; font-weight: 700; overflow-wrap: anywhere; }
 
 .badge {
   align-self: flex-start;
@@ -137,7 +144,7 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
   border-radius: 999px;
 }
 
-.price { font-size: 1.15rem; font-weight: 700; margin: 0.2rem 0; }
+.price { font-size: 1.15rem; font-weight: 700; margin: 0.2rem 0; overflow-wrap: anywhere; }
 
 /* ---- Bug 10 (Ofertas, 2026-09): sello "🔥 Oferta" sobre la foto (se ve en
    CUALQUIER producto en oferta, tenga o no Precio de oferta puesto), y
@@ -161,13 +168,15 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
 .price-oferta { display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; }
 .price-original { font-size: 0.85rem; font-weight: 400; color: var(--muted); text-decoration: line-through; }
 .price-descuento { color: var(--danger); }
-.stock { font-size: 0.85rem; color: var(--brand); margin: 0; }
+.stock { font-size: 0.85rem; color: var(--brand); margin: 0; overflow-wrap: anywhere; }
 .stock.out { color: var(--danger); font-weight: 600; }
 /* min-height: respaldo para que la tarjeta reserve el mismo espacio
    aunque el texto de la descripción sea muy corto o esté vacío (ver el
-   cambio en ProductCard.jsx que ahora siempre dibuja este párrafo). */
-.description { font-size: 0.85rem; color: var(--muted); margin: 0.2rem 0 0.4rem; min-height: 1.2em; }
-.product-color { font-size: 0.85rem; color: var(--muted); margin: 0; }
+   cambio en ProductCard.jsx que ahora siempre dibuja este párrafo).
+   overflow-wrap: mismo arreglo que en .product-body h3 arriba — un texto
+   largo sin espacios ya no se sale de la tarjeta. */
+.description { font-size: 0.85rem; color: var(--muted); margin: 0.2rem 0 0.4rem; min-height: 1.2em; overflow-wrap: anywhere; }
+.product-color { font-size: 0.85rem; color: var(--muted); margin: 0; overflow-wrap: anywhere; }
 
 .product-actions { margin-top: auto; display: flex; flex-direction: column; gap: 0.5rem; }
 
