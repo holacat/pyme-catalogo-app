@@ -1403,6 +1403,7 @@ export default function Dashboard() {
           usuarios={usuarios}
           esAdministrador={esAdministrador}
           usuarioId={usuarioId}
+          nombreSesion={nombreSesion}
           onOpcionesActualizadas={() => cargarTodo(sesionToken, { silencioso: true })}
           onGuardado={() => {
             cargarTodo(sesionToken);
@@ -1521,7 +1522,7 @@ const CAMPOS_CON_OPCIONES = [
 // Sirve tanto para dar de alta un producto nuevo como para editar uno que
 // ya existe: si le pasas `productoExistente`, precarga sus datos y guarda
 // con "actualizarProducto" en vez de "crearProducto".
-function ProductoForm({ sesionToken, opciones = {}, usuarios = [], esAdministrador = false, usuarioId = '', productoExistente, onGuardado, onOpcionesActualizadas, onCancelar }) {
+function ProductoForm({ sesionToken, opciones = {}, usuarios = [], esAdministrador = false, usuarioId = '', nombreSesion = '', productoExistente, onGuardado, onOpcionesActualizadas, onCancelar }) {
   const esEdicion = !!productoExistente;
   const [form, setForm] = useState(() => (esEdicion ? formDesdeProducto(productoExistente) : { ...FORM_INICIAL, duenoId: usuarioId || '' }));
   const [fotos, setFotos] = useState(() => (esEdicion ? fotosDesdeProducto(productoExistente) : []));
@@ -1619,11 +1620,18 @@ function ProductoForm({ sesionToken, opciones = {}, usuarios = [], esAdministrad
     // a alguien en "Asignar a" al crear el producto, mandamos también su
     // nombre (el backend lo necesita para guardarlo en "StockPersonal"). Si
     // no se eligió a nadie, el backend asigna todo al Admin Central solo.
-    const duenoSeleccionado = usuarios.find((u) => u.ID === form.duenoId);
+    // Blindaje extra (2026-09-22): no confiamos SOLO en el valor con el que
+    // se inicializó el formulario al montarse — si por cualquier motivo
+    // llegó vacío (por ejemplo si el componente se montó antes de que la
+    // sesión terminara de cargar), aquí mismo, justo antes de mandarlo, se
+    // vuelve a poner por default a quien está creando el producto.
+    const duenoIdFinal = !esEdicion && !form.duenoId ? usuarioId : form.duenoId;
+    const duenoSeleccionado = usuarios.find((u) => u.ID === duenoIdFinal);
     const datos = {
       sesionToken,
       ...form,
-      duenoNombre: duenoSeleccionado ? duenoSeleccionado.Nombre : '',
+      duenoId: duenoIdFinal,
+      duenoNombre: duenoSeleccionado ? duenoSeleccionado.Nombre : (duenoIdFinal === usuarioId ? nombreSesion : ''),
       fotoUrl: fotos.join('|'),
     };
     const promesa = esEdicion
@@ -1658,7 +1666,7 @@ function ProductoForm({ sesionToken, opciones = {}, usuarios = [], esAdministrad
               ⚙️
             </button>
           </span>
-          <input value={form.nombre} onChange={handleChange('nombre')} required list="lista-nombre" />
+          <input value={form.nombre} onChange={handleChange('nombre')} required maxLength={80} list="lista-nombre" />
           <datalist id="lista-nombre">
             {(opciones.nombre || []).map((v) => (
               <option key={v} value={v} />
@@ -1676,6 +1684,7 @@ function ProductoForm({ sesionToken, opciones = {}, usuarios = [], esAdministrad
             value={form.codigoPropio}
             onChange={handleChange('codigoPropio')}
             placeholder="Ej. PLY-001"
+            maxLength={30}
             list="lista-codigoPropio"
           />
           <datalist id="lista-codigoPropio">
@@ -1808,7 +1817,7 @@ function ProductoForm({ sesionToken, opciones = {}, usuarios = [], esAdministrad
         </label>
         <label className="form-grid-wide">
           Descripción
-          <input value={form.descripcion} onChange={handleChange('descripcion')} />
+          <input value={form.descripcion} onChange={handleChange('descripcion')} maxLength={500} />
         </label>
       </div>
 
