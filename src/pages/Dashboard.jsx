@@ -318,6 +318,12 @@ export default function Dashboard() {
   const sesionIdRef = useRef(0);
   const [rol, setRol] = useState(() => localStorage.getItem(ROL_KEY) || '');
    const [nombreSesion, setNombreSesion] = useState(() => localStorage.getItem(NOMBRE_KEY) || '');
+  // Arreglo (2026-09-23, pedido por Claudia): lo que se lleva escrito en
+  // "+ Agregar producto" ya NO se borra si cambias de pestaña sin querer —
+  // este estado vive aquí (en Dashboard, que nunca se desmonta) en vez de
+  // adentro de ProductoForm (que sí se desmonta al cambiar de pestaña).
+  const [formNuevoProducto, setFormNuevoProducto] = useState(() => ({ ...FORM_INICIAL }));
+  const [fotosNuevoProducto, setFotosNuevoProducto] = useState([]);
      const [esAdminCentral, setEsAdminCentral] = useState(() => localStorage.getItem(ADMIN_CENTRAL_KEY) === 'true');
   const [usuarioId, setUsuarioId] = useState(() => localStorage.getItem(USUARIO_ID_KEY) || '');
   const [permisos, setPermisos] = useState(() => leerPermisosGuardados());
@@ -657,11 +663,20 @@ export default function Dashboard() {
     setMensaje('');
   }
 
+  // Arreglo (2026-09-23, pedido por Claudia): antes esta función no
+  // regresaba su promesa, así que el cuadrito de "Actualizar stock" no
+  // tenía forma de saber cuándo terminaba el guardado — el botón se
+  // quedaba en "Guardar" todo el tiempo, sin avisar que estaba
+  // procesando, y si fallaba, el mensaje de error se quedaba pegado en
+  // pantalla aunque el siguiente intento sí funcionara. Ahora se limpia
+  // el mensaje viejo al empezar y SÍ se regresa la promesa, para que
+  // StockRow pueda mostrar "Guardando…" mientras espera la respuesta.
   function handleActualizarStock(productoId, nuevoStock) {
-    actualizarStock({ sesionToken, productoId, nuevoStock })
-         .then(() => { cargarTodo(sesionToken, { silencioso: true }); })
+    setMensaje('');
+    return actualizarStock({ sesionToken, productoId, nuevoStock })
+      .then(() => { cargarTodo(sesionToken, { silencioso: true }); })
       .catch((err) => {
-        setMensaje(`Error al solicitar stock: ${err.message}`);
+        setMensaje(`Error al actualizar stock: ${err.message}`);
         throw err;
       });
   }
@@ -1406,10 +1421,15 @@ export default function Dashboard() {
              <ProductoForm
           sesionToken={sesionToken}
           opciones={opciones}
+          setOpciones={setOpciones}
           usuarios={usuarios}
           esAdministrador={esAdministrador}
           usuarioId={usuarioId}
           nombreSesion={nombreSesion}
+          formExterno={formNuevoProducto}
+          setFormExterno={setFormNuevoProducto}
+          fotosExterno={fotosNuevoProducto}
+          setFotosExterno={setFotosNuevoProducto}
           onOpcionesActualizadas={() => cargarTodo(sesionToken, { silencioso: true })}
           onGuardado={() => {
             cargarTodo(sesionToken);
@@ -1429,6 +1449,7 @@ export default function Dashboard() {
             <ProductoForm
               sesionToken={sesionToken}
               opciones={opciones}
+              setOpciones={setOpciones}
               onOpcionesActualizadas={() => cargarTodo(sesionToken, { silencioso: true })}
               productoExistente={productoEditando}
               onGuardado={() => {
@@ -1528,12 +1549,37 @@ const CAMPOS_CON_OPCIONES = [
 // Sirve tanto para dar de alta un producto nuevo como para editar uno que
 // ya existe: si le pasas `productoExistente`, precarga sus datos y guarda
 // con "actualizarProducto" en vez de "crearProducto".
-function ProductoForm({ sesionToken, opciones = {}, usuarios = [], esAdministrador = false, usuarioId = '', nombreSesion = '', productoExistente, onGuardado, onOpcionesActualizadas, onCancelar }) {
+function ProductoForm({ sesionToken, opciones = {}, setOpciones, usuarios = [], esAdministrador = false, usuarioId = '', nombreSesion = '', productoExistente, onGuardado, onOpcionesActualizadas, onCancelar, formExterno, setFormExterno, fotosExterno, setFotosExterno }) {
   const esEdicion = !!productoExistente;
-  const [form, setForm] = useState(() => (esEdicion ? formDesdeProducto(productoExistente) : { ...FORM_INICIAL, duenoId: usuarioId || '' }));
-  const [fotos, setFotos] = useState(() => (esEdicion ? fotosDesdeProducto(productoExistente) : []));
+  // Arreglo (2026-09-23, pedido por Claudia): en la pestaña "+ Agregar
+  // producto" (nunca en el modal de "Editar"), el Dashboard manda su PROPIO
+  // estado (formExterno/fotosExterno) para que lo escrito NO se borre si
+  // cambias de pestaña sin querer — ProductoForm igual se sigue montando y
+  // desmontando, pero el estado ya no vive adentro de él. Si no llega ese
+  // estado externo (como en "Editar producto"), se usa el de siempre.
+  const usaEstadoExterno = !esEdicion && formExterno !== undefined && !!setFormExterno;
+  const [formInterno, setFormInterno] = useState(() => (esEdicion ? formDesdeProducto(productoExistente) : { ...FORM_INICIAL, duenoId: usuarioId || '' }));
+  const [fotosInterno, setFotosInterno] = useState(() => (esEdicion ? fotosDesdeProducto(productoExistente) : []));
+  const form = usaEstadoExterno ? formExterno : formInterno;
+  const setForm = usaEstadoExterno ? setFormExterno : setFormInterno;
+  const fotos = usaEstadoExterno ? fotosExterno : fotosInterno;
+  const setFotos = usaEstadoExterno ? setFotosExterno : setFotosInterno;
   const [enviando, setEnviando] = useState(false);
   const [mensaje, setMensaje] = useState('');
+
+  // Actualiza YA (sin esperar el refresco completo de datos) la lista de
+  // opciones predeterminadas visible en este formulario, para que agregar o
+  // quitar una opción se vea al instante y no tarde varios segundos —
+  // "onOpcionesActualizadas" se sigue llamando después, como respaldo, pero
+  // ya no es lo único que actualiza lo que se ve en pantalla.
+  function actualizarOpcionesLocal(campo, quitar, agregar) {
+    setOpciones?.((prev) => {
+      const lista = prev[campo] || [];
+      let nueva = quitar ? lista.filter((v) => v !== quitar) : lista;
+      if (agregar && !nueva.includes(agregar)) nueva = [...nueva, agregar];
+      return { ...prev, [campo]: nueva };
+    });
+  }
 
   // ---- Ventana de "Administrar opciones predeterminadas" ----
   // Es UNA sola ventana compartida por los 6 campos: el botón ⚙️ de cada
@@ -1579,6 +1625,11 @@ function ProductoForm({ sesionToken, opciones = {}, usuarios = [], esAdministrad
 
     promesa
       .then(() => {
+        actualizarOpcionesLocal(
+          campoGestion,
+          editandoValorOriginal && editandoValorOriginal !== valor ? editandoValorOriginal : null,
+          valor
+        );
         setValorOpcion('');
         setEditandoValorOriginal(null);
         onOpcionesActualizadas?.();
@@ -1591,7 +1642,10 @@ function ProductoForm({ sesionToken, opciones = {}, usuarios = [], esAdministrad
     const confirmar = window.confirm(`¿Quitar "${valor}" de las opciones predeterminadas?`);
     if (!confirmar) return;
     eliminarOpcion({ sesionToken, campo: campoGestion, valor })
-      .then(() => onOpcionesActualizadas?.())
+      .then(() => {
+        actualizarOpcionesLocal(campoGestion, valor, null);
+        onOpcionesActualizadas?.();
+      })
       .catch((err) => setMensaje(`Error al quitar la opción: ${err.message}`));
   }
 
@@ -1842,6 +1896,27 @@ function ProductoForm({ sesionToken, opciones = {}, usuarios = [], esAdministrad
         </button>
         {esEdicion && (
           <button type="button" className="btn btn-secondary" onClick={onCancelar}>
+            Cancelar
+          </button>
+        )}
+        {/* Arreglo (2026-09-23, pedido por Claudia): botón para borrar TODO
+            lo escrito en "+ Agregar producto" a propósito — con aviso antes,
+            para no perder nada por un clic accidental. Va del lado opuesto
+            al de "Agregar producto" (ver .btn-cancelar-nuevo en el CSS). */}
+        {!esEdicion && (
+          <button
+            type="button"
+            className="btn btn-secondary btn-cancelar-nuevo"
+            onClick={() => {
+              const confirmar = window.confirm(
+                '¿Seguro que quieres cancelar? Se borrará todo lo que llevas escrito en este formulario.'
+              );
+              if (!confirmar) return;
+              setForm({ ...FORM_INICIAL, duenoId: usuarioId || '' });
+              setFotos([]);
+              setMensaje('');
+            }}
+          >
             Cancelar
           </button>
         )}
@@ -2492,6 +2567,10 @@ function StockRow({
   onAsignarDueno,
 }) {
   const [valor, setValor] = useState(producto.Stock);
+  // Arreglo (2026-09-23): antes el botón "Guardar" no avisaba nada mientras
+  // se procesaba la petición (podía tardar unos segundos) — con esto se ve
+  // "Guardando…" y se bloquea para no mandarla dos veces sin querer.
+  const [guardandoStock, setGuardandoStock] = useState(false);
   const stockConocido = useRef(producto.Stock);
   const sinGuardar = Number(valor) !== Number(producto.Stock);
   const llave = `stock:${producto.ID}`;
@@ -2750,15 +2829,20 @@ function StockRow({
             min="0"
             className={sinGuardar ? 'campo-modificado' : ''}
             value={valor}
-            disabled={!puedoEditar}
+            disabled={!puedoEditar || guardandoStock}
             onChange={(e) => setValor(limitarDigitos(e.target.value, MAX_DIGITOS_STOCK))}
           />
           <button
             className="btn btn-small"
-            onClick={() => onActualizar(producto.ID, valor)}
-            disabled={!sinGuardar || !puedoEditar}
+            onClick={() => {
+              setGuardandoStock(true);
+              onActualizar(producto.ID, valor)
+                .catch(() => {})
+                .finally(() => setGuardandoStock(false));
+            }}
+            disabled={!sinGuardar || !puedoEditar || guardandoStock}
           >
-            Guardar
+            {guardandoStock ? 'Guardando…' : 'Guardar'}
           </button>
         </div>
         {!puedoEditar && <p className="muted campo-nota">🔒 No es tuyo — usa "Solicitar" junto al dueño.</p>}
