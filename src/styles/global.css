@@ -804,6 +804,23 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
    clic sin querer en el que no era. */
 .btn-cancelar-nuevo { margin-left: auto; }
 
+/* Aviso de "solo puedes bajar hasta lo tuyo" (2026-09-23) — junto al campo
+   de Stock, tanto en el cuadro rápido de la tabla como en el modal de
+   Editar producto. */
+.aviso-stock-propio { display: block; color: var(--danger); }
+
+/* Botón "Guardar" del cuadro de Actualizar stock, mientras está procesando
+   la petición (2026-09-23, pedido por Claudia: el gris de ".btn:disabled"
+   se notaba muy poco sobre el verde de este botón chiquito) — aquí se
+   fuerza un gris bien visible, sin depender del filtro general. */
+.btn-guardando,
+.btn-guardando:disabled {
+  background: #9ca3af !important;
+  color: #f3f4f6 !important;
+  filter: none !important;
+  opacity: 1 !important;
+}
+
 /* ---- Subida de fotos (arrastrar o buscar archivo) ---- */
 .dropzone {
   border: 2px dashed var(--border);
