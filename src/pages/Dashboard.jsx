@@ -210,8 +210,14 @@ function indicadorOrdenStock(orden, campo) {
   return orden.direccion === 1 ? '▲' : '▼';
 }
 
-const MAX_DIGITOS_STOCK = 9; // hasta 999,999,999 piezas
-const MAX_DIGITOS_PRECIO = 9; // hasta 999,999,999 (con hasta 2 decimales)
+// Bajado de 9 a un límite razonable (2026-09-23, pedido por Claudia): con 9
+// dígitos se podía escribir Stock=111111111 o Precio=$111,111,111 y con eso
+// se rompía el catálogo — 6 y 7 dígitos ya cubren de sobra un inventario y
+// precios reales de una PyME, y el backend (Code.gs, PRECIO_MAXIMO_ /
+// STOCK_MAXIMO_) aplica el mismo tope como respaldo aunque no se use este
+// formulario.
+const MAX_DIGITOS_STOCK = 6; // hasta 999,999 piezas
+const MAX_DIGITOS_PRECIO = 7; // hasta $9,999,999 (con hasta 2 decimales)
 const MAX_DIGITOS_CANTIDAD = 4; // hasta 9,999 piezas por pedido
 
 // Cada cuánto se refresca solo el Dashboard en segundo plano (milisegundos).
