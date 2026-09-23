@@ -43,16 +43,33 @@ export default function ProductCard({ producto, onSolicitar, onAgregarCarrito })
   const [indice, setIndice] = useState(0);
   const [zoomAbierto, setZoomAbierto] = useState(false);
   const [cantidad, setCantidad] = useState(1);
-  // Funcionalidad (2026-09-22, pedido por Claudia): una descripción muy
-  // larga ya no rompe la tarjeta — se corta a 120 caracteres y aparece un
-  // "Ver más" para desplegarla completa si el cliente quiere leerla.
-  const [descripcionAbierta, setDescripcionAbierta] = useState(false);
+  // Funcionalidad (2026-09-22, pedido por Claudia; ampliada 2026-09-23):
+  // un Nombre, Color o Descripción muy largos ya no rompen la tarjeta — cada
+  // uno se corta a un tamaño razonable y UN solo botón "Ver más" (no uno por
+  // campo) despliega los tres completos si el cliente quiere leerlos. Antes
+  // solo la Descripción se cortaba; con el límite de caracteres nuevo en el
+  // Dashboard (Nombre 80, Color sin límite propio salvo el de Descripción)
+  // un Nombre o Color largo seguía pudiendo desbordar la tarjeta.
+  const [detalleAbierto, setDetalleAbierto] = useState(false);
+
+  const nombreCompleto = producto.Nombre || '';
+  const nombreEsLargo = nombreCompleto.length > 40;
+  const nombreMostrado =
+    !nombreEsLargo || detalleAbierto ? nombreCompleto : nombreCompleto.slice(0, 40) + '…';
+
   const descripcionCompleta = producto.Descripcion || '';
   const descripcionEsLarga = descripcionCompleta.length > 120;
   const descripcionMostrada =
-    !descripcionEsLarga || descripcionAbierta
+    !descripcionEsLarga || detalleAbierto
       ? descripcionCompleta
       : descripcionCompleta.slice(0, 120) + '…';
+
+  const colorCompleto = producto.Color || '';
+  const colorEsLargo = colorCompleto.length > 30;
+  const colorMostrado =
+    !colorEsLargo || detalleAbierto ? colorCompleto : colorCompleto.slice(0, 30) + '…';
+
+  const hayAlgoQueExpandir = nombreEsLargo || descripcionEsLarga || colorEsLargo;
 
   function fotoAnterior(e) {
     e.stopPropagation();
@@ -112,7 +129,7 @@ export default function ProductCard({ producto, onSolicitar, onAgregarCarrito })
         )}
       </div>
           <div className="product-body">
-        <h3 className="product-nombre">{producto.Nombre}</h3>
+        <h3 className="product-nombre">{nombreMostrado}</h3>
         {producto.Categoria && <span className="badge">{producto.Categoria}</span>}
         {precioOferta ? (
           <p className="price price-oferta">
@@ -133,20 +150,19 @@ export default function ProductCard({ producto, onSolicitar, onAgregarCarrito })
             (vacío si no hay texto) para que la altura sea la misma en todas
             las tarjetas de la fila — ver el `min-height` de ".description"
             en global.css. */}
-             <p className="description">
-          {descripcionMostrada}
-          {descripcionEsLarga && (
-            <button
-              type="button"
-              className="link-button descripcion-ver-mas"
-              onClick={() => setDescripcionAbierta((v) => !v)}
-            >
-              {descripcionAbierta ? ' Ver menos' : ' Ver más'}
-            </button>
-          )}
-        </p>
+             <p className="description">{descripcionMostrada}</p>
 
-        {producto.Color && <p className="product-color">Color: {producto.Color}</p>}
+        {producto.Color && <p className="product-color">Color: {colorMostrado}</p>}
+
+        {hayAlgoQueExpandir && (
+          <button
+            type="button"
+            className="link-button descripcion-ver-mas"
+            onClick={() => setDetalleAbierto((v) => !v)}
+          >
+            {detalleAbierto ? 'Ver menos' : 'Ver más'}
+          </button>
+        )}
 
         {!sinStock && (
           <div className="cantidad-selector">
