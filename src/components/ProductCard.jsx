@@ -74,7 +74,16 @@ export default function ProductCard({ producto, onSolicitar, onAgregarCarrito })
   const colorMostrado =
     !colorEsLargo || detalleAbierto ? colorCompleto : colorCompleto.slice(0, 30) + '…';
 
-  const hayAlgoQueExpandir = nombreEsLargo || descripcionEsLarga || colorEsLargo;
+  // Bug (2026-09-24, reportado por Claudia): la Talla se guarda bien en la
+  // hoja pero nunca se dibujaba en la tarjeta del catálogo — faltaba por
+  // completo, no era un problema de recorte. Se agrega aquí con el mismo
+  // manejo de texto largo que ya tiene Color.
+  const tallaCompleta = producto.Talla || '';
+  const tallaEsLarga = tallaCompleta.length > 30;
+  const tallaMostrada =
+    !tallaEsLarga || detalleAbierto ? tallaCompleta : tallaCompleta.slice(0, 30) + '…';
+
+  const hayAlgoQueExpandir = nombreEsLargo || descripcionEsLarga || colorEsLargo || tallaEsLarga;
 
   function fotoAnterior(e) {
     e.stopPropagation();
@@ -157,6 +166,7 @@ export default function ProductCard({ producto, onSolicitar, onAgregarCarrito })
             en global.css. */}
              <p className="description">{descripcionMostrada}</p>
 
+        {producto.Talla && <p className="product-talla">Talla: {tallaMostrada}</p>}
         {producto.Color && <p className="product-color">Color: {colorMostrado}</p>}
 
         {hayAlgoQueExpandir && (
