@@ -250,6 +250,37 @@ const MAX_CARACTERES_DESCRIPCION = 250;
 // Cada cuánto se refresca solo el Dashboard en segundo plano (milisegundos).
 const INTERVALO_REFRESCO_MS = 6000;
 
+// Bug real (2026-09-24, reportado por Claudia: "actualicé un estatus de un
+// pedido y el círculo de carga se quedó cargando más de 1 minuto, hasta en
+// otras pestañas donde no había hecho cambios, aunque el cambio ya se había
+// aplicado"). Google Apps Script a veces tarda mucho, y muy rara vez una
+// petición se puede quedar "colgada" sin nunca contestar (ni éxito ni
+// error) — si eso pasa, una promesa que nunca se resuelve hace que el
+// círculo de carga se quede prendido PARA SIEMPRE, porque nada vuelve a
+// apagarlo (y como el círculo es el mismo para toda la app, se ve
+// "cargando" en cualquier pestaña, no solo en la que se usó).
+// `conLimiteDeTiempo` pone un tope de tiempo a cualquier llamada al
+// servidor: si no contesta en ese tiempo, la damos por fallida (con un
+// mensaje claro) para que el círculo se apague y Claudia pueda revisar o
+// reintentar, en vez de quedarse esperando sin saber qué pasó.
+const TIEMPO_MAXIMO_ESPERA_MS = 25000;
+function conLimiteDeTiempo(promesa, etiqueta) {
+  return Promise.race([
+    promesa,
+    new Promise((_, reject) =>
+      setTimeout(() => {
+        reject(
+          new Error(
+            `${etiqueta}: el servidor tardó demasiado en responder (más de ${Math.round(
+              TIEMPO_MAXIMO_ESPERA_MS / 1000
+            )}s). Es posible que el cambio sí se haya guardado del lado del servidor — revisa antes de repetirlo.`
+          )
+        );
+      }, TIEMPO_MAXIMO_ESPERA_MS)
+    ),
+  ]);
+}
+
 const ESTADOS_PEDIDO = ['Sin solicitud', 'En proceso', 'Pagado', 'Reembolsado', 'Cancelado'];
 
 // Ya no existe una sola "clave de administrador" compartida: cada persona
@@ -337,20 +368,22 @@ function leerPermisosGuardados() {
 // Normaliza valores de "sí/no" que pueden venir como booleano real
 // (true/false) o como texto ("TRUE", "SI"), igual que hace el backend.
 // Indicador minimalista de "algo está cargando" (2026-09-24, pedido por
-// Claudia: no saber si la app se congeló o solo está tardando le
-// generaba ansiedad). Es un circulito fijo en la esquina que se va
-// "cerrando" como un reloj/pacman en bucle mientras `activo` sea true —
-// no mide el tiempo real que falta (eso no se puede saber de antemano),
-// pero deja clarísimo que la app SIGUE viva y trabajando; en cuanto la
-// acción de verdad termina, `activo` pasa a false y el circulito
-// desaparece por completo — esa desaparición es la señal real de "ya
-// acabó". Ver `cargasEnCurso`/`iniciarCarga`/`terminarCarga` en el
-// componente Dashboard para quién lo prende y apaga.
-function IndicadorCarga({ activo }) {
+// Claudia; rediseñado el mismo día porque la primera versión giraba en un
+// bucle infinito y ella no podía saber si de verdad iba avanzando o cuándo
+// terminaría). Ahora `progreso` es un número real de 0 a 100 que Dashboard
+// calcula según el tiempo transcurrido — el círculo se va cerrando
+// despacio, y solo se cierra POR COMPLETO y desaparece cuando la carga de
+// verdad terminó (`activo` pasa a false). ver `cargasEnCurso`/
+// `progresoCarga` en el componente Dashboard para quién lo calcula.
+function IndicadorCarga({ activo, progreso }) {
   if (!activo) return null;
+  const porcentaje = Math.min(100, Math.max(0, progreso || 0));
   return (
     <div className="indicador-carga" role="status" aria-live="polite" title="Cargando…">
-      <span className="indicador-carga-circulo" />
+      <span
+        className="indicador-carga-circulo"
+        style={{ '--indicador-carga-angulo': `${porcentaje}%` }}
+      />
     </div>
   );
 }
@@ -516,6 +549,71 @@ export default function Dashboard() {
   function terminarCarga() {
     setCargasEnCurso((n) => Math.max(0, n - 1));
   }
+
+  // Rediseño del círculo de carga (2026-09-24, pedido por Claudia: "prefiero
+  // que se vaya cerrando lentamente conforme al tiempo y en cuanto ya acabe
+  // la espera se cierra el circulo entero y se quita, así se ve realmente
+  // cuánto va de progreso y no solo algo cíclico"). Antes el círculo se
+  // llenaba con una animación CSS en bucle infinito (`@keyframes ...
+  // infinite`) que no significaba nada — solo giraba y giraba sin parar.
+  // Ahora `progresoCarga` es un número real (0 a 100) que avanza con el
+  // tiempo transcurrido de verdad, cada vez más despacio (nunca podemos
+  // saber CUÁNTO va a tardar el servidor, así que no prometemos un tiempo
+  // exacto — pero sí transmitimos "sigue avanzando, no está congelado"), y
+  // se topa en 92% mientras seguimos esperando. Solo cuando `cargasEnCurso`
+  // de verdad vuelve a 0 (la espera real terminó) el círculo salta a 100%
+  // —se cierra por completo— y un instante después desaparece, para que esa
+  // desaparición sea la señal clara de "ya acabó de verdad".
+  const [progresoCarga, setProgresoCarga] = useState(0);
+  const [mostrarIndicadorCarga, setMostrarIndicadorCarga] = useState(false);
+  // Ojo: la dependencia es `cargasEnCurso > 0` (un booleano), NO
+  // `cargasEnCurso` directo. Como puede haber más de una cosa cargando al
+  // mismo tiempo, el contador puede subir y bajar (1 → 2 → 1) sin llegar a
+  // 0 — si este efecto se reiniciara con cada uno de esos cambios, el
+  // progreso "regresaría" a 0% de golpe cada vez que empezara una segunda
+  // acción, dando una sensación de retroceso. Así, solo se reinicia cuando
+  // de verdad se pasa de "nada cargando" a "algo cargando" o viceversa.
+  useEffect(() => {
+    if (cargasEnCurso > 0) {
+      setMostrarIndicadorCarga(true);
+      const inicio = Date.now();
+      const DURACION_TIPICA_MS = 3500;
+      const TOPE_MIENTRAS_CARGA = 92;
+      const avance = setInterval(() => {
+        const transcurrido = Date.now() - inicio;
+        setProgresoCarga(TOPE_MIENTRAS_CARGA * (1 - Math.exp(-transcurrido / DURACION_TIPICA_MS)));
+      }, 60);
+      return () => clearInterval(avance);
+    }
+    // Ya no queda nada cargando de verdad: cerramos el círculo por completo
+    // y, poquito después (para que se alcance a VER cerrarse, no que
+    // desaparezca de golpe), lo quitamos de la pantalla.
+    setProgresoCarga(100);
+    const espera = setTimeout(() => setMostrarIndicadorCarga(false), 350);
+    return () => clearTimeout(espera);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cargasEnCurso > 0]);
+
+  // Red de seguridad (2026-09-24, reportado por Claudia: una vez el círculo
+  // se quedó cargando más de 1 minuto, aunque el cambio ya se había
+  // aplicado — una petición se quedó "colgada" sin nunca contestar).
+  // `conLimiteDeTiempo` ya le pone un tope a cada llamada al servidor, pero
+  // esto es un respaldo adicional: si por cualquier motivo no previsto el
+  // círculo siguiera encendido más tiempo del razonable, lo apagamos
+  // nosotros mismos y avisamos, en vez de dejarlo dando vueltas para
+  // siempre sin que Claudia sepa qué pasó.
+  useEffect(() => {
+    if (cargasEnCurso === 0) return;
+    const vigilante = setTimeout(() => {
+      setCargasEnCurso(0);
+      setCargando(false);
+      setMensaje(
+        'Una acción tardó demasiado en responder y se canceló la espera. Es posible que sí se haya guardado del lado del servidor — revisa antes de repetirla.'
+      );
+    }, TIEMPO_MAXIMO_ESPERA_MS + 3000);
+    return () => clearTimeout(vigilante);
+  }, [cargasEnCurso]);
+
   const [mensaje, setMensaje] = useState('');
   const [productoEditando, setProductoEditando] = useState(null);
   const [filtroDesde, setFiltroDesde] = useState('');
@@ -620,7 +718,7 @@ export default function Dashboard() {
     // servidor no tiene que rechazarlas una por una. Antes esto dependía
     // solo del Rol; ahora también puede depender de una excepción individual
     // que le haya puesto el Admin Central.
-                   return Promise.all([
+                   return conLimiteDeTiempo(Promise.all([
       (puedeVer('stock') || puedeVer('pedidos') || puedeVer('orden') || puedeVer('cuenta'))
         ? listarProductosAdmin(token)
         : Promise.resolve({ productos: [] }),
@@ -637,7 +735,7 @@ export default function Dashboard() {
       puedeVer('bitacora') ? listarBitacora(token) : Promise.resolve({ bitacora: [] }),
       (puedeVer('usuarios') || puedeVer('stock')) ? listarUsuarios(token) : Promise.resolve({ usuarios: [] }),
       puedeVer('stock') ? listarTransferencias(token) : Promise.resolve({ transferencias: [] }),
-    ])
+    ]), 'Cargar datos')
           .then(([p, o, a, op, mv, b, us, tr]) => {
         // Fix "switcheo" de sesión (2026-09): si ya cambiamos de sesión, ignoramos esta respuesta vieja.
         if (miSesionId !== sesionIdRef.current) return;
@@ -669,12 +767,20 @@ export default function Dashboard() {
         if (!silencioso) setMensaje(`Error al cargar datos: ${err.message}`);
       })
            .finally(() => {
-        // Fix "switcheo" de sesión (2026-09): igual, ignoramos si ya no es la sesión activa.
-        if (miSesionId !== sesionIdRef.current) return;
+        // Bug real (2026-09-24): antes este `return` por "ya no es la
+        // sesión activa" estaba ANTES de apagar el círculo de carga — si
+        // alguna vez pasaba (o si una petición tardaba tanto que la sesión
+        // cambiaba mientras tanto), `terminarCarga()` nunca se llamaba y el
+        // círculo se quedaba encendido para siempre. Apagar el círculo NO
+        // depende de que sigamos en la misma sesión (nada se corrompe por
+        // apagarlo), así que ahora eso pasa siempre. Lo único que sí debe
+        // depender de la sesión es `verificandoSesion`.
         if (!silencioso) {
           setCargando(false);
           terminarCarga();
         }
+        // Fix "switcheo" de sesión (2026-09): ignoramos si ya no es la sesión activa.
+        if (miSesionId !== sesionIdRef.current) return;
         setVerificandoSesion(false);
       });
   }
@@ -803,10 +909,20 @@ export default function Dashboard() {
   // pantalla aunque el siguiente intento sí funcionara. Ahora se limpia
   // el mensaje viejo al empezar y SÍ se regresa la promesa, para que
   // StockRow pueda mostrar "Guardando…" mientras espera la respuesta.
+  // A partir de aquí (2026-09-24, pedido por Claudia: "recuerda que el
+  // pacman es indispensable en cada carga que haya, para reducir la
+  // incertidumbre al hacer un cambio") TODAS estas acciones envuelven su
+  // llamada al servidor con `iniciarCarga()`/`terminarCarga()` desde el
+  // primer clic (antes varias solo prendían el círculo DESPUÉS de que la
+  // acción ya había contestado, durante el refresco posterior — mientras la
+  // acción de verdad tardaba, no había ningún aviso). También se les puso
+  // `conLimiteDeTiempo` para que, si el servidor se cuelga, la espera se dé
+  // por terminada sola en vez de dejar el círculo cargando para siempre
+  // (ver el comentario junto a `conLimiteDeTiempo`, arriba).
   function handleActualizarStock(productoId, nuevoStock) {
     setMensaje('');
     iniciarCarga();
-    return actualizarStock({ sesionToken, productoId, nuevoStock })
+    return conLimiteDeTiempo(actualizarStock({ sesionToken, productoId, nuevoStock }), 'Actualizar stock')
       .then(() => { cargarTodo(sesionToken, { silencioso: true }); })
       .catch((err) => {
         setMensaje(`Error al actualizar stock: ${err.message}`);
@@ -816,16 +932,26 @@ export default function Dashboard() {
   }
 
   function handleGuardarPedido(pedidoId, { cantidad, telefono, notas, estado, montoReembolso }) {
-    return actualizarPedido({ sesionToken, pedidoId, cantidad, telefono, notas, estado, montoReembolso })
-      .then(() => cargarTodo(sesionToken))
-      .catch((err) => setMensaje(`Error al actualizar pedido: ${err.message}`));
+    iniciarCarga();
+    return conLimiteDeTiempo(
+      actualizarPedido({ sesionToken, pedidoId, cantidad, telefono, notas, estado, montoReembolso }),
+      'Actualizar pedido'
+    )
+      .then(() => cargarTodo(sesionToken, { silencioso: true }))
+      .catch((err) => setMensaje(`Error al actualizar pedido: ${err.message}`))
+      .finally(terminarCarga);
   }
 
   function handleCambiarDisponibilidad(producto) {
     const nuevoValor = !esProductoVisible(producto);
-    cambiarDisponibilidad({ sesionToken, productoId: producto.ID, disponible: nuevoValor })
-      .then(() => cargarTodo(sesionToken))
-      .catch((err) => setMensaje(`Error al cambiar visibilidad: ${err.message}`));
+    iniciarCarga();
+    conLimiteDeTiempo(
+      cambiarDisponibilidad({ sesionToken, productoId: producto.ID, disponible: nuevoValor }),
+      'Cambiar disponibilidad'
+    )
+      .then(() => cargarTodo(sesionToken, { silencioso: true }))
+      .catch((err) => setMensaje(`Error al cambiar visibilidad: ${err.message}`))
+      .finally(terminarCarga);
   }
 
    function handleEliminarProducto(producto) {
@@ -833,33 +959,64 @@ export default function Dashboard() {
       `¿Seguro que quieres eliminar "${producto.Nombre}" para siempre? Esta acción no se puede deshacer desde la app.`
     );
     if (!confirmar) return;
-    eliminarProducto({ sesionToken, productoId: producto.ID })
-      .then(() => cargarTodo(sesionToken))
-      .catch((err) => setMensaje(`Error al eliminar producto: ${err.message}`));
+    iniciarCarga();
+    conLimiteDeTiempo(eliminarProducto({ sesionToken, productoId: producto.ID }), 'Eliminar producto')
+      .then(() => cargarTodo(sesionToken, { silencioso: true }))
+      .catch((err) => setMensaje(`Error al eliminar producto: ${err.message}`))
+      .finally(terminarCarga);
   }
 
   // ---- Funcionalidad 2 (Stock personal + transferencias, 2026-09) ----
   function handleSolicitarTransferencia(producto, dueno, cantidad) {
-    return solicitarTransferencia({
-      sesionToken,
-      productoId: producto.ID,
-      duenoId: dueno.usuarioId,
-      duenoNombre: dueno.nombre,
-      cantidad,
-    })
-      .then(() => cargarTodo(sesionToken))
+    iniciarCarga();
+    return conLimiteDeTiempo(
+      solicitarTransferencia({
+        sesionToken,
+        productoId: producto.ID,
+        duenoId: dueno.usuarioId,
+        duenoNombre: dueno.nombre,
+        cantidad,
+      }),
+      'Solicitar stock'
+    )
+      .then(() => cargarTodo(sesionToken, { silencioso: true }))
       .catch((err) => {
         setMensaje(`Error al solicitar stock: ${err.message}`);
         throw err;
-      });
+      })
+      .finally(terminarCarga);
   }
 
-  function handleOfrecerTransferencia(producto, dueno, destinatarioId, destinatarioNombre, cantidad) {     return ofrecerTransferencia({       sesionToken,       productoId: producto.ID,       duenoId: dueno.usuarioId,       duenoNombre: dueno.nombre,       destinatarioId,       destinatarioNombre,       cantidad,     })       .then(() => { cargarTodo(sesionToken, { silencioso: true }); })       .catch((err) => {         setMensaje(`Error al transferir stock: ${err.message}`);         throw err;       });   }   function handleResponderTransferencia(transferenciaId, aceptar) {
+  function handleOfrecerTransferencia(producto, dueno, destinatarioId, destinatarioNombre, cantidad) {
+    iniciarCarga();
+    return conLimiteDeTiempo(
+      ofrecerTransferencia({
+        sesionToken,
+        productoId: producto.ID,
+        duenoId: dueno.usuarioId,
+        duenoNombre: dueno.nombre,
+        destinatarioId,
+        destinatarioNombre,
+        cantidad,
+      }),
+      'Transferir stock'
+    )
+      .then(() => { cargarTodo(sesionToken, { silencioso: true }); })
+      .catch((err) => {
+        setMensaje(`Error al transferir stock: ${err.message}`);
+        throw err;
+      })
+      .finally(terminarCarga);
+  }
+
+  function handleResponderTransferencia(transferenciaId, aceptar) {
     setTransferenciasEnAccion((prev) => new Set(prev).add(transferenciaId));
-    responderTransferencia({ sesionToken, transferenciaId, aceptar })
-      .then(() => cargarTodo(sesionToken))
+    iniciarCarga();
+    conLimiteDeTiempo(responderTransferencia({ sesionToken, transferenciaId, aceptar }), 'Responder solicitud')
+      .then(() => cargarTodo(sesionToken, { silencioso: true }))
       .catch((err) => setMensaje(`Error al responder la solicitud: ${err.message}`))
       .finally(() => {
+        terminarCarga();
         setTransferenciasEnAccion((prev) => {
           const siguiente = new Set(prev);
           siguiente.delete(transferenciaId);
@@ -870,10 +1027,12 @@ export default function Dashboard() {
 
   function handleMarcarTransferenciaVista(transferenciaId) {
     setTransferenciasEnAccion((prev) => new Set(prev).add(transferenciaId));
-    marcarTransferenciaVista({ sesionToken, transferenciaId })
+    iniciarCarga();
+    conLimiteDeTiempo(marcarTransferenciaVista({ sesionToken, transferenciaId }), 'Marcar transferencia vista')
       .then(() => cargarTodo(sesionToken, { silencioso: true }))
       .catch((err) => setMensaje(`Error: ${err.message}`))
       .finally(() => {
+        terminarCarga();
         setTransferenciasEnAccion((prev) => {
           const siguiente = new Set(prev);
           siguiente.delete(transferenciaId);
@@ -894,18 +1053,23 @@ export default function Dashboard() {
   // pone en EXACTAMENTE `cantidad` la porción de este producto que le
   // toca a esa persona.
   function handleAsignarStockDueno(producto, destinoUsuarioId, destinoUsuarioNombre, cantidad) {
-    return asignarStockDueno({
-      sesionToken,
-      productoId: producto.ID,
-      usuarioId: destinoUsuarioId,
-      usuarioNombre: destinoUsuarioNombre,
-      cantidad,
-    })
-      .then(() => cargarTodo(sesionToken))
+    iniciarCarga();
+    return conLimiteDeTiempo(
+      asignarStockDueno({
+        sesionToken,
+        productoId: producto.ID,
+        usuarioId: destinoUsuarioId,
+        usuarioNombre: destinoUsuarioNombre,
+        cantidad,
+      }),
+      'Asignar stock'
+    )
+      .then(() => cargarTodo(sesionToken, { silencioso: true }))
       .catch((err) => {
         setMensaje(`Error al asignar stock: ${err.message}`);
         throw err;
-      });
+      })
+      .finally(terminarCarga);
   }
 
   if (!autenticado) {
@@ -1057,14 +1221,28 @@ export default function Dashboard() {
 
   return (
     <div className="dashboard">
-      <IndicadorCarga activo={cargasEnCurso > 0} />
+      <IndicadorCarga activo={mostrarIndicadorCarga} progreso={progresoCarga} />
       <div className="dashboard-header">
         <h2>Panel de administración</h2>
         <div className="dashboard-header-acciones">
                     <span className="muted texto-usuario-conectado">
             Sesión: <strong>{nombreSesion || 'Sin nombre'}</strong> · {rol || '—'}
           </span>
-          <button className="btn btn-secondary" onClick={() => cargarTodo(sesionToken)}>🔄 Actualizar</button>
+          {/* Arreglo (2026-09-24, pedido por Claudia: "el botón de actualizar
+              no me da certeza de saber si cuando lo cliqueo si acciona o no,
+              no parece que haga algo"). Antes el único aviso de que el clic
+              sí hizo algo era el círculo chiquito de la esquina, fácil de no
+              notar. Ahora el botón mismo cambia de texto y se deshabilita
+              mientras carga, para que quede clarísimo que SÍ reaccionó — y
+              de paso evita que un doble clic dispare dos cargas iguales. */}
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => cargarTodo(sesionToken)}
+            disabled={cargando}
+          >
+            {cargando ? 'Actualizando…' : '🔄 Actualizar'}
+          </button>
           <button className="btn btn-secondary" onClick={handleLogout}>Cerrar sesión</button>
         </div>
       </div>
@@ -1566,8 +1744,10 @@ export default function Dashboard() {
           fotosExterno={fotosNuevoProducto}
           setFotosExterno={setFotosNuevoProducto}
           onOpcionesActualizadas={() => cargarTodo(sesionToken, { silencioso: true })}
+          iniciarCarga={iniciarCarga}
+          terminarCarga={terminarCarga}
           onGuardado={() => {
-            cargarTodo(sesionToken);
+            cargarTodo(sesionToken, { silencioso: true });
             setTab('stock');
           }}
         />
@@ -1588,9 +1768,11 @@ export default function Dashboard() {
               usuarioId={usuarioId}
               onOpcionesActualizadas={() => cargarTodo(sesionToken, { silencioso: true })}
               productoExistente={productoEditando}
+              iniciarCarga={iniciarCarga}
+              terminarCarga={terminarCarga}
               onGuardado={() => {
                 setProductoEditando(null);
-                cargarTodo(sesionToken);
+                cargarTodo(sesionToken, { silencioso: true });
               }}
               onCancelar={() => setProductoEditando(null)}
             />
@@ -1685,7 +1867,7 @@ const CAMPOS_CON_OPCIONES = [
 // Sirve tanto para dar de alta un producto nuevo como para editar uno que
 // ya existe: si le pasas `productoExistente`, precarga sus datos y guarda
 // con "actualizarProducto" en vez de "crearProducto".
-function ProductoForm({ sesionToken, opciones = {}, setOpciones, usuarios = [], esAdministrador = false, usuarioId = '', nombreSesion = '', productoExistente, onGuardado, onOpcionesActualizadas, onCancelar, formExterno, setFormExterno, fotosExterno, setFotosExterno }) {
+function ProductoForm({ sesionToken, opciones = {}, setOpciones, usuarios = [], esAdministrador = false, usuarioId = '', nombreSesion = '', productoExistente, onGuardado, onOpcionesActualizadas, onCancelar, formExterno, setFormExterno, fotosExterno, setFotosExterno, iniciarCarga, terminarCarga }) {
   const esEdicion = !!productoExistente;
   // Arreglo (2026-09-23, pedido por Claudia): en la pestaña "+ Agregar
   // producto" (nunca en el modal de "Editar"), el Dashboard manda su PROPIO
@@ -1850,6 +2032,12 @@ function ProductoForm({ sesionToken, opciones = {}, setOpciones, usuarios = [], 
     }
     setEnviando(true);
     setMensaje('');
+    // Para que el círculo de carga de la esquina también aparezca aquí
+    // (2026-09-24, pedido por Claudia: "el pacman es indispensable en cada
+    // carga que haya") — el botón "Guardar" ya se deshabilita con
+    // `enviando`, pero el círculo global da la misma certeza en cualquier
+    // parte de la pantalla en la que esté mirando.
+    iniciarCarga?.();
 
     // Funcionalidad 2 (Stock personal, 2026-09): si un Administrador eligió
     // a alguien en "Asignar a" al crear el producto, mandamos también su
@@ -1869,9 +2057,12 @@ function ProductoForm({ sesionToken, opciones = {}, setOpciones, usuarios = [], 
       duenoNombre: duenoSeleccionado ? duenoSeleccionado.Nombre : (duenoIdFinal === usuarioId ? nombreSesion : ''),
       fotoUrl: fotos.join('|'),
     };
-    const promesa = esEdicion
-      ? actualizarProducto({ ...datos, productoId: productoExistente.ID })
-      : crearProducto(datos);
+    const promesa = conLimiteDeTiempo(
+      esEdicion
+        ? actualizarProducto({ ...datos, productoId: productoExistente.ID })
+        : crearProducto(datos),
+      esEdicion ? 'Guardar cambios' : 'Agregar producto'
+    );
 
     promesa
       .then(() => {
@@ -1883,7 +2074,10 @@ function ProductoForm({ sesionToken, opciones = {}, setOpciones, usuarios = [], 
         onGuardado();
       })
       .catch((err) => setMensaje(`Error: ${err.message}`))
-      .finally(() => setEnviando(false));
+      .finally(() => {
+        setEnviando(false);
+        terminarCarga?.();
+      });
   }
 
   return (
