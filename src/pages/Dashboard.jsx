@@ -1450,6 +1450,7 @@ export default function Dashboard() {
               sesionToken={sesionToken}
               opciones={opciones}
               setOpciones={setOpciones}
+              usuarioId={usuarioId}
               onOpcionesActualizadas={() => cargarTodo(sesionToken, { silencioso: true })}
               productoExistente={productoEditando}
               onGuardado={() => {
