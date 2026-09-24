@@ -78,6 +78,19 @@ function notasIniciales(pedido) {
 // de precio/stock/cantidad (por ejemplo, llenar el cuadro de puros ceros y
 // que la app se rompa). Corta el texto a una cantidad máxima de dígitos,
 // dejando escribir el punto decimal para precios.
+// Nota (2026-09-24, bug real reportado por Claudia): estos campos usaban
+// <input type="number">, que tiene una rareza conocida del navegador — si
+// en algún momento el texto que llevas escrito deja de ser un número
+// "válido" (por ejemplo al escribir letras, o al mantener una tecla
+// presionada y presionar otra al mismo tiempo), el navegador puede
+// devolver el valor como VACÍO en vez de lo que en verdad está escrito en
+// pantalla. Como este recorte se calcula sobre ese valor (potencialmente
+// vacío), el límite se "olvidaba" momentáneamente y luego dejaba escribir
+// de más. Por eso estos campos ahora son <input type="text"
+// inputMode="numeric|decimal"> (se ve y se comporta casi igual, con
+// teclado numérico en el celular) en vez de type="number" — así el valor
+// que llega aquí siempre es el texto real, nunca se vacía solo, y este
+// recorte sí puede confiar en él siempre.
 function limitarDigitos(valorTexto, maxDigitos) {
   const texto = String(valorTexto);
   const partes = texto.split('.');
@@ -220,8 +233,22 @@ const MAX_DIGITOS_STOCK = 6; // hasta 999,999 piezas
 const MAX_DIGITOS_PRECIO = 7; // hasta $9,999,999 (con hasta 2 decimales)
 const MAX_DIGITOS_CANTIDAD = 4; // hasta 9,999 piezas por pedido
 
+// Límites estándar de caracteres para los campos de texto de "Agregar/editar
+// producto" (2026-09-24, pedido por Claudia: varios de estos campos —
+// Categoría, Marca, Talla, Color — no tenían NINGÚN límite, dejando pasar
+// textos absurdamente largos que rompían el catálogo y la tabla de Stock).
+// El mismo tope se aplica también en el servidor (Code.gs, recortarTexto_)
+// como respaldo, igual que ya pasa con Stock/Precio.
+const MAX_CARACTERES_NOMBRE = 80;
+const MAX_CARACTERES_CODIGO = 30;
+const MAX_CARACTERES_CATEGORIA = 40;
+const MAX_CARACTERES_MARCA = 40;
+const MAX_CARACTERES_TALLA = 20;
+const MAX_CARACTERES_COLOR = 30;
+const MAX_CARACTERES_DESCRIPCION = 250;
+
 // Cada cuánto se refresca solo el Dashboard en segundo plano (milisegundos).
-const INTERVALO_REFRESCO_MS = 15000;
+const INTERVALO_REFRESCO_MS = 6000;
 
 const ESTADOS_PEDIDO = ['Sin solicitud', 'En proceso', 'Pagado', 'Reembolsado', 'Cancelado'];
 
@@ -309,6 +336,89 @@ function leerPermisosGuardados() {
 
 // Normaliza valores de "sí/no" que pueden venir como booleano real
 // (true/false) o como texto ("TRUE", "SI"), igual que hace el backend.
+// Indicador minimalista de "algo está cargando" (2026-09-24, pedido por
+// Claudia: no saber si la app se congeló o solo está tardando le
+// generaba ansiedad). Es un circulito fijo en la esquina que se va
+// "cerrando" como un reloj/pacman en bucle mientras `activo` sea true —
+// no mide el tiempo real que falta (eso no se puede saber de antemano),
+// pero deja clarísimo que la app SIGUE viva y trabajando; en cuanto la
+// acción de verdad termina, `activo` pasa a false y el circulito
+// desaparece por completo — esa desaparición es la señal real de "ya
+// acabó". Ver `cargasEnCurso`/`iniciarCarga`/`terminarCarga` en el
+// componente Dashboard para quién lo prende y apaga.
+function IndicadorCarga({ activo }) {
+  if (!activo) return null;
+  return (
+    <div className="indicador-carga" role="status" aria-live="polite" title="Cargando…">
+      <span className="indicador-carga-circulo" />
+    </div>
+  );
+}
+
+// Flechitas ▲▼ para subir/bajar un campo numérico (2026-09-24, pedido por
+// Claudia): al cambiar Precio/Stock de <input type="number"> a
+// type="text" (ver la nota junto a limitarDigitos, arriba) se perdieron
+// las flechitas nativas del navegador. Claudia pidió que NO desaparezcan
+// — que se queden, más grandes y fáciles de dar clic (sin exagerar), y
+// que además dejarlas presionadas suba/baje rápido en vez de solo
+// clic-por-clic como las nativas. Por eso son botones propios: un clic
+// normal sube/baja de 1 en 1, y mantenerlos presionados (mouse o dedo)
+// arranca una repetición rápida a los 400ms de tenerlos abajo.
+function BotonesPasoNumero({ onSubir, onBajar, disabled }) {
+  const intervaloRef = useRef(null);
+  const esperaRef = useRef(null);
+
+  function detener() {
+    if (esperaRef.current) clearTimeout(esperaRef.current);
+    if (intervaloRef.current) clearInterval(intervaloRef.current);
+    esperaRef.current = null;
+    intervaloRef.current = null;
+  }
+
+  function iniciar(accion) {
+    if (disabled) return;
+    accion();
+    esperaRef.current = setTimeout(() => {
+      intervaloRef.current = setInterval(accion, 80);
+    }, 400);
+  }
+
+  useEffect(() => detener, []);
+
+  return (
+    <div className="paso-numero-botones">
+      <button
+        type="button"
+        className="paso-numero-btn"
+        disabled={disabled}
+        tabIndex={-1}
+        onMouseDown={() => iniciar(onSubir)}
+        onMouseUp={detener}
+        onMouseLeave={detener}
+        onTouchStart={(e) => { e.preventDefault(); iniciar(onSubir); }}
+        onTouchEnd={detener}
+        aria-label="Subir"
+      >
+        ▲
+      </button>
+      <button
+        type="button"
+        className="paso-numero-btn"
+        disabled={disabled}
+        tabIndex={-1}
+        onMouseDown={() => iniciar(onBajar)}
+        onMouseUp={detener}
+        onMouseLeave={detener}
+        onTouchStart={(e) => { e.preventDefault(); iniciar(onBajar); }}
+        onTouchEnd={detener}
+        aria-label="Bajar"
+      >
+        ▼
+      </button>
+    </div>
+  );
+}
+
 function esActivo(valor) {
   return valor === true || String(valor).toUpperCase() === 'TRUE' || String(valor).toUpperCase() === 'SI';
 }
@@ -390,6 +500,22 @@ export default function Dashboard() {
   // agregó a mano desde "Administrar opciones predeterminadas".
   const [opciones, setOpciones] = useState({});
   const [cargando, setCargando] = useState(false);
+  // Indicador de carga minimalista tipo "reloj que se cierra" (2026-09-24,
+  // pedido por Claudia: no saber si la app se congeló o solo está
+  // tardando le generaba ansiedad — sobre todo al Guardar en Stock o al
+  // guardar un producto). Es un CONTADOR, no un booleano, porque puede
+  // haber más de una cosa cargando al mismo tiempo (por ejemplo, guardar
+  // un producto Y el refresco de fondo) — el círculo solo desaparece
+  // cuando de verdad ya no queda NADA pendiente. `iniciarCarga`/
+  // `terminarCarga` se pasan hacia abajo a los componentes que lo
+  // necesiten (ver `onCargando`/`onCargaLista` en ProductoForm).
+  const [cargasEnCurso, setCargasEnCurso] = useState(0);
+  function iniciarCarga() {
+    setCargasEnCurso((n) => n + 1);
+  }
+  function terminarCarga() {
+    setCargasEnCurso((n) => Math.max(0, n - 1));
+  }
   const [mensaje, setMensaje] = useState('');
   const [productoEditando, setProductoEditando] = useState(null);
   const [filtroDesde, setFiltroDesde] = useState('');
@@ -483,7 +609,10 @@ export default function Dashboard() {
     const silencioso = !!opciones.silencioso;
     // Fix "switcheo" de sesión (2026-09): "número de turno" de quien pidió estos datos.
     const miSesionId = sesionIdRef.current;
-    if (!silencioso) setCargando(true);
+    if (!silencioso) {
+      setCargando(true);
+      iniciarCarga();
+    }
   
       // Funcionalidad 1, Paso 2 (Permisos de pestañas, 2026-09): "Estado de
     // cuenta", "Bitácora" y "Usuarios" solo se piden si `permisos` dice que
@@ -542,7 +671,10 @@ export default function Dashboard() {
            .finally(() => {
         // Fix "switcheo" de sesión (2026-09): igual, ignoramos si ya no es la sesión activa.
         if (miSesionId !== sesionIdRef.current) return;
-        if (!silencioso) setCargando(false);
+        if (!silencioso) {
+          setCargando(false);
+          terminarCarga();
+        }
         setVerificandoSesion(false);
       });
   }
@@ -673,12 +805,14 @@ export default function Dashboard() {
   // StockRow pueda mostrar "Guardando…" mientras espera la respuesta.
   function handleActualizarStock(productoId, nuevoStock) {
     setMensaje('');
+    iniciarCarga();
     return actualizarStock({ sesionToken, productoId, nuevoStock })
       .then(() => { cargarTodo(sesionToken, { silencioso: true }); })
       .catch((err) => {
         setMensaje(`Error al actualizar stock: ${err.message}`);
         throw err;
-      });
+      })
+      .finally(terminarCarga);
   }
 
   function handleGuardarPedido(pedidoId, { cantidad, telefono, notas, estado, montoReembolso }) {
@@ -923,6 +1057,7 @@ export default function Dashboard() {
 
   return (
     <div className="dashboard">
+      <IndicadorCarga activo={cargasEnCurso > 0} />
       <div className="dashboard-header">
         <h2>Panel de administración</h2>
         <div className="dashboard-header-acciones">
@@ -1665,10 +1800,40 @@ function ProductoForm({ sesionToken, opciones = {}, setOpciones, usuarios = [], 
 
   // Para campos numéricos (precio, stock, etc.): igual que handleChange,
   // pero corta el texto a una cantidad máxima de dígitos para que no se
-  // puedan escribir números absurdamente grandes. Sigue usando <input
-  // type="number"> para no perder las flechitas de subir/bajar.
+  // puedan escribir números absurdamente grandes. Estos campos usan
+  // <input type="text" inputMode="numeric|decimal"> (no type="number") a
+  // propósito — ver la nota junto a limitarDigitos() más abajo sobre por
+  // qué se cambió.
   function handleChangeNumero(campo, maxDigitos) {
     return (e) => setForm((f) => ({ ...f, [campo]: limitarDigitos(e.target.value, maxDigitos) }));
+  }
+
+  // Para las flechitas ▲▼ de subir/bajar (ver BotonesPasoNumero, arriba en
+  // el archivo). Usa la forma funcional de setForm para que, aunque el
+  // botón se quede presionado y este mismo cierre se llame muchas veces
+  // seguidas por el temporizador, cada paso siempre sume/reste sobre el
+  // valor MÁS RECIENTE, nunca sobre uno viejo.
+  function handlePasoNumero(campo, delta, maxDigitos) {
+    setForm((f) => {
+      const actual = Number(f[campo]) || 0;
+      const nuevo = Math.max(0, actual + delta);
+      return { ...f, [campo]: limitarDigitos(String(nuevo), maxDigitos) };
+    });
+  }
+
+  // Para campos de texto con límite de caracteres (Nombre, Categoría, Marca,
+  // Talla, Color, Código, Descripción, 2026-09-24). A diferencia de dejar
+  // solo el atributo nativo `maxLength` del <input>, este recorte se hace
+  // en JS sobre el valor real que ya trae el navegador en cada tecleo — así
+  // el límite se respeta siempre, incluso en el caso raro que reportó
+  // Claudia de mantener una tecla presionada y presionar otra(s) al mismo
+  // tiempo (el navegador a veces entrega de golpe más caracteres de los que
+  // "debería" en un solo evento; recortar por JS en cada evento, sobre el
+  // valor completo que sea, es lo único que garantiza el tope pase lo que
+  // pase). El `maxLength` del <input> se deja puesto también, como respaldo
+  // extra, pero quien de verdad manda es este recorte.
+  function handleChangeTexto(campo, maxCaracteres) {
+    return (e) => setForm((f) => ({ ...f, [campo]: String(e.target.value).slice(0, maxCaracteres) }));
   }
 
   // Para casillas (checkboxes) como "En oferta": a diferencia de los demás
@@ -1736,7 +1901,7 @@ function ProductoForm({ sesionToken, opciones = {}, setOpciones, usuarios = [], 
               ⚙️
             </button>
           </span>
-          <input value={form.nombre} onChange={handleChange('nombre')} required maxLength={80} list="lista-nombre" />
+          <input value={form.nombre} onChange={handleChangeTexto('nombre', MAX_CARACTERES_NOMBRE)} required maxLength={MAX_CARACTERES_NOMBRE} list="lista-nombre" />
           <datalist id="lista-nombre">
             {(opciones.nombre || []).map((v) => (
               <option key={v} value={v} />
@@ -1752,9 +1917,9 @@ function ProductoForm({ sesionToken, opciones = {}, setOpciones, usuarios = [], 
           </span>
           <input
             value={form.codigoPropio}
-            onChange={handleChange('codigoPropio')}
+            onChange={handleChangeTexto('codigoPropio', MAX_CARACTERES_CODIGO)}
             placeholder="Ej. PLY-001"
-            maxLength={30}
+            maxLength={MAX_CARACTERES_CODIGO}
             list="lista-codigoPropio"
           />
           <datalist id="lista-codigoPropio">
@@ -1770,7 +1935,7 @@ function ProductoForm({ sesionToken, opciones = {}, setOpciones, usuarios = [], 
               ⚙️
             </button>
           </span>
-          <input value={form.categoria} onChange={handleChange('categoria')} list="lista-categoria" />
+          <input value={form.categoria} onChange={handleChangeTexto('categoria', MAX_CARACTERES_CATEGORIA)} maxLength={MAX_CARACTERES_CATEGORIA} list="lista-categoria" />
           <datalist id="lista-categoria">
             {(opciones.categoria || []).map((v) => (
               <option key={v} value={v} />
@@ -1784,7 +1949,7 @@ function ProductoForm({ sesionToken, opciones = {}, setOpciones, usuarios = [], 
               ⚙️
             </button>
           </span>
-          <input value={form.marca} onChange={handleChange('marca')} list="lista-marca" />
+          <input value={form.marca} onChange={handleChangeTexto('marca', MAX_CARACTERES_MARCA)} maxLength={MAX_CARACTERES_MARCA} list="lista-marca" />
           <datalist id="lista-marca">
             {(opciones.marca || []).map((v) => (
               <option key={v} value={v} />
@@ -1798,7 +1963,7 @@ function ProductoForm({ sesionToken, opciones = {}, setOpciones, usuarios = [], 
               ⚙️
             </button>
           </span>
-          <input value={form.talla} onChange={handleChange('talla')} list="lista-talla" />
+          <input value={form.talla} onChange={handleChangeTexto('talla', MAX_CARACTERES_TALLA)} maxLength={MAX_CARACTERES_TALLA} list="lista-talla" />
           <datalist id="lista-talla">
             {(opciones.talla || []).map((v) => (
               <option key={v} value={v} />
@@ -1812,7 +1977,7 @@ function ProductoForm({ sesionToken, opciones = {}, setOpciones, usuarios = [], 
               ⚙️
             </button>
           </span>
-          <input value={form.color} onChange={handleChange('color')} list="lista-color" />
+          <input value={form.color} onChange={handleChangeTexto('color', MAX_CARACTERES_COLOR)} maxLength={MAX_CARACTERES_COLOR} list="lista-color" />
           <datalist id="lista-color">
             {(opciones.color || []).map((v) => (
               <option key={v} value={v} />
@@ -1832,32 +1997,50 @@ function ProductoForm({ sesionToken, opciones = {}, setOpciones, usuarios = [], 
         )}
         <label>
           Precio de venta*
-          <input
-            type="number"
-            min="0"
-            value={form.precio}
-            onChange={handleChangeNumero('precio', MAX_DIGITOS_PRECIO)}
-            required
-          />
+          <div className="campo-numero-wrapper">
+            <input
+              type="text"
+              inputMode="decimal"
+              value={form.precio}
+              onChange={handleChangeNumero('precio', MAX_DIGITOS_PRECIO)}
+              required
+            />
+            <BotonesPasoNumero
+              onSubir={() => handlePasoNumero('precio', 1, MAX_DIGITOS_PRECIO)}
+              onBajar={() => handlePasoNumero('precio', -1, MAX_DIGITOS_PRECIO)}
+            />
+          </div>
         </label>
         <label>
           Precio de compra
-          <input
-            type="number"
-            min="0"
-            value={form.precioCompra}
-                       onChange={handleChangeNumero('precioCompra', MAX_DIGITOS_PRECIO)}
-          />
+          <div className="campo-numero-wrapper">
+            <input
+              type="text"
+              inputMode="decimal"
+              value={form.precioCompra}
+              onChange={handleChangeNumero('precioCompra', MAX_DIGITOS_PRECIO)}
+            />
+            <BotonesPasoNumero
+              onSubir={() => handlePasoNumero('precioCompra', 1, MAX_DIGITOS_PRECIO)}
+              onBajar={() => handlePasoNumero('precioCompra', -1, MAX_DIGITOS_PRECIO)}
+            />
+          </div>
         </label>
         <label>
           Precio de oferta
-          <input
-            type="number"
-            min="0"
-            value={form.precioOferta}
-            onChange={handleChangeNumero('precioOferta', MAX_DIGITOS_PRECIO)}
-            placeholder="Déjalo vacío si no aplica"
-          />
+          <div className="campo-numero-wrapper">
+            <input
+              type="text"
+              inputMode="decimal"
+              value={form.precioOferta}
+              onChange={handleChangeNumero('precioOferta', MAX_DIGITOS_PRECIO)}
+              placeholder="Déjalo vacío si no aplica"
+            />
+            <BotonesPasoNumero
+              onSubir={() => handlePasoNumero('precioOferta', 1, MAX_DIGITOS_PRECIO)}
+              onBajar={() => handlePasoNumero('precioOferta', -1, MAX_DIGITOS_PRECIO)}
+            />
+          </div>
         </label>
         <label className="form-checkbox-fila">
           <input
@@ -1869,13 +2052,19 @@ function ProductoForm({ sesionToken, opciones = {}, setOpciones, usuarios = [], 
         </label>
         <label>
           Stock {esEdicion ? '' : 'inicial'}
-          <input
-            type="number"
-            min="0"
-            className={excedeMiPropioEdicion ? 'campo-modificado' : ''}
-            value={form.stock}
-            onChange={handleChangeNumero('stock', MAX_DIGITOS_STOCK)}
-          />
+          <div className="campo-numero-wrapper">
+            <input
+              type="text"
+              inputMode="numeric"
+              className={excedeMiPropioEdicion ? 'campo-modificado' : ''}
+              value={form.stock}
+              onChange={handleChangeNumero('stock', MAX_DIGITOS_STOCK)}
+            />
+            <BotonesPasoNumero
+              onSubir={() => handlePasoNumero('stock', 1, MAX_DIGITOS_STOCK)}
+              onBajar={() => handlePasoNumero('stock', -1, MAX_DIGITOS_STOCK)}
+            />
+          </div>
           {excedeMiPropioEdicion && (
             <span className="muted campo-nota aviso-stock-propio">
               Solo puedes bajar hasta {minimoPermitidoEdicion} — de este producto tienes {miCantidadPropiaEdicion}{' '}
@@ -1885,16 +2074,22 @@ function ProductoForm({ sesionToken, opciones = {}, setOpciones, usuarios = [], 
         </label>
         <label>
           Stock mínimo
-          <input
-            type="number"
-            min="0"
-            value={form.stockMinimo}
-            onChange={handleChangeNumero('stockMinimo', MAX_DIGITOS_STOCK)}
-          />
+          <div className="campo-numero-wrapper">
+            <input
+              type="text"
+              inputMode="numeric"
+              value={form.stockMinimo}
+              onChange={handleChangeNumero('stockMinimo', MAX_DIGITOS_STOCK)}
+            />
+            <BotonesPasoNumero
+              onSubir={() => handlePasoNumero('stockMinimo', 1, MAX_DIGITOS_STOCK)}
+              onBajar={() => handlePasoNumero('stockMinimo', -1, MAX_DIGITOS_STOCK)}
+            />
+          </div>
         </label>
         <label className="form-grid-wide">
           Descripción
-          <input value={form.descripcion} onChange={handleChange('descripcion')} maxLength={200} />
+          <input value={form.descripcion} onChange={handleChangeTexto('descripcion', MAX_CARACTERES_DESCRIPCION)} maxLength={MAX_CARACTERES_DESCRIPCION} />
         </label>
       </div>
 
@@ -2565,6 +2760,29 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio }) {
   );
 }
 
+// Bug reportado por Claudia (2026-09-24): un Nombre/Categoría/Código muy
+// largo (sobre todo sin espacios, como los productos de prueba con puras
+// "X" seguidas) se salía de su columna en la tabla de Stock y se veía
+// encimado sobre las columnas vecinas — la tabla no debe agrandarse ni
+// encimarse nunca. Este componente recorta el texto a una sola línea con
+// "…" por default (nunca se sale de su columna), y un clic lo expande
+// para leerlo completo (envuelto en varias líneas dentro de la misma
+// celda, sin romper el layout); otro clic lo vuelve a recortar a su
+// tamaño original. Se usa en las columnas Producto, Categoría y Código.
+function CeldaTruncada({ texto }) {
+  const [expandida, setExpandida] = useState(false);
+  if (!texto) return <>{texto}</>;
+  return (
+    <span
+      className={`celda-texto-truncado ${expandida ? 'expandida' : ''}`}
+      onClick={() => setExpandida((v) => !v)}
+      title={expandida ? 'Clic para recortar' : 'Clic para ver completo'}
+    >
+      {texto}
+    </span>
+  );
+}
+
 function StockRow({
   producto,
   categoria,
@@ -2721,14 +2939,14 @@ function StockRow({
           ) : (
             <div className="stock-thumb stock-thumb-vacia">Sin foto</div>
           )}
-          <span>
-            {producto.Nombre}
+          <span className="stock-nombre-texto">
+            <CeldaTruncada texto={producto.Nombre} />
             {!visible && <span className="badge badge-oculto">Oculto</span>}
           </span>
         </div>
       </td>
-      <td>{categoria}</td>
-      <td>{producto.CodigoPropio || '—'}</td>
+      <td><CeldaTruncada texto={categoria} /></td>
+      <td>{producto.CodigoPropio ? <CeldaTruncada texto={producto.CodigoPropio} /> : '—'}</td>
       <td>${Number(producto.Precio).toLocaleString('es-MX')}</td>
          <td>
         {producto.Stock}
@@ -2774,9 +2992,8 @@ function StockRow({
                                 {solicitandoA && solicitandoA.usuarioId === d.usuarioId && (
                     <div className="stock-solicitar-caja">
                                            <input
-                        type="number"
-                        min="1"
-                        max={disponibleD}
+                        type="text"
+                        inputMode="numeric"
                         placeholder="Cantidad"
                         value={cantidadSolicitud}
                         onChange={(e) => setCantidadSolicitud(limitarDigitos(e.target.value, MAX_DIGITOS_STOCK))}
@@ -2814,9 +3031,8 @@ function StockRow({
                         ))}
                       </select>
                                            <input
-                        type="number"
-                        min="1"
-                        max={disponibleD}
+                        type="text"
+                        inputMode="numeric"
                         placeholder="Cantidad"
                         value={cantidadOferta}
                         onChange={(e) => setCantidadOferta(limitarDigitos(e.target.value, MAX_DIGITOS_STOCK))}
@@ -2851,14 +3067,25 @@ function StockRow({
       <td>{producto.StockMinimo}</td>
       <td>
         <div className="stock-editor">
-          <input
-            type="number"
-            min="0"
-            className={excedeMiPropioStock ? 'campo-modificado' : sinGuardar ? 'campo-modificado' : ''}
-            value={valor}
-            disabled={!puedoEditar || guardandoStock}
-            onChange={(e) => setValor(limitarDigitos(e.target.value, MAX_DIGITOS_STOCK))}
-          />
+          <div className="campo-numero-wrapper">
+            <input
+              type="text"
+              inputMode="numeric"
+              className={excedeMiPropioStock ? 'campo-modificado' : sinGuardar ? 'campo-modificado' : ''}
+              value={valor}
+              disabled={!puedoEditar || guardandoStock}
+              onChange={(e) => setValor(limitarDigitos(e.target.value, MAX_DIGITOS_STOCK))}
+            />
+            <BotonesPasoNumero
+              disabled={!puedoEditar || guardandoStock}
+              onSubir={() =>
+                setValor((v) => limitarDigitos(String(Math.max(0, (Number(v) || 0) + 1)), MAX_DIGITOS_STOCK))
+              }
+              onBajar={() =>
+                setValor((v) => limitarDigitos(String(Math.max(0, (Number(v) || 0) - 1)), MAX_DIGITOS_STOCK))
+              }
+            />
+          </div>
           <button
             className={`btn btn-small ${guardandoStock ? 'btn-guardando' : ''}`}
             onClick={() => {
@@ -4144,8 +4371,8 @@ function PedidoRow({ pedido, categoria, codigo, onGuardar, onDirtyChange, onAbri
       <td>{codigo}</td>
       <td>
         <input
-          type="number"
-          min="1"
+          type="text"
+          inputMode="numeric"
           className={`pedido-input-cant ${cambioCantidad ? 'campo-modificado' : ''}`}
           value={cantidad}
           onChange={(e) => setCantidad(limitarDigitos(e.target.value, MAX_DIGITOS_CANTIDAD))}
@@ -4192,9 +4419,8 @@ function PedidoRow({ pedido, categoria, codigo, onGuardar, onDirtyChange, onAbri
             <label>
               Monto a reembolsar
               <input
-                type="number"
-                min="0"
-                step="0.01"
+                type="text"
+                inputMode="decimal"
                 className="pedido-input-reembolso"
                 value={montoReembolso}
                 onChange={(e) => setMontoReembolso(limitarDigitos(e.target.value, MAX_DIGITOS_PRECIO))}
