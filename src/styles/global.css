@@ -176,7 +176,7 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
    overflow-wrap: mismo arreglo que en .product-body h3 arriba — un texto
    largo sin espacios ya no se sale de la tarjeta. */
 .description { font-size: 0.85rem; color: var(--muted); margin: 0.2rem 0 0.4rem; min-height: 1.2em; overflow-wrap: anywhere; }
-.product-color { font-size: 0.85rem; color: var(--muted); margin: 0; overflow-wrap: anywhere; }
+.product-color, .product-talla { font-size: 0.85rem; color: var(--muted); margin: 0; overflow-wrap: anywhere; }
 
 .product-actions { margin-top: auto; display: flex; flex-direction: column; gap: 0.5rem; }
 
@@ -188,7 +188,7 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
   margin: 0.2rem 0;
 }
 
-.cantidad-selector-label { font-size: 0.8rem; color: var(--muted); } .product-color { font-size: 0.8rem; color: var(--muted); margin: 0.3rem 0; }
+.cantidad-selector-label { font-size: 0.8rem; color: var(--muted); }
 
 .cantidad-selector button {
   width: 26px;
@@ -1189,13 +1189,22 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
   isolation: isolate;
 }
 
-/* Flechas del carrusel de categorías: grandes, centradas verticalmente a
-   los lados (igual que las del carrusel de fotos de un producto, pero
-   más grandes), con fondo blanco sólido y sombra para que se vean bien
-   sobre cualquier foto. */
+/* Flechas del carrusel de categorías: grandes, con fondo blanco sólido y
+   sombra para que se vean bien sobre cualquier foto.
+   Bug (2026-09-24, reportado por Claudia): estaban centradas con
+   "top: 50%" respecto a TODA la fila (.categoria-carrusel-envoltura), no
+   respecto a la foto de cada tarjeta. Como la fila estira todas las
+   tarjetas a la altura de la más alta (por ejemplo una con descripción
+   larga y botón "Ver más"), ese 50% ya no coincidía con la foto y la
+   flecha terminaba tapando el texto de abajo (Talla/Color, Cantidad,
+   etc.) en vez de quedar sobre la imagen. Ahora se fija a una altura en
+   píxeles igual a la mitad de la foto (220px de ancho de tarjeta ×
+   aspect-ratio 4/3 = 165px de alto → mitad = 82px), así la flecha
+   siempre queda centrada en la foto sin importar qué tan larga sea el
+   texto debajo. */
 .categoria-carrusel-flecha {
   position: absolute;
-  top: 50%;
+  top: 82px;
   left: auto;
   right: auto;
   transform: translateY(-50%);
