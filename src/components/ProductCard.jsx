@@ -52,10 +52,15 @@ export default function ProductCard({ producto, onSolicitar, onAgregarCarrito })
   // un Nombre o Color largo seguía pudiendo desbordar la tarjeta.
   const [detalleAbierto, setDetalleAbierto] = useState(false);
 
+  // Bajado de 40 a 26 (2026-09-24, pedido por Claudia: un nombre largo
+  // seguía "rompiéndose" en la tarjeta angosta del carrusel — se veía en
+  // 3 líneas desparejas en vez de quedar compacto con "Ver más"). 26
+  // caracteres es aproximadamente un renglón completo en una tarjeta de
+  // 220px de ancho.
   const nombreCompleto = producto.Nombre || '';
-  const nombreEsLargo = nombreCompleto.length > 40;
+  const nombreEsLargo = nombreCompleto.length > 26;
   const nombreMostrado =
-    !nombreEsLargo || detalleAbierto ? nombreCompleto : nombreCompleto.slice(0, 40) + '…';
+    !nombreEsLargo || detalleAbierto ? nombreCompleto : nombreCompleto.slice(0, 26) + '…';
 
   const descripcionCompleta = producto.Descripcion || '';
   const descripcionEsLarga = descripcionCompleta.length > 120;
