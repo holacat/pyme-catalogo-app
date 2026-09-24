@@ -320,7 +320,19 @@ export default function Catalog() {
   // Bug 10 (Ofertas, 2026-09): un producto en oferta aparece AQUÍ y TAMBIÉN
   // en su categoría normal de más abajo — no se quita de su categoría, la
   // zona de Ofertas es solo un acceso rápido a lo más llamativo.
-  const productosEnOferta = productos.filter((p) => obtenerInfoOferta(p).enOferta);
+  //
+  // Arreglo (2026-09-23, pedido por Claudia): "productos" ya viene agrupado
+  // por categoría (ver ordenarProductos_ en Code.gs), así que si se
+  // filtraba directo de ahí, el orden dentro de Ofertas terminaba siendo
+  // "por categoría" y no "por qué tan reciente es" — un producto nuevo en
+  // una categoría que cae más adelante en esa lista podía verse hasta el
+  // fondo del carrusel aunque fuera el más nuevo de todos. Aquí sí se
+  // reordena por fecha de creación, de más nuevo a más viejo, sin importar
+  // la categoría de cada uno.
+  const productosEnOferta = productos
+    .filter((p) => obtenerInfoOferta(p).enOferta)
+    .slice()
+    .sort((a, b) => new Date(b.FechaCreacion) - new Date(a.FechaCreacion));
   const grupoAbierto = vista.tipo === 'categoria' ? grupos.find((g) => g.nombre === vista.nombre) : null;
 
   // Chiquita función de ayuda para no repetir el mismo bloque de
