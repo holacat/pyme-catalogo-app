@@ -62,41 +62,29 @@ export default function ProductCard({ producto, onSolicitar, onAgregarCarrito })
   const nombreMostrado =
     !nombreEsLargo || detalleAbierto ? nombreCompleto : nombreCompleto.slice(0, 26) + '…';
 
-  // Arreglo (2026-09-25, reportado por Claudia): una Categoría larga no
-  // tenía NINGÚN recorte, así que en la tarjeta angosta del carrusel el
-  // texto se partía en varias líneas dentro del "pastillazo" verde — y una
-  // pastilla (border-radius redondeado) con texto en varias líneas se ve
-  // rota, no como una cajita que encierra el texto. Con el mismo patrón de
-  // Nombre/Color/Talla, la Categoría se recorta a un renglón y "Ver más"
-  // la muestra completa — así la pastilla vuelve a verse como una cajita
-  // chiquita en vez de una barra rota en dos líneas.
+  // Rediseño de la tarjeta compacta (2026-09-25, pedido por Claudia con
+  // capturas: "necesito que no se vean tan largos, se ve feo, solo que se
+  // vea la imagen, el nombre del producto y el precio, y lo demás que esté
+  // oculto y solo se vea si le damos Ver más... lo que debe de ocultarse es
+  // la descripción, talla, color y lo demás"). Antes, Categoría/
+  // Descripción/Talla/Color se mostraban SIEMPRE (solo se les recortaba el
+  // texto si eran muy largos). Ahora esos campos NO se dibujan en absoluto
+  // mientras la tarjeta está cerrada — aparecen completos únicamente al
+  // abrir "Ver más" — así que ya no hace falta la lógica de "cortar a N
+  // caracteres": o se esconden por completo, o se muestran completos. La
+  // única excepción es "Agotado": se deja visible siempre (aunque el resto
+  // de la línea de existencias se oculte) porque explica por qué los
+  // botones de abajo están deshabilitados; el detalle exacto de cuánto hay
+  // en existencia ("Disponible: N") si se oculta hasta abrir "Ver más".
   const categoriaCompleta = producto.Categoria || '';
-  const categoriaEsLarga = categoriaCompleta.length > 24;
-  const categoriaMostrada =
-    !categoriaEsLarga || detalleAbierto ? categoriaCompleta : categoriaCompleta.slice(0, 24) + '…';
-
   const descripcionCompleta = producto.Descripcion || '';
-  const descripcionEsLarga = descripcionCompleta.length > 120;
-  const descripcionMostrada =
-    !descripcionEsLarga || detalleAbierto
-      ? descripcionCompleta
-      : descripcionCompleta.slice(0, 120) + '…';
-
   const colorCompleto = producto.Color || '';
-  const colorEsLargo = colorCompleto.length > 30;
-  const colorMostrado =
-    !colorEsLargo || detalleAbierto ? colorCompleto : colorCompleto.slice(0, 30) + '…';
-
-  // Bug (2026-09-24, reportado por Claudia): la Talla se guarda bien en la
-  // hoja pero nunca se dibujaba en la tarjeta del catálogo — faltaba por
-  // completo, no era un problema de recorte. Se agrega aquí con el mismo
-  // manejo de texto largo que ya tiene Color.
   const tallaCompleta = producto.Talla || '';
-  const tallaEsLarga = tallaCompleta.length > 30;
-  const tallaMostrada =
-    !tallaEsLarga || detalleAbierto ? tallaCompleta : tallaCompleta.slice(0, 30) + '…';
 
-  const hayAlgoQueExpandir = nombreEsLargo || descripcionEsLarga || colorEsLargo || tallaEsLarga || categoriaEsLarga;
+  // El botón "Ver más" aparece si hay CUALQUIER información extra que
+  // mostrar (sin importar qué tan larga sea) o si el nombre se recortó.
+  const hayInfoExtra = !!(categoriaCompleta || descripcionCompleta || colorCompleto || tallaCompleta);
+  const hayAlgoQueExpandir = nombreEsLargo || hayInfoExtra;
 
   function fotoAnterior(e) {
     e.stopPropagation();
@@ -124,7 +112,7 @@ export default function ProductCard({ producto, onSolicitar, onAgregarCarrito })
   }
 
   return (
-    <article className="product-card">
+    <article className={`product-card ${detalleAbierto ? 'product-card-expandido' : ''}`}>
       <div className="product-photo">
         {enOferta && <span className="oferta-badge">🔥 Oferta</span>}
         {fotos.length > 0 ? (
@@ -157,7 +145,7 @@ export default function ProductCard({ producto, onSolicitar, onAgregarCarrito })
       </div>
           <div className="product-body">
         <h3 className="product-nombre">{nombreMostrado}</h3>
-        {producto.Categoria && <span className="badge">{categoriaMostrada}</span>}
+        {detalleAbierto && producto.Categoria && <span className="badge">{categoriaCompleta}</span>}
         {precioOferta ? (
           <p className="price price-oferta">
             <span className="price-original">${Number(producto.Precio).toLocaleString('es-MX')}</span>
@@ -166,21 +154,15 @@ export default function ProductCard({ producto, onSolicitar, onAgregarCarrito })
         ) : (
           <p className="price">${Number(producto.Precio).toLocaleString('es-MX')}</p>
         )}
-        <p className={`stock ${sinStock ? 'out' : ''}`}>
-          {sinStock ? 'Agotado' : `Disponible: ${producto.Stock}`}
-        </p>
-        {/* Bug reportado por Claudia (2026-09): antes este párrafo solo se
-            mostraba SI el producto tenía Descripción, así que en un producto
-            sin descripción todo lo de abajo (el selector de Cantidad) subía
-            un renglón y quedaba desalineado respecto a los productos vecinos
-            que sí tienen descripción. Ahora siempre se dibuja el espacio
-            (vacío si no hay texto) para que la altura sea la misma en todas
-            las tarjetas de la fila — ver el `min-height` de ".description"
-            en global.css. */}
-             <p className="description">{descripcionMostrada}</p>
+        {/* "Agotado" se deja siempre visible (explica por qué los botones de
+            abajo están deshabilitados); "Disponible: N" (la cantidad exacta)
+            se oculta hasta abrir "Ver más", igual que el resto del detalle. */}
+        {sinStock && <p className="stock out">Agotado</p>}
+        {detalleAbierto && !sinStock && <p className="stock">Disponible: {producto.Stock}</p>}
 
-        {producto.Talla && <p className="product-talla">Talla: {tallaMostrada}</p>}
-        {producto.Color && <p className="product-color">Color: {colorMostrado}</p>}
+        {detalleAbierto && descripcionCompleta && <p className="description">{descripcionCompleta}</p>}
+        {detalleAbierto && producto.Talla && <p className="product-talla">Talla: {tallaCompleta}</p>}
+        {detalleAbierto && producto.Color && <p className="product-color">Color: {colorCompleto}</p>}
 
         {hayAlgoQueExpandir && (
           <button
