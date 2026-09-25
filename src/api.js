@@ -60,6 +60,21 @@ export function login({ usuario, contrasena }) {
 }
 
 // ---- Dashboard admin (requiere sesionToken) ----
+
+// Arreglo de rendimiento (2026-09-25): antes, para llenar el panel entero,
+// se hacían 8 peticiones SEPARADAS a la vez (una por cada pestaña de datos).
+// Cada una es su propia ejecución de Apps Script desde cero — abre la hoja
+// de cálculo, valida la sesión leyendo "Usuarios" completa, y revisa
+// permisos leyendo "Permisos" completa — así que al hacerlas las 8 juntas,
+// era 8 veces ese trabajo repetido al mismo tiempo. Eso fue lo que hacía
+// que abrir el panel (o darle "Actualizar") a veces se quedara "cargando"
+// sin nunca terminar. Ahora se pide todo junto en UNA sola llamada
+// (`cargarPanelCompleto` en Code.gs hace ese trabajo una sola vez), y el
+// resultado trae las mismas piezas que antes venían de las 8 peticiones.
+export function cargarPanelCompleto(sesionToken) {
+  return get('cargarPanelCompleto', { sesionToken });
+}
+
 export function listarProductosAdmin(sesionToken) {
   return get('listarProductosAdmin', { sesionToken });
 }
