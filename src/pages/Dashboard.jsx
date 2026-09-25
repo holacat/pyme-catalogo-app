@@ -1,16 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   login,
-  listarProductosAdmin,
-  listarPedidos,
-  obtenerAlertas,
-  listarOpciones,
+  // Arreglo de rendimiento (2026-09-25): `cargarPanelCompleto` reemplaza a
+  // las 8 llamadas sueltas que antes se usaban aquí (listarProductosAdmin,
+  // listarPedidos, obtenerAlertas, listarOpciones, listarMovimientos,
+  // listarBitacora, listarUsuarios, listarTransferencias) — todas siguen
+  // existiendo en api.js/Code.gs por si algún día hacen falta sueltas, pero
+  // el Dashboard ya no las usa una por una.
+  cargarPanelCompleto,
   agregarOpcion,
   eliminarOpcion,
   actualizarStock,
   actualizarPedido,
-  listarMovimientos,
-  listarBitacora,
   crearProducto,
   actualizarProducto,
   cambiarDisponibilidad,
@@ -19,7 +20,6 @@ import {
   actualizarOrdenCategorias,
   renombrarCategoria,
   eliminarCategoria,
-  listarUsuarios,
   crearUsuario,
   actualizarUsuario,
   cambiarContrasenaUsuario,
@@ -29,7 +29,6 @@ import {
   listarPermisos,
   actualizarPermisoRol,
   actualizarPermisoUsuario,
-  listarTransferencias,
   solicitarTransferencia,
   ofrecerTransferencia,
   responderTransferencia,
@@ -741,44 +740,36 @@ export default function Dashboard() {
       iniciarCarga();
     }
   
-      // Funcionalidad 1, Paso 2 (Permisos de pestañas, 2026-09): "Estado de
-    // cuenta", "Bitácora" y "Usuarios" solo se piden si `permisos` dice que
-    // esta cuenta puede verlas — ni siquiera las pedimos si no, así el
-    // servidor no tiene que rechazarlas una por una. Antes esto dependía
-    // solo del Rol; ahora también puede depender de una excepción individual
-    // que le haya puesto el Admin Central.
-                   return conLimiteDeTiempo(Promise.all([
-      (puedeVer('stock') || puedeVer('pedidos') || puedeVer('orden') || puedeVer('cuenta'))
-        ? listarProductosAdmin(token)
-        : Promise.resolve({ productos: [] }),
-      (puedeVer('pedidos') || puedeVer('cuenta'))
-        ? listarPedidos(token)
-        : Promise.resolve({ pedidos: [] }),
-      (puedeVer('alertas') || puedeVer('stock'))
-        ? obtenerAlertas(token)
-              : Promise.resolve({ alertas: [], transferenciasPendientes: [], transferenciasResueltas: [], transferenciasEnProceso: [], transferenciasAplicadas: [] }),
-      (puedeVer('stock') || puedeVer('nuevo') || puedeVer('orden'))
-        ? listarOpciones(token)
-        : Promise.resolve({ opciones: {} }),
-      puedeVer('cuenta') ? listarMovimientos(token) : Promise.resolve({ movimientos: [] }),
-      puedeVer('bitacora') ? listarBitacora(token) : Promise.resolve({ bitacora: [] }),
-      (puedeVer('usuarios') || puedeVer('stock')) ? listarUsuarios(token) : Promise.resolve({ usuarios: [] }),
-      puedeVer('stock') ? listarTransferencias(token) : Promise.resolve({ transferencias: [] }),
-    ]), 'Cargar datos', { ms: TIEMPO_MAXIMO_CARGA_INICIAL_MS, esLectura: true })
-          .then(([p, o, a, op, mv, b, us, tr]) => {
+      // Arreglo de rendimiento (2026-09-25, reportado por Claudia: al abrir
+    // el panel — o incluso al darle "Actualizar" — se quedaba "cargando"
+    // sin nunca terminar). Antes aquí se hacían 8 peticiones SEPARADAS al
+    // mismo tiempo (una por cada pestaña de datos: productos, pedidos,
+    // alertas, opciones, movimientos, bitácora, usuarios, transferencias).
+    // Cada una es su PROPIA ejecución de Apps Script desde cero — vuelve a
+    // abrir la hoja de cálculo, vuelve a leer "Usuarios" completa para
+    // validar la sesión, y vuelve a leer "Permisos" completa para revisar
+    // qué puede ver esa cuenta — así que 8 a la vez era 8 veces ese trabajo
+    // repetido al mismo tiempo, y eso era lo que hacía que a veces nunca
+    // terminara de contestar. Ahora se pide todo junto en una sola llamada
+    // (`cargarPanelCompleto`, en Code.gs) que hace ese trabajo una sola vez
+    // y ya decide del lado del servidor qué partes puede ver esta cuenta
+    // (igual que antes, solo que en un solo viaje de ida y vuelta en vez de
+    // ocho).
+                   return conLimiteDeTiempo(cargarPanelCompleto(token), 'Cargar datos', { ms: TIEMPO_MAXIMO_CARGA_INICIAL_MS, esLectura: true })
+          .then((r) => {
         // Fix "switcheo" de sesión (2026-09): si ya cambiamos de sesión, ignoramos esta respuesta vieja.
         if (miSesionId !== sesionIdRef.current) return;
-        setProductos(p.productos);
-        setPedidos(o.pedidos);
-        setAlertas(a.alertas || []);
-        setTransferenciasPendientes(a.transferenciasPendientes || []);
-        setTransferenciasResueltas(a.transferenciasResueltas || []);
-        setTransferenciasEnProceso(a.transferenciasEnProceso || []);         setTransferenciasAplicadas(a.transferenciasAplicadas || []);
-        setOpciones(op.opciones || {});
-        setMovimientos(mv.movimientos || []);
-        setBitacora(b.bitacora || []);
-        setUsuarios(us.usuarios || []);
-        setTransferencias(tr.transferencias || []);
+        setProductos(r.productos || []);
+        setPedidos(r.pedidos || []);
+        setAlertas(r.alertas || []);
+        setTransferenciasPendientes(r.transferenciasPendientes || []);
+        setTransferenciasResueltas(r.transferenciasResueltas || []);
+        setTransferenciasEnProceso(r.transferenciasEnProceso || []);         setTransferenciasAplicadas(r.transferenciasAplicadas || []);
+        setOpciones(r.opciones || {});
+        setMovimientos(r.movimientos || []);
+        setBitacora(r.bitacora || []);
+        setUsuarios(r.usuarios || []);
+        setTransferencias(r.transferencias || []);
         // Arreglo (2026-09-25, reportado por Claudia: el aviso de "sigue
         // cargando" se quedó pegado en pantalla para siempre, ni el
         // refresco automático de cada 6s lo quitaba). Antes esta línea
