@@ -1413,34 +1413,32 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
    una foto o un texto, así que ahí se esconden (queda solo el deslizado
    con el dedo, que es lo natural en pantallas táctiles) y se le regresa a
    la fila todo el ancho que antes se reservaba para ellas. */
-/* Arreglo (2026-09-25, reportado por Claudia: "scrollear en el catálogo
-   en el teléfono es difícil y raro y no muy ergonómico y se ve muy
-   estrecho"). Con una captura de su celular se veía el problema: las
-   tarjetas medían 220px fijos (el mismo tamaño que en computadora) y el
-   deslizado usaba "scroll-snap-type: x PROXIMITY", que es un snap suave
-   y no obligatorio — es decir, el dedo podía soltar el scroll a medias
-   entre dos tarjetas, dejándolo en un punto raro, ni en una tarjeta ni en
-   otra. Eso es lo que se sentía "difícil y raro". Y con 220px fijos en
-   una pantalla angosta, la segunda tarjeta quedaba cortada de forma poco
-   generosa (se veía apenas una rebanadita), lo cual se ve "estrecho" en
-   vez de dar la sensación clara de "hay más, desliza para verlo".
-   La solución, un patrón común de carrusel en celular:
-   1) Cada tarjeta mide ~84% del ancho de pantalla (en vez de un tamaño
-      fijo pensado para computadora), así se ve grande y cómoda de leer,
-      con solo un pedacito de la siguiente asomando como pista de que se
-      puede seguir deslizando.
-   2) "scroll-snap-type: x MANDATORY" en vez de "proximity": el navegador
-      YA NO deja soltar el dedo a medias — siempre termina de acomodar en
-      una tarjeta completa. Con "scroll-snap-stop: always" en cada
-      tarjeta, un deslizado rápido tampoco se puede saltar de largo varias
-      tarjetas de un jalón: siempre para de una en una, como pasar
-      "páginas". Ambos cambios juntos son los que hacen que se sienta
-      firme y predecible en vez de "raro".
-   3) Un pequeño margen a los lados (en vez de que la primera tarjeta
-      toque el borde exacto de la pantalla) para que se vea con más
-      espacio y para que el dedo no empiece el deslizado justo en el
-      borde, donde en algunos celulares compite con el gesto de "regresar"
-      del sistema. */
+/* Arreglo grande, ronda 2 (2026-09-25). El primer intento (tarjetas más
+   anchas + snap obligatorio) NO resolvió el problema real y Claudia
+   reportó algo peor con capturas nuevas: "scrollear hacia abajo o arriba
+   es imposible a menos que toque las finas líneas grises del fondo... y
+   se ve demasiado grande, tengo que poner sitio para computadoras y no
+   tendría por qué". La causa de fondo: un carrusel horizontal METIDO
+   dentro de una página que también se desliza vertical obliga al dedo a
+   un gesto ambiguo — el navegador tiene que adivinar si el arrastre es
+   "bajar la página" o "deslizar la fila de productos". Al agrandar las
+   tarjetas casi a pantalla completa, casi CUALQUIER lugar donde pusiera
+   el dedo quedaba capturado por el carrusel (por el "touch-action: pan-x"
+   que le pusimos para el deslizado horizontal), y solo la rendijita de
+   fondo gris entre tarjetas quedaba libre para el scroll vertical normal.
+   Eso es exactamente lo que describió: "imposible a menos que toque las
+   líneas grises".
+   En vez de seguir afinando el gesto (que en cualquier ajuste sigue
+   siendo un carrusel horizontal peleando con el scroll vertical), en
+   celular quitamos el carrusel por completo: los productos de cada
+   categoría (y los de Ofertas) se acomodan en una cuadrícula normal, una
+   tarjeta por renglón — exactamente como ya se ve en "Ver catálogo
+   completo", que nunca tuvo este problema porque ahí SIEMPRE fue
+   cuadrícula, nunca carrusel. Así en celular todo el deslizado es
+   vertical, como cualquier página normal, sin ningún gesto ambiguo ni
+   necesidad de "hacer espacio pensado para computadora". En pantallas
+   anchas (computadora) el carrusel horizontal con flechas se queda
+   exactamente igual que antes. */
 @media (max-width: 700px) {
   .categoria-carrusel-envoltura {
     padding: 0;
@@ -1449,16 +1447,19 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
     display: none;
   }
   .categoria-carrusel {
-    scroll-snap-type: x mandatory;
-    gap: 0.7rem;
-    padding-left: 0.35rem;
-    padding-right: 0.35rem;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+    gap: 1.2rem;
+    overflow: visible;
+    scroll-snap-type: none;
+    touch-action: auto;
+    -webkit-overflow-scrolling: auto;
+    padding-bottom: 0;
   }
   .categoria-carrusel .product-card {
-    flex: 0 0 84%;
-    max-width: 320px;
-    scroll-snap-align: start;
-    scroll-snap-stop: always;
+    flex: initial;
+    width: 100%;
+    scroll-snap-align: none;
   }
 }
 
