@@ -62,6 +62,57 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
   gap: 1.2rem;
 }
 
+/* Arreglo (2026-09-25, pedido por Claudia: "al ver todo el catálogo en el
+   tel debería verse por filas de 3 para scrollear más rápido"). En
+   computadora ".catalog-grid" ya se acomoda solo (cabe la cantidad de
+   columnas de 230px que quepan); en celular eso da SIEMPRE 1 columna, que
+   es lo que se quería cambiar. Aquí se fuerza a 3 columnas fijas y se
+   encoge el contenido de la tarjeta (letra, botones, selector de
+   cantidad) para que quepa en una columna angosta — como Claudia ya pidió
+   ocultar Categoría/Descripción/Talla/Color por default (ver
+   ProductCard.jsx), la tarjeta cerrada ya es bastante compacta de por sí:
+   foto + nombre + precio + cantidad + botones. */
+@media (max-width: 700px) {
+  .catalog-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.5rem;
+  }
+  .catalog-grid .product-body {
+    padding: 0.5rem 0.4rem 0.6rem;
+    gap: 0.25rem;
+  }
+  .catalog-grid .product-body h3 {
+    font-size: 0.72rem;
+  }
+  .catalog-grid .price {
+    font-size: 0.78rem;
+    margin: 0.1rem 0;
+  }
+  .catalog-grid .stock {
+    font-size: 0.68rem;
+  }
+  .catalog-grid .cantidad-selector {
+    gap: 0.3rem;
+  }
+  .catalog-grid .cantidad-selector button {
+    width: 20px;
+    height: 20px;
+    min-width: 20px;
+    font-size: 0.8rem;
+  }
+  .catalog-grid .btn {
+    font-size: 0.6rem;
+    padding: 0.35rem 0.25rem;
+    line-height: 1.15;
+  }
+  .catalog-grid .product-actions {
+    gap: 0.3rem;
+  }
+  .catalog-grid .descripcion-ver-mas {
+    font-size: 0.68rem;
+  }
+}
+
 .product-card {
   background: var(--card-bg);
   border: 1px solid var(--border);
@@ -205,6 +256,11 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
   align-items: center;
   gap: 0.5rem;
   margin: 0.2rem 0;
+  /* Blindaje (2026-09-25): que este renglón nunca se achique tan poco que
+     el botón "+" (el último elemento) quede recortado por el
+     "overflow: hidden" de la tarjeta — ver el arreglo de abajo, en el
+     "@media", para la causa real (la tarjeta angosta de celular). */
+  flex-shrink: 0;
 }
 
 .cantidad-selector-label { font-size: 0.8rem; color: var(--muted); text-transform: uppercase; }
@@ -212,12 +268,31 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
 .cantidad-selector button {
   width: 26px;
   height: 26px;
+  min-width: 26px;
   border-radius: 6px;
   border: 1px solid var(--border);
   background: white;
   font-size: 1rem;
   line-height: 1;
   cursor: pointer;
+  flex-shrink: 0;
+}
+
+/* Arreglo (2026-09-25, reportado por Claudia con captura: "desapareció el +
+   ... solo se ve el menos"). La tarjeta angosta del carrusel en celular
+   (150-190px de ancho) no alcanzaba a darle espacio a todo el renglón
+   "CANTIDAD: − 1 +" — la etiqueta "CANTIDAD:" por sí sola ya ocupaba buena
+   parte del ancho disponible, así que el botón "+" (el último elemento)
+   quedaba fuera del espacio visible y el "overflow: hidden" de la tarjeta
+   lo recortaba. Por eso solo se veía al abrir "Ver más" (que ensancha la
+   tarjeta). En vez de eso, en celular quitamos la palabra "CANTIDAD:" y
+   dejamos solo los botones −/+ con el número en medio — es un patrón
+   sobradamente reconocible (como en cualquier carrito de compras) y así
+   el renglón completo siempre cabe, tarjeta abierta o cerrada. */
+@media (max-width: 700px) {
+  .cantidad-selector-label {
+    display: none;
+  }
 }
 
 .cantidad-selector button:disabled { color: #c1c5cb; cursor: not-allowed; }
@@ -252,6 +327,20 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
    un error real — como "sigue cargando, tardó más de lo normal" — en vez
    del rojo de alarma, un tono ámbar tranquilo: informa sin asustar. */
 .info-msg.aviso { color: #92650c; padding: 0.6rem 0; }
+
+/* Pantalla de "no se pudo cargar el catálogo" (2026-09-25) — se usa el
+   mismo tono ámbar tranquilo que el resto de los avisos "sigue
+   intentando solo", en vez del rojo de alarma, más el botón para
+   reintentar de inmediato. */
+.catalogo-error-carga {
+  max-width: 480px;
+  margin: 2rem auto;
+  text-align: center;
+}
+
+.catalogo-error-carga .btn {
+  margin-top: 0.5rem;
+}
 
 .login-box {
   max-width: 360px;
