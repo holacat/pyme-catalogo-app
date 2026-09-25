@@ -31,11 +31,23 @@ export function obtenerInfoOferta(producto) {
   };
 }
 
-// onSolicitar: pide ESTE producto de inmediato (abre WhatsApp ya).
-// onAgregarCarrito: lo agrega al "pedido" (carrito) para juntarlo con
-// otros productos y mandar un solo WhatsApp al final. Los dos reciben
-// la cantidad que el cliente eligió con el selector +/-.
-export default function ProductCard({ producto, onSolicitar, onAgregarCarrito }) {
+// onAgregarCarrito: agrega el producto al "pedido" (carrito) con la
+// cantidad que el cliente eligió con el selector +/-, para juntarlo con
+// otros productos y mandar un solo WhatsApp al final.
+//
+// Arreglo (2026-09-25, pedido por Claudia: "el botón de solicitar por
+// WhatsApp ya está de más en el catálogo, tanto del tel como de la
+// compu, es mejor quitarlo"). Antes había DOS formas de pedir: este botón
+// (pedía ESE producto solo, de inmediato) y "Agregar al pedido" (lo
+// sumaba al carrito para pedir varios juntos). Con las dos, el cliente
+// podía confundirse sobre cuál usar, y en la tarjeta angosta del celular
+// ocupaba espacio y aumentaba el riesgo de un toque accidental. Se quitó
+// por completo — pedir un solo producto sigue siendo posible, solo se
+// agrega ese uno al carrito y se seguirá con "Ver pedido". El prop
+// "onSolicitar" y su botón ya no existen; Catalog.jsx también se limpió
+// de la lógica que solo servía para este botón (handleSolicitar,
+// registrarYAbrirWhatsApp, el estado "solicitudActual" y su modal).
+export default function ProductCard({ producto, onAgregarCarrito }) {
   const stockDisponible = Number(producto.Stock) || 0;
   const sinStock = stockDisponible <= 0;
   const fotos = obtenerFotos(producto.FotoURL);
@@ -204,14 +216,6 @@ export default function ProductCard({ producto, onSolicitar, onAgregarCarrito })
         )}
 
         <div className="product-actions">
-          <button
-            type="button"
-            className="btn btn-whatsapp"
-            disabled={sinStock}
-            onClick={() => onSolicitar?.(producto, cantidad)}
-          >
-            📲 Solicitar por WhatsApp
-          </button>
           <button
             type="button"
             className="btn btn-carrito"
