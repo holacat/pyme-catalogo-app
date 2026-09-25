@@ -673,7 +673,14 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
   height: 28px;
   border-radius: 50%;
   background: conic-gradient(var(--brand) var(--indicador-carga-angulo), #e5e7eb 0);
-  transition: background 0.1s linear;
+  /* Arreglo (2026-09-25): antes esta transición era de 0.1s, más corta que
+     el intervalo de 60ms que actualiza el progreso — combinado con la
+     curva vieja que se estancaba cerca del final, el salto final hasta
+     100% se sentía como un brinco instantáneo. 0.22s (menos de un cuarto
+     de segundo, no alcanza a sentirse como demora) hace que tanto los
+     pasos normales como el cierre final se vean como un avance fluido en
+     vez de un salto. */
+  transition: background 0.22s ease-out;
 }
 
 @media print {
