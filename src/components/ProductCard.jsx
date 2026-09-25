@@ -62,6 +62,19 @@ export default function ProductCard({ producto, onSolicitar, onAgregarCarrito })
   const nombreMostrado =
     !nombreEsLargo || detalleAbierto ? nombreCompleto : nombreCompleto.slice(0, 26) + '…';
 
+  // Arreglo (2026-09-25, reportado por Claudia): una Categoría larga no
+  // tenía NINGÚN recorte, así que en la tarjeta angosta del carrusel el
+  // texto se partía en varias líneas dentro del "pastillazo" verde — y una
+  // pastilla (border-radius redondeado) con texto en varias líneas se ve
+  // rota, no como una cajita que encierra el texto. Con el mismo patrón de
+  // Nombre/Color/Talla, la Categoría se recorta a un renglón y "Ver más"
+  // la muestra completa — así la pastilla vuelve a verse como una cajita
+  // chiquita en vez de una barra rota en dos líneas.
+  const categoriaCompleta = producto.Categoria || '';
+  const categoriaEsLarga = categoriaCompleta.length > 24;
+  const categoriaMostrada =
+    !categoriaEsLarga || detalleAbierto ? categoriaCompleta : categoriaCompleta.slice(0, 24) + '…';
+
   const descripcionCompleta = producto.Descripcion || '';
   const descripcionEsLarga = descripcionCompleta.length > 120;
   const descripcionMostrada =
@@ -83,7 +96,7 @@ export default function ProductCard({ producto, onSolicitar, onAgregarCarrito })
   const tallaMostrada =
     !tallaEsLarga || detalleAbierto ? tallaCompleta : tallaCompleta.slice(0, 30) + '…';
 
-  const hayAlgoQueExpandir = nombreEsLargo || descripcionEsLarga || colorEsLargo || tallaEsLarga;
+  const hayAlgoQueExpandir = nombreEsLargo || descripcionEsLarga || colorEsLargo || tallaEsLarga || categoriaEsLarga;
 
   function fotoAnterior(e) {
     e.stopPropagation();
@@ -144,7 +157,7 @@ export default function ProductCard({ producto, onSolicitar, onAgregarCarrito })
       </div>
           <div className="product-body">
         <h3 className="product-nombre">{nombreMostrado}</h3>
-        {producto.Categoria && <span className="badge">{producto.Categoria}</span>}
+        {producto.Categoria && <span className="badge">{categoriaMostrada}</span>}
         {precioOferta ? (
           <p className="price price-oferta">
             <span className="price-original">${Number(producto.Precio).toLocaleString('es-MX')}</span>
