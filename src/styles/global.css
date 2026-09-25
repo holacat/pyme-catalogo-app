@@ -1283,13 +1283,37 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
 }
 
 .categoria-titulo {
-  margin: 0 0 0.9rem;
+  margin: 0;
   font-size: 1.15rem;
   color: var(--brand-dark);
 }
 
 .categoria-titulo-completo {
-  margin: 1rem 0 1.2rem;
+  margin: 0;
+}
+
+/* Arreglo (2026-09-25): envoltura para el título de categoría + su botón
+   "Ver más" (ver TituloCategoria en Catalog.jsx). "overflow-wrap: anywhere"
+   es un blindaje extra: aunque el recorte a 40 caracteres ya evita que se
+   desborde en casi cualquier caso, esto asegura que ni siquiera un texto
+   sin espacios pueda salirse del contenedor. */
+.categoria-titulo-envoltura {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin: 0 0 0.9rem;
+  min-width: 0;
+}
+
+.categoria-titulo-envoltura h2 {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.categoria-titulo-ver-mas {
+  font-size: 0.85rem;
+  white-space: nowrap;
 }
 
 /* ---- Bug 10 (Ofertas, 2026-09): la sección de Ofertas es la MISMA cajita
@@ -1347,6 +1371,19 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
 .categoria-carrusel .product-card {
   flex: 0 0 220px;
   scroll-snap-align: start;
+}
+
+/* Arreglo (2026-09-25, pedido por Claudia junto con ocultar Categoría/
+   Descripción/Talla/Color por default: "que esté un poco más ancho cuando
+   se abra para que no se vea tan largo"). Al abrir "Ver más" la tarjeta
+   vuelve a mostrar ese texto completo — para que no se vea apretado en
+   varias líneas dentro de la misma columna angosta de 220px, la tarjeta
+   se ensancha un poco solo mientras está expandida. ProductCard.jsx le
+   agrega la clase "product-card-expandido" a la tarjeta cuando
+   `detalleAbierto` es true. */
+.categoria-carrusel .product-card.product-card-expandido {
+  flex-basis: 300px;
+  max-width: 300px;
 }
 
 /* Envoltura que hace de referencia para poder colocar las flechas ‹ ›
@@ -1472,6 +1509,14 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
     max-width: 190px;
     scroll-snap-align: start;
     scroll-snap-stop: always;
+  }
+  /* Igual que en computadora: al abrir "Ver más" en celular, la tarjeta se
+     ensancha (más del doble del ancho normal) para que la Categoría,
+     Descripción, Talla y Color completos no se vean apretados en una
+     columna angosta. */
+  .categoria-carrusel .product-card.product-card-expandido {
+    flex-basis: 78%;
+    max-width: 280px;
   }
 }
 
