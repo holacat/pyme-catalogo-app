@@ -988,7 +988,18 @@ export default function Dashboard() {
     setMensaje('');
     iniciarCarga();
     return conLimiteDeTiempo(actualizarStock({ sesionToken, productoId, nuevoStock }), 'Actualizar stock')
-      .then(() => { cargarTodo(sesionToken, { silencioso: true }); })
+      // Arreglo (2026-09-25, reportado por Claudia: "el pacman se detiene 1
+      // segundo antes de que se aplique el cambio, debe ser al mismo
+      // tiempo"). Aquí faltaba un "return": con "{ cargarTodo(...); }" (con
+      // llaves y sin "return") la función de la flecha en realidad NO
+      // regresa la promesa de cargarTodo, así que la cadena ".then()" la
+      // daba por "terminada" de inmediato, sin esperar a que la
+      // actualización de datos (cargarTodo) de verdad completara. Eso hacía
+      // que ".finally(terminarCarga)" cerrara el círculo ANTES de que los
+      // datos nuevos (el stock actualizado) llegaran a la pantalla — de ahí
+      // el desfase que reportó. Con "return" sí se espera a que cargarTodo
+      // termine antes de cerrar el círculo.
+      .then(() => cargarTodo(sesionToken, { silencioso: true }))
       .catch((err) => {
         setMensaje(`Error al actualizar stock: ${err.message}`);
         throw err;
@@ -1066,7 +1077,9 @@ export default function Dashboard() {
       }),
       'Transferir stock'
     )
-      .then(() => { cargarTodo(sesionToken, { silencioso: true }); })
+      // Mismo arreglo que en handleActualizarStock: faltaba el "return" que
+      // hace que se espere a cargarTodo antes de cerrar el círculo.
+      .then(() => cargarTodo(sesionToken, { silencioso: true }))
       .catch((err) => {
         setMensaje(`Error al transferir stock: ${err.message}`);
         throw err;
@@ -1819,8 +1832,12 @@ export default function Dashboard() {
           iniciarCarga={iniciarCarga}
           terminarCarga={terminarCarga}
           onGuardado={() => {
-            cargarTodo(sesionToken, { silencioso: true });
+            // Arreglo (2026-09-25): antes esta función no regresaba la
+            // promesa de cargarTodo, así que ProductoForm cerraba su
+            // círculo de carga sin esperar a que los datos nuevos de
+            // verdad llegaran — mismo bug que en handleActualizarStock.
             setTab('stock');
+            return cargarTodo(sesionToken, { silencioso: true });
           }}
         />
       )}
@@ -1843,8 +1860,11 @@ export default function Dashboard() {
               iniciarCarga={iniciarCarga}
               terminarCarga={terminarCarga}
               onGuardado={() => {
+                // Mismo arreglo: hay que regresar la promesa de cargarTodo
+                // para que ProductoForm espere a que termine antes de
+                // cerrar su círculo de carga.
                 setProductoEditando(null);
-                cargarTodo(sesionToken, { silencioso: true });
+                return cargarTodo(sesionToken, { silencioso: true });
               }}
               onCancelar={() => setProductoEditando(null)}
             />
@@ -2143,7 +2163,11 @@ function ProductoForm({ sesionToken, opciones = {}, setOpciones, usuarios = [], 
           setFotos([]);
         }
         setMensaje(esEdicion ? 'Cambios guardados ✅' : 'Producto agregado correctamente ✅');
-        onGuardado();
+        // Arreglo (2026-09-25): faltaba "return" — sin él, ".finally()" de
+        // abajo (que apaga el círculo de carga) no esperaba a que
+        // onGuardado() (que dispara la actualización silenciosa de datos)
+        // de verdad terminara.
+        return onGuardado();
       })
       .catch((err) => setMensaje(`Error: ${err.message}`))
       .finally(() => {
