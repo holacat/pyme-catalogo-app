@@ -261,6 +261,19 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
      "overflow: hidden" de la tarjeta — ver el arreglo de abajo, en el
      "@media", para la causa real (la tarjeta angosta de celular). */
   flex-shrink: 0;
+  /* Arreglo (2026-09-25, pedido por Claudia: "el botón de Agregar pedido no
+     debe estar tan cerca de las flechas de cantidad en el cel, para evitar
+     clics accidentales"). Antes el espacio entre este renglón y el botón
+     de abajo dependía solo de ".product-actions { margin-top: auto }" —
+     que empuja el botón al fondo de la tarjeta usando el espacio libre que
+     haya, pero en una tarjeta compacta (poco contenido) casi no queda
+     espacio libre, así que el botón terminaba pegado justo debajo de los
+     botones −/+. Con este margen fijo siempre queda un espacio mínimo
+     garantizado, sin importar cuánto espacio libre haya en la tarjeta —
+     antes esto no se notaba tanto porque "Solicitar por WhatsApp" ocupaba
+     ese primer lugar; al quitarlo, "Agregar al pedido" subió justo debajo
+     del selector de cantidad. */
+  margin-bottom: 0.9rem;
 }
 
 .cantidad-selector-label { font-size: 0.8rem; color: var(--muted); text-transform: uppercase; }
@@ -1588,24 +1601,24 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
     scroll-snap-type: x mandatory;
     gap: 0.7rem;
   }
+  /* Arreglo (2026-09-25, ronda 4, pedido por Claudia: "está muy delgado el
+     cuadro de productos en el teléfono... cuando le damos click en Ver
+     más obtiene un ancho ideal, mantén ese ancho el mismo... pero sigue
+     ocultando la info que hace que se alargue el cuadro en altura"). La
+     ronda anterior usaba un ancho angosto (44%) por default y solo
+     ensanchaba la tarjeta al abrir "Ver más" — eso fue lo que se sintió
+     "delgado". Ahora la tarjeta usa SIEMPRE ese mismo ancho "ideal" (el
+     que antes solo aparecía al expandir), tanto cerrada como abierta; lo
+     único que cambia entre un estado y otro sigue siendo la ALTURA
+     (Categoría/Descripción/Talla/Color solo se dibujan — y solo entonces
+     alargan la tarjeta — cuando "Ver más" está abierto, ver
+     ProductCard.jsx). Como el ancho ya no cambia, ya no hace falta una
+     regla aparte para ".product-card-expandido" aquí. */
   .categoria-carrusel .product-card {
-    /* ~2.1 tarjetas visibles a la vez en la mayoría de celulares (como en
-       Amazon: se alcanza a ver bien la de al lado, como pista de que hay
-       más), en vez del 220px fijo de computadora que se sentía "estrecho"
-       en pantallas angostas y desproporcionado en pantallas anchas. */
-    flex: 0 0 44%;
-    min-width: 150px;
-    max-width: 190px;
+    flex: 0 0 78%;
+    max-width: 280px;
     scroll-snap-align: start;
     scroll-snap-stop: always;
-  }
-  /* Igual que en computadora: al abrir "Ver más" en celular, la tarjeta se
-     ensancha (más del doble del ancho normal) para que la Categoría,
-     Descripción, Talla y Color completos no se vean apretados en una
-     columna angosta. */
-  .categoria-carrusel .product-card.product-card-expandido {
-    flex-basis: 78%;
-    max-width: 280px;
   }
 }
 
