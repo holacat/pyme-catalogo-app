@@ -1413,12 +1413,52 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
    una foto o un texto, así que ahí se esconden (queda solo el deslizado
    con el dedo, que es lo natural en pantallas táctiles) y se le regresa a
    la fila todo el ancho que antes se reservaba para ellas. */
+/* Arreglo (2026-09-25, reportado por Claudia: "scrollear en el catálogo
+   en el teléfono es difícil y raro y no muy ergonómico y se ve muy
+   estrecho"). Con una captura de su celular se veía el problema: las
+   tarjetas medían 220px fijos (el mismo tamaño que en computadora) y el
+   deslizado usaba "scroll-snap-type: x PROXIMITY", que es un snap suave
+   y no obligatorio — es decir, el dedo podía soltar el scroll a medias
+   entre dos tarjetas, dejándolo en un punto raro, ni en una tarjeta ni en
+   otra. Eso es lo que se sentía "difícil y raro". Y con 220px fijos en
+   una pantalla angosta, la segunda tarjeta quedaba cortada de forma poco
+   generosa (se veía apenas una rebanadita), lo cual se ve "estrecho" en
+   vez de dar la sensación clara de "hay más, desliza para verlo".
+   La solución, un patrón común de carrusel en celular:
+   1) Cada tarjeta mide ~84% del ancho de pantalla (en vez de un tamaño
+      fijo pensado para computadora), así se ve grande y cómoda de leer,
+      con solo un pedacito de la siguiente asomando como pista de que se
+      puede seguir deslizando.
+   2) "scroll-snap-type: x MANDATORY" en vez de "proximity": el navegador
+      YA NO deja soltar el dedo a medias — siempre termina de acomodar en
+      una tarjeta completa. Con "scroll-snap-stop: always" en cada
+      tarjeta, un deslizado rápido tampoco se puede saltar de largo varias
+      tarjetas de un jalón: siempre para de una en una, como pasar
+      "páginas". Ambos cambios juntos son los que hacen que se sienta
+      firme y predecible en vez de "raro".
+   3) Un pequeño margen a los lados (en vez de que la primera tarjeta
+      toque el borde exacto de la pantalla) para que se vea con más
+      espacio y para que el dedo no empiece el deslizado justo en el
+      borde, donde en algunos celulares compite con el gesto de "regresar"
+      del sistema. */
 @media (max-width: 700px) {
   .categoria-carrusel-envoltura {
     padding: 0;
   }
   .categoria-carrusel-flecha {
     display: none;
+  }
+  .categoria-carrusel {
+    scroll-snap-type: x mandatory;
+    gap: 0.7rem;
+    padding-left: 0.35rem;
+    padding-right: 0.35rem;
+  }
+  .categoria-carrusel .product-card {
+    flex: 0 0 84%;
+    max-width: 320px;
+    scroll-snap-align: start;
+    scroll-snap-stop: always;
   }
 }
 
@@ -1451,9 +1491,14 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
   justify-content: space-between;
   gap: 0.6rem;
   margin-bottom: 0.7rem;
+  flex-wrap: wrap;
 }
 
-.orden-categoria-header h3 { margin: 0; font-size: 1rem; }
+/* Mismo arreglo que ".orden-nombre": el título de la categoría es otro
+   elemento flex que por default no se encoge más chico que su contenido.
+   Un nombre de categoría muy largo (o sin espacios) podría romper la fila
+   de encabezado igual que pasaba con el nombre del producto. */
+.orden-categoria-header h3 { margin: 0; font-size: 1rem; min-width: 0; overflow-wrap: anywhere; flex: 1 1 auto; }
 
 .orden-lista {
   list-style: none;
@@ -1522,7 +1567,18 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
   background: #f0f0f0;
 }
 
-.orden-nombre { font-size: 0.9rem; flex: 1; }
+/* Arreglo (2026-09-25, reportado por Claudia con captura: "en orden de
+   catálogo se rompe" — un nombre de producto muy largo Y SIN espacios
+   (una sola palabra larguísima) desbordaba toda la fila hacia la derecha,
+   rompiendo el acomodo de la página. La causa: en una fila flex, un
+   elemento con "flex: 1" por default tiene "min-width: auto", o sea que
+   el navegador NUNCA lo encoge más chico que el ancho de su contenido —
+   y un texto sin espacios no tiene dónde partirse en varias líneas, así
+   que en vez de encogerse, empuja toda la fila hacia afuera. Con
+   "min-width: 0" SÍ se le permite encogerse, y "overflow-wrap: anywhere"
+   le da permiso de partir la palabra donde haga falta (aunque no tenga
+   espacios) para quedarse dentro de su propia fila en vez de desbordarla. */
+.orden-nombre { font-size: 0.9rem; flex: 1; min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
 .orden-barra-superior {
   margin-bottom: 1rem;
 }
