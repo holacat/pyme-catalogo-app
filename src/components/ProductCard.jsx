@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import ImageLightbox from './ImageLightbox.jsx';
 
 // Un producto puede tener varias fotos guardadas en una sola celda de
@@ -51,6 +51,22 @@ export default function ProductCard({ producto, onSolicitar, onAgregarCarrito })
   // Dashboard (Nombre 80, Color sin límite propio salvo el de Descripción)
   // un Nombre o Color largo seguía pudiendo desbordar la tarjeta.
   const [detalleAbierto, setDetalleAbierto] = useState(false);
+  const articleRef = useRef(null);
+
+  // Arreglo (2026-09-25, reportado por Claudia: "al darle click en Ver más
+  // se agranda pero tengo que manualmente deslizar para ver todo el cuadro
+  // agrandado, eso debe ser automático"). Al abrir "Ver más" dentro del
+  // carrusel horizontal, la tarjeta se ensancha (ver ".product-card-
+  // expandido" en global.css) y puede quedar parcialmente fuera de la
+  // parte visible del carrusel — antes había que deslizar a mano para
+  // verla completa. "scrollIntoView" hace ese ajuste solo, deslizando el
+  // carrusel (o la página, si hiciera falta verticalmente) lo mínimo
+  // necesario para que la tarjeta completa quede a la vista.
+  useEffect(() => {
+    if (detalleAbierto && articleRef.current) {
+      articleRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+    }
+  }, [detalleAbierto]);
 
   // Bajado de 40 a 26 (2026-09-24, pedido por Claudia: un nombre largo
   // seguía "rompiéndose" en la tarjeta angosta del carrusel — se veía en
@@ -112,7 +128,7 @@ export default function ProductCard({ producto, onSolicitar, onAgregarCarrito })
   }
 
   return (
-    <article className={`product-card ${detalleAbierto ? 'product-card-expandido' : ''}`}>
+    <article ref={articleRef} className={`product-card ${detalleAbierto ? 'product-card-expandido' : ''}`}>
       <div className="product-photo">
         {enOferta && <span className="oferta-badge">🔥 Oferta</span>}
         {fotos.length > 0 ? (
