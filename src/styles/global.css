@@ -133,15 +133,34 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
    dentro del carrusel de Ofertas, donde la tarjeta tiene un ancho fijo. Con
    "overflow-wrap: anywhere" el texto se parte donde haga falta para
    quedarse siempre dentro de la tarjeta, aunque no tenga espacios. */
-.product-body h3 { margin: 0; font-size: 1.15rem; font-weight: 700; overflow-wrap: anywhere; }
+/* Mayúsculas (2026-09-25, pedido por Claudia) en Título, Disponible,
+   Talla, Descripción, Color y Cantidad — es solo un estilo visual
+   (text-transform), el dato guardado en la hoja sigue tal cual lo
+   escribió, así que Nombre/Talla/etc. no se ven afectados en ningún otro
+   lado (Dashboard, WhatsApp, etc.), solo aquí en la tarjeta del catálogo. */
+.product-body h3 { margin: 0; font-size: 1.15rem; font-weight: 700; overflow-wrap: anywhere; text-transform: uppercase; }
 
 .badge {
   align-self: flex-start;
   background: #ecfdf5;
   color: var(--brand-dark);
   font-size: 0.72rem;
-  padding: 0.15rem 0.5rem;
+  /* Arreglo (2026-09-25, pedido por Claudia: la pastilla de categoría se
+     veía "descuadrada" — el padding izquierdo empujaba el texto ("jkb")
+     bastante más a la derecha que el título de arriba, que no tiene
+     padding. Se achica solo el padding IZQUIERDO para que el texto de la
+     categoría arranque casi a la misma altura que el título, sin perder la
+     forma de pastilla redondeada. */
+  padding: 0.15rem 0.5rem 0.15rem 0.3rem;
   border-radius: 999px;
+  /* Respaldo (2026-09-25): la Categoría ya se recorta en JS antes de
+     llegar aquí (ver ProductCard.jsx), pero esto asegura que la "pastilla"
+     NUNCA se parta en varias líneas — con texto en 2+ líneas una forma tan
+     redondeada se ve rota, no como una cajita que encierra el texto. */
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .price { font-size: 1.15rem; font-weight: 700; margin: 0.2rem 0; overflow-wrap: anywhere; }
@@ -168,15 +187,15 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
 .price-oferta { display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; }
 .price-original { font-size: 0.85rem; font-weight: 400; color: var(--muted); text-decoration: line-through; }
 .price-descuento { color: var(--danger); }
-.stock { font-size: 0.85rem; color: var(--brand); margin: 0; overflow-wrap: anywhere; }
+.stock { font-size: 0.85rem; color: var(--brand); margin: 0; overflow-wrap: anywhere; text-transform: uppercase; }
 .stock.out { color: var(--danger); font-weight: 600; }
 /* min-height: respaldo para que la tarjeta reserve el mismo espacio
    aunque el texto de la descripción sea muy corto o esté vacío (ver el
    cambio en ProductCard.jsx que ahora siempre dibuja este párrafo).
    overflow-wrap: mismo arreglo que en .product-body h3 arriba — un texto
    largo sin espacios ya no se sale de la tarjeta. */
-.description { font-size: 0.85rem; color: var(--muted); margin: 0.2rem 0 0.4rem; min-height: 1.2em; overflow-wrap: anywhere; }
-.product-color, .product-talla { font-size: 0.85rem; color: var(--muted); margin: 0; overflow-wrap: anywhere; }
+.description { font-size: 0.85rem; color: var(--muted); margin: 0.2rem 0 0.4rem; min-height: 1.2em; overflow-wrap: anywhere; text-transform: uppercase; }
+.product-color, .product-talla { font-size: 0.85rem; color: var(--muted); margin: 0; overflow-wrap: anywhere; text-transform: uppercase; }
 
 .product-actions { margin-top: auto; display: flex; flex-direction: column; gap: 0.5rem; }
 
@@ -188,7 +207,7 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
   margin: 0.2rem 0;
 }
 
-.cantidad-selector-label { font-size: 0.8rem; color: var(--muted); }
+.cantidad-selector-label { font-size: 0.8rem; color: var(--muted); text-transform: uppercase; }
 
 .cantidad-selector button {
   width: 26px;
@@ -1293,6 +1312,15 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
      flechas ‹ › en vez de verse una barra gris de scroll. */
   scrollbar-width: none; /* Firefox */
   -ms-overflow-style: none; /* Edge viejito */
+  /* Arreglo (2026-09-25, pedido por Claudia: "en teléfono debe de poderse
+     también deslizando, no solo con esas flechitas"). El deslizado con el
+     dedo YA funcionaba por ser un contenedor con overflow-x, pero estas dos
+     líneas lo hacen más confiable en más celulares: "touch-action: pan-x"
+     le dice explícitamente al navegador que este elemento se desliza
+     horizontalmente con el dedo, y "-webkit-overflow-scrolling: touch" le
+     da el desplazamiento suave con inercia en iPhones/iPads. */
+  touch-action: pan-x;
+  -webkit-overflow-scrolling: touch;
 }
 
 .categoria-carrusel::-webkit-scrollbar {
@@ -1316,9 +1344,22 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
    pegadas a los lados del carrusel de productos de cada categoría.
    "isolation: isolate" es lo que garantiza que las flechas SIEMPRE se
    vean por encima de las fotos de los productos. */
+/* Arreglo (2026-09-25, pedido por Claudia: "las flechitas del carrusel
+   deberían estar fuera del recuadro... que no tapen info"). Antes las
+   flechas quedaban FLOTANDO encima de la foto del primer/último producto
+   (position: absolute sobre la fila), tapando parte de la imagen. Ahora
+   esta envoltura reserva un espacio propio a los lados (padding) del
+   mismo ancho que las flechas, y las flechas se colocan DENTRO de ese
+   espacio reservado — así quedan completamente fuera de las tarjetas, sin
+   tapar ninguna foto ni texto. En pantallas angostas (celular) ese espacio
+   se quita y las flechas se esconden (ver el "@media" más abajo): ahí ya
+   no hay lugar cómodo para ellas sin tapar algo, así que en celular se
+   depende solo del deslizado con el dedo (que de por sí es lo natural en
+   touch). */
 .categoria-carrusel-envoltura {
   position: relative;
   isolation: isolate;
+  padding: 0 2.6rem;
 }
 
 /* Flechas del carrusel de categorías: grandes, con fondo blanco sólido y
@@ -1361,11 +1402,24 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
 }
 
 .categoria-carrusel-flecha-izq {
-  left: 0.3rem;
+  left: 0;
 }
 
 .categoria-carrusel-flecha-der {
-  right: 0.3rem;
+  right: 0;
+}
+
+/* En celular no hay espacio cómodo para poner las flechas SIN que tapen
+   una foto o un texto, así que ahí se esconden (queda solo el deslizado
+   con el dedo, que es lo natural en pantallas táctiles) y se le regresa a
+   la fila todo el ancho que antes se reservaba para ellas. */
+@media (max-width: 700px) {
+  .categoria-carrusel-envoltura {
+    padding: 0;
+  }
+  .categoria-carrusel-flecha {
+    display: none;
+  }
 }
 
 .categoria-pie {
