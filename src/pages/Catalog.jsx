@@ -198,19 +198,48 @@ export default function Catalog() {
 
   const [clienteGuardado, setClienteGuardado] = useState(() => leerClienteGuardado());
 
-  useEffect(() => {
-    function cargarProductos() {
-      listarProductos()
-        .then((data) => {
-          setProductos(data.productos);
-          setEstado('listo');
-        })
-        .catch((err) => {
+  // Arreglo (2026-09-25, reportado por Claudia: "al salirme del catálogo y
+  // volverme a meter tengo que actualizarlo manualmente, ya que si no dice
+  // 'no se pudo cargar el catálogo, failed to fetch'... el usuario se va a
+  // asustar"). Aquí había DOS problemas:
+  // 1) Esta pantalla ya reintentaba sola cada 5 segundos en segundo plano
+  //    (la idea siempre fue no depender de que el cliente actualice a
+  //    mano), pero si esa recarga en SEGUNDO PLANO fallaba UNA sola vez
+  //    (por ejemplo, el celular se queda sin señal un instante justo al
+  //    volver de otra app o de segundo plano), el código borraba TODO el
+  //    catálogo que ya se había cargado bien y lo reemplazaba con una
+  //    pantalla de error — aunque los productos ya estuvieran ahí y
+  //    perfectamente visibles un segundo antes. Ahora una recarga en
+  //    segundo plano que falla ya NO borra el catálogo que ya se veía: se
+  //    queda tal cual estaba, y el siguiente intento automático (5
+  //    segundos después) lo repone solo, sin que el cliente note nada.
+  // 2) La pantalla de error de la carga INICIAL (cuando todavía no hay
+  //    nada en pantalla) sí puede aparecer — por ejemplo si el celular
+  //    abre la página sin conexión — pero se veía como un error técnico
+  //    ("Failed to fetch") sin ninguna pista de qué hacer. Ahora explica
+  //    en palabras simples que puede ser la conexión, aclara que se sigue
+  //    intentando solo, y agrega un botón "🔄 Actualizar" para reintentar
+  //    de inmediato sin tener que refrescar la página completa a mano.
+  function cargarProductos() {
+    listarProductos()
+      .then((data) => {
+        setProductos(data.productos);
+        setEstado('listo');
+      })
+      .catch((err) => {
+        setEstado((estadoPrevio) => {
+          // Si ya había un catálogo cargado y visible, una falla de la
+          // recarga silenciosa en segundo plano NO debe borrarlo de la
+          // pantalla — se deja tal cual y el siguiente intento automático
+          // (5s después) lo arregla solo.
+          if (estadoPrevio === 'listo') return 'listo';
           setError(err.message);
-          setEstado('error');
+          return 'error';
         });
-    }
+      });
+  }
 
+  useEffect(() => {
     cargarProductos();
 
     // Vuelve a pedir el catálogo cada 5 segundos, en segundo plano, para
@@ -341,7 +370,19 @@ export default function Catalog() {
   }
 
   if (estado === 'cargando') return <p className="info-msg">Cargando catálogo…</p>;
-  if (estado === 'error') return <p className="info-msg error">No se pudo cargar el catálogo: {error}</p>;
+  if (estado === 'error') {
+    return (
+      <div className="catalogo-error-carga">
+        <p className="info-msg aviso">
+          No se pudo cargar el catálogo — puede ser que se haya perdido la conexión un momento.
+          Se está intentando de nuevo solo; si tarda mucho, dale clic a "Actualizar".
+        </p>
+        <button type="button" className="btn btn-secondary" onClick={cargarProductos}>
+          🔄 Actualizar
+        </button>
+      </div>
+    );
+  }
   if (productos.length === 0) return <p className="info-msg">Aún no hay productos disponibles.</p>;
 
   const totalProductosEnCarrito = carrito.length;
