@@ -229,6 +229,10 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
 
 .info-msg { text-align: center; color: var(--muted); padding: 2rem 0; }
 .info-msg.error { color: var(--danger); }
+/* Aviso "suave" (2026-09-25, pedido por Claudia): para mensajes que NO son
+   un error real — como "sigue cargando, tardó más de lo normal" — en vez
+   del rojo de alarma, un tono ámbar tranquilo: informa sin asustar. */
+.info-msg.aviso { color: #92650c; padding: 0.6rem 0; }
 
 .login-box {
   max-width: 360px;
