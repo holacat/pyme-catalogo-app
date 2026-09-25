@@ -34,22 +34,6 @@ function borrarClienteGuardado() {
   }
 }
 
-// Mensaje de WhatsApp para pedir UN solo producto al instante.
-function buildWhatsAppLink(producto, nombre, cantidad) {
-  const phone = import.meta.env.VITE_WHATSAPP_NUMBER;
-  const subtotal = Number(producto.Precio) * cantidad;
-  const lineaCantidad =
-    cantidad > 1 ? `Cantidad: ${cantidad}\n💲 Subtotal: $${subtotal.toLocaleString('es-MX')}\n` : '';
-  const mensaje =
-    `Hola, soy ${nombre}.\n` +
-    `Me interesa este producto:\n` +
-    `🛍️ ${producto.Nombre}\n` +
-    `💲 $${Number(producto.Precio).toLocaleString('es-MX')}\n` +
-    lineaCantidad +
-    `¿Sigue disponible?`;
-  return `https://wa.me/${phone}?text=${encodeURIComponent(mensaje)}`;
-}
-
 // Mensaje de WhatsApp para pedir VARIOS productos juntos (carrito).
 function buildWhatsAppLinkCarrito(items, nombre) {
   const phone = import.meta.env.VITE_WHATSAPP_NUMBER;
@@ -187,9 +171,6 @@ export default function Catalog() {
   // categoría"), o el catálogo entero mezclado ("Ver catálogo completo").
   const [vista, setVista] = useState({ tipo: 'categorias' });
 
-  // Pedido de UN producto al instante: { producto, cantidad } o null.
-  const [solicitudActual, setSolicitudActual] = useState(null);
-
   // Carrito con VARIOS productos: lista de { producto, cantidad }.
   const [carrito, setCarrito] = useState([]);
   const [carritoAbierto, setCarritoAbierto] = useState(false);
@@ -248,46 +229,6 @@ export default function Catalog() {
     const intervalo = setInterval(cargarProductos, 5000);
     return () => clearInterval(intervalo);
   }, []);
-
-  // ---- Pedido instantáneo de UN producto ----
-
-  function registrarYAbrirWhatsApp(producto, cantidad, { nombre, telefono }) {
-    window.open(buildWhatsAppLink(producto, nombre, cantidad), '_blank', 'noopener,noreferrer');
-
-    crearPedido({
-      cliente: nombre,
-      telefono,
-      producto: producto.Nombre,
-      productoId: producto.ID,
-      cantidad,
-      notas: '',
-    }).catch((err) => console.warn('No se pudo registrar el pedido:', err.message));
-  }
-
-  // Se llama cuando el cliente le da clic a "Solicitar por WhatsApp".
-  // Si ya tenemos sus datos guardados en este navegador, NO le volvemos a
-  // preguntar: vamos directo a WhatsApp. Si es su primera vez, mostramos
-  // el modal para pedirle nombre y teléfono una sola vez.
-  function handleSolicitar(producto, cantidad) {
-    if (clienteGuardado) {
-      registrarYAbrirWhatsApp(producto, cantidad, clienteGuardado);
-    } else {
-      setSolicitudActual({ producto, cantidad });
-    }
-  }
-
-  // Se llama cuando el cliente confirma el modal (primera vez) del pedido
-  // instantáneo de un solo producto.
-  function handleConfirmarSolicitud({ nombre, telefono }) {
-    const actual = solicitudActual;
-    setSolicitudActual(null);
-    if (!actual) return;
-
-    guardarCliente({ nombre, telefono });
-    setClienteGuardado({ nombre, telefono });
-
-    registrarYAbrirWhatsApp(actual.producto, actual.cantidad, { nombre, telefono });
-  }
 
   // ---- Carrito con varios productos ----
 
@@ -412,7 +353,6 @@ export default function Catalog() {
       <ProductCard
         key={p.ID}
         producto={p}
-        onSolicitar={handleSolicitar}
         onAgregarCarrito={handleAgregarCarrito}
       />
     ));
@@ -515,15 +455,6 @@ export default function Catalog() {
           onCambiarCantidad={handleCambiarCantidadCarrito}
           onClose={() => setCarritoAbierto(false)}
           onContinuar={handleContinuarCarrito}
-        />
-      )}
-
-      {solicitudActual && (
-        <SolicitudModal
-          producto={solicitudActual.producto}
-          cantidad={solicitudActual.cantidad}
-          onClose={() => setSolicitudActual(null)}
-          onConfirm={handleConfirmarSolicitud}
         />
       )}
 
