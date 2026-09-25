@@ -1314,12 +1314,22 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
   -ms-overflow-style: none; /* Edge viejito */
   /* Arreglo (2026-09-25, pedido por Claudia: "en teléfono debe de poderse
      también deslizando, no solo con esas flechitas"). El deslizado con el
-     dedo YA funcionaba por ser un contenedor con overflow-x, pero estas dos
-     líneas lo hacen más confiable en más celulares: "touch-action: pan-x"
-     le dice explícitamente al navegador que este elemento se desliza
-     horizontalmente con el dedo, y "-webkit-overflow-scrolling: touch" le
-     da el desplazamiento suave con inercia en iPhones/iPads. */
-  touch-action: pan-x;
+     dedo YA funcionaba por ser un contenedor con overflow-x, y
+     "-webkit-overflow-scrolling: touch" le da el desplazamiento suave con
+     inercia en iPhones/iPads.
+     CORRECCIÓN (2026-09-25, ronda 3): aquí también había "touch-action:
+     pan-x", puesto para que el deslizado horizontal fuera más confiable.
+     Eso fue un error — "pan-x" le dice al navegador "este elemento SOLO
+     entiende arrastres horizontales", así que un arrastre vertical que
+     empezaba encima del carrusel (que en celular ocupa casi toda la
+     pantalla) se quedaba sin efecto en vez de subir/bajar la página. Por
+     eso Claudia reportó "scrollear hacia abajo o arriba es imposible a
+     menos que toque las líneas grises del fondo": esa rendijita gris era
+     la única parte de la pantalla que NO tenía "pan-x". Quitando esta
+     línea, el navegador vuelve a decidir solo (como en cualquier carrusel
+     tipo Amazon): arrastre horizontal → desliza el carrusel; arrastre
+     vertical → sube/baja la página normal. No hace falta "ayudarlo" con
+     touch-action para esto. */
   -webkit-overflow-scrolling: touch;
 }
 
@@ -1413,32 +1423,27 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
    una foto o un texto, así que ahí se esconden (queda solo el deslizado
    con el dedo, que es lo natural en pantallas táctiles) y se le regresa a
    la fila todo el ancho que antes se reservaba para ellas. */
-/* Arreglo grande, ronda 2 (2026-09-25). El primer intento (tarjetas más
-   anchas + snap obligatorio) NO resolvió el problema real y Claudia
-   reportó algo peor con capturas nuevas: "scrollear hacia abajo o arriba
-   es imposible a menos que toque las finas líneas grises del fondo... y
-   se ve demasiado grande, tengo que poner sitio para computadoras y no
-   tendría por qué". La causa de fondo: un carrusel horizontal METIDO
-   dentro de una página que también se desliza vertical obliga al dedo a
-   un gesto ambiguo — el navegador tiene que adivinar si el arrastre es
-   "bajar la página" o "deslizar la fila de productos". Al agrandar las
-   tarjetas casi a pantalla completa, casi CUALQUIER lugar donde pusiera
-   el dedo quedaba capturado por el carrusel (por el "touch-action: pan-x"
-   que le pusimos para el deslizado horizontal), y solo la rendijita de
-   fondo gris entre tarjetas quedaba libre para el scroll vertical normal.
-   Eso es exactamente lo que describió: "imposible a menos que toque las
-   líneas grises".
-   En vez de seguir afinando el gesto (que en cualquier ajuste sigue
-   siendo un carrusel horizontal peleando con el scroll vertical), en
-   celular quitamos el carrusel por completo: los productos de cada
-   categoría (y los de Ofertas) se acomodan en una cuadrícula normal, una
-   tarjeta por renglón — exactamente como ya se ve en "Ver catálogo
-   completo", que nunca tuvo este problema porque ahí SIEMPRE fue
-   cuadrícula, nunca carrusel. Así en celular todo el deslizado es
-   vertical, como cualquier página normal, sin ningún gesto ambiguo ni
-   necesidad de "hacer espacio pensado para computadora". En pantallas
-   anchas (computadora) el carrusel horizontal con flechas se queda
-   exactamente igual que antes. */
+/* Historial de este arreglo, para que quede claro por qué se ve así:
+   Ronda 2 (2026-09-25): probamos quitar el carrusel en celular y usar
+   cuadrícula vertical (una tarjeta por renglón, todas seguidas). Eso SÍ
+   arregló el choque con el scroll vertical, pero Claudia lo rechazó por
+   otra razón: "es demasiado tardado ver todo ir scrolleando... debe ser
+   como el de la compu, solo adaptarlo al tamaño de pantalla... como
+   Amazon u otros catálogos", que sí logran carrusel horizontal por
+   categoría Y scroll vertical cómodo al mismo tiempo en celular.
+   Ronda 3 (2026-09-25, esta versión): identificamos la verdadera causa
+   de que "es imposible scrollear a menos que toque las líneas grises" —
+   NO era el carrusel horizontal en sí (Amazon también usa eso y funciona
+   bien), sino la línea "touch-action: pan-x" que le habíamos puesto a
+   ".categoria-carrusel" (ver el arreglo de esa regla, arriba en este
+   archivo): le decía al navegador "aquí SOLO hay arrastre horizontal",
+   así que un arrastre vertical que empezaba sobre el carrusel no hacía
+   nada. Quitando esa línea, el navegador vuelve a decidir solo la
+   dirección del arrastre — igual que en Amazon — y el carrusel horizontal
+   puede quedarse en celular sin pelearse con el scroll vertical de la
+   página. Aquí solo falta adaptar el TAMAÑO de las tarjetas a una
+   pantalla angosta (en vez del mismo 220px fijo de computadora), y hacer
+   que el deslizado quede firme (no a medias entre dos tarjetas). */
 @media (max-width: 700px) {
   .categoria-carrusel-envoltura {
     padding: 0;
@@ -1447,19 +1452,19 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
     display: none;
   }
   .categoria-carrusel {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
-    gap: 1.2rem;
-    overflow: visible;
-    scroll-snap-type: none;
-    touch-action: auto;
-    -webkit-overflow-scrolling: auto;
-    padding-bottom: 0;
+    scroll-snap-type: x mandatory;
+    gap: 0.7rem;
   }
   .categoria-carrusel .product-card {
-    flex: initial;
-    width: 100%;
-    scroll-snap-align: none;
+    /* ~2.1 tarjetas visibles a la vez en la mayoría de celulares (como en
+       Amazon: se alcanza a ver bien la de al lado, como pista de que hay
+       más), en vez del 220px fijo de computadora que se sentía "estrecho"
+       en pantallas angostas y desproporcionado en pantallas anchas. */
+    flex: 0 0 44%;
+    min-width: 150px;
+    max-width: 190px;
+    scroll-snap-align: start;
+    scroll-snap-stop: always;
   }
 }
 
