@@ -599,11 +599,31 @@ export default function Dashboard() {
     if (cargasEnCurso > 0) {
       setMostrarIndicadorCarga(true);
       const inicio = Date.now();
+      // Arreglo (2026-09-25, reportado por Claudia: "el pacman debe ser un
+      // indicador del tiempo real que lleva esperar... a veces no es exacto,
+      // el relleno brinca al final en vez de avanzar parejo"). La curva
+      // anterior (exponencial) avanzaba rápido al principio y se iba
+      // "aplanando" cada vez más despacio cerca del 92% — en una acción
+      // rápida (la mayoría duran 1-2 segundos) eso se veía como que el
+      // círculo se quedaba estancado en un punto bajo, y luego SALTABA de
+      // golpe hasta 100% al terminar, en vez de sentirse como un cronómetro
+      // real avanzando parejo. Ahora el avance es LINEAL — misma velocidad
+      // todo el tiempo, como un cronómetro de verdad — contra una duración
+      // típica de referencia, topándose en un techo alto (97%) mientras
+      // seguimos esperando (nunca se completa solo, eso sigue pasando SOLO
+      // cuando `cargasEnCurso` de verdad vuelve a 0). El salto final que
+      // queda (de donde se haya quedado hasta 100%) sigue siendo inevitable
+      // — nadie puede saber de antemano el instante exacto en que el
+      // servidor va a responder — pero ahora ese cierre es una transición
+      // suave y rápida (ver ".indicador-carga-circulo" en global.css) en
+      // vez de un salto instantáneo, así se siente como que "alcanza" el
+      // 100% justo cuando el cambio se realiza.
       const DURACION_TIPICA_MS = 3500;
-      const TOPE_MIENTRAS_CARGA = 92;
+      const TOPE_MIENTRAS_CARGA = 97;
       const avance = setInterval(() => {
         const transcurrido = Date.now() - inicio;
-        setProgresoCarga(TOPE_MIENTRAS_CARGA * (1 - Math.exp(-transcurrido / DURACION_TIPICA_MS)));
+        const porcentajeParejo = (transcurrido / DURACION_TIPICA_MS) * TOPE_MIENTRAS_CARGA;
+        setProgresoCarga(Math.min(TOPE_MIENTRAS_CARGA, porcentajeParejo));
       }, 60);
       return () => clearInterval(avance);
     }
