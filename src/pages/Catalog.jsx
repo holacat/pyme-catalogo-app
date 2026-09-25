@@ -148,6 +148,35 @@ function CategoriaCarrusel({ children }) {
   );
 }
 
+// Arreglo (2026-09-25, reportado por Claudia con captura: el nombre de una
+// categoría de prueba, muy largo y sin espacios, se desbordaba fuera de la
+// pantalla en el título de la sección). Igual que ya se hizo con el nombre
+// del producto y su Categoría en ProductCard.jsx, aquí se recorta el título
+// a un tamaño razonable con la posibilidad de verlo completo dándole
+// "Ver más". Se usa tanto para el título de cada categoría en la vista
+// normal como para el título grande de "Ver más de X".
+function TituloCategoria({ nombre, className }) {
+  const [abierto, setAbierto] = useState(false);
+  const LIMITE = 40;
+  const nombreCompleto = nombre || '';
+  const esLargo = nombreCompleto.length > LIMITE;
+  const mostrado = !esLargo || abierto ? nombreCompleto : nombreCompleto.slice(0, LIMITE) + '…';
+  return (
+    <div className="categoria-titulo-envoltura">
+      <h2 className={className}>{mostrado}</h2>
+      {esLargo && (
+        <button
+          type="button"
+          className="link-button categoria-titulo-ver-mas"
+          onClick={() => setAbierto((v) => !v)}
+        >
+          {abierto ? 'Ver menos' : 'Ver más'}
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function Catalog() {
   const [productos, setProductos] = useState([]);
   const [estado, setEstado] = useState('cargando'); // cargando | listo | error
@@ -382,7 +411,7 @@ export default function Catalog() {
 
           {grupos.map((grupo) => (
             <section key={grupo.nombre} className="categoria-seccion">
-              <h2 className="categoria-titulo">{grupo.nombre}</h2>
+              <TituloCategoria nombre={grupo.nombre} className="categoria-titulo" />
               <CategoriaCarrusel>{tarjetas(grupo.productos)}</CategoriaCarrusel>
               <div className="categoria-pie">
                 <button
@@ -408,7 +437,7 @@ export default function Catalog() {
           >
             ← Volver a categorías
           </button>
-          <h2 className="categoria-titulo-completo">{vista.nombre}</h2>
+          <TituloCategoria nombre={vista.nombre} className="categoria-titulo-completo" />
           {grupoAbierto && grupoAbierto.productos.length > 0 ? (
             <div className="catalog-grid">{tarjetas(grupoAbierto.productos)}</div>
           ) : (
