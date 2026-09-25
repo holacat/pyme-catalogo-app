@@ -260,23 +260,46 @@ const INTERVALO_REFRESCO_MS = 6000;
 // apagarlo (y como el círculo es el mismo para toda la app, se ve
 // "cargando" en cualquier pestaña, no solo en la que se usó).
 // `conLimiteDeTiempo` pone un tope de tiempo a cualquier llamada al
-// servidor: si no contesta en ese tiempo, la damos por fallida (con un
-// mensaje claro) para que el círculo se apague y Claudia pueda revisar o
-// reintentar, en vez de quedarse esperando sin saber qué pasó.
+// servidor: si no contesta en ese tiempo, la damos por fallida para que el
+// círculo se apague, en vez de quedarse esperando para siempre sin saber
+// qué pasó.
+//
+// Ajuste (2026-09-25, reportado por Claudia: el aviso de "tardó demasiado"
+// la asustó porque sonaba a que algo se rompió, y además le tocó justo al
+// ABRIR el panel — que de por sí siempre tarda más, porque pide 8 hojas de
+// Google Sheets al mismo tiempo y, si Google Apps Script llevaba rato sin
+// usarse, tarda extra en "despertar"). Por eso ahora hay DOS topes
+// distintos, no uno solo:
+//   - `TIEMPO_MAXIMO_ESPERA_MS`: para una acción puntual (guardar un
+//     pedido, actualizar stock, etc.) — son peticiones chicas, así que 25s
+//     ya es generoso.
+//   - `TIEMPO_MAXIMO_CARGA_INICIAL_MS`: para cargar TODO el panel — se le
+//     da mucho más margen (45s) precisamente porque es más pesada y porque
+//     es la que se dispara justo al abrir, cuando Apps Script puede estar
+//     "frío". Además su mensaje ya NO dice "revisa antes de repetirlo" (eso
+//     solo tiene sentido cuando SE GUARDÓ algo) ni empieza con la palabra
+//     "Error" — es solo un aviso tranquilo de que sigue intentando, y el
+//     refresco automático de cada 6s lo va a resolver solo en cuanto la
+//     conexión conteste (ver el `.then()` de `cargarTodo`, que limpia este
+//     aviso apenas un refresco de fondo sí funciona).
 const TIEMPO_MAXIMO_ESPERA_MS = 25000;
-function conLimiteDeTiempo(promesa, etiqueta) {
+const TIEMPO_MAXIMO_CARGA_INICIAL_MS = 45000;
+function conLimiteDeTiempo(promesa, etiqueta, opciones = {}) {
+  const ms = opciones.ms || TIEMPO_MAXIMO_ESPERA_MS;
+  const esLectura = !!opciones.esLectura;
   return Promise.race([
     promesa,
     new Promise((_, reject) =>
       setTimeout(() => {
-        reject(
-          new Error(
-            `${etiqueta}: el servidor tardó demasiado en responder (más de ${Math.round(
-              TIEMPO_MAXIMO_ESPERA_MS / 1000
-            )}s). Es posible que el cambio sí se haya guardado del lado del servidor — revisa antes de repetirlo.`
-          )
+        const segundos = Math.round(ms / 1000);
+        const error = new Error(
+          esLectura
+            ? `Sigue cargando… la conexión está tardando más de lo normal (más de ${segundos}s). Se va a seguir intentando solo — si tarda mucho más, dale clic a "Actualizar".`
+            : `${etiqueta}: el servidor está tardando más de lo normal (más de ${segundos}s). Es posible que el cambio sí se haya guardado del lado del servidor — revisa antes de repetirlo.`
         );
-      }, TIEMPO_MAXIMO_ESPERA_MS)
+        error.esLimiteDeTiempo = true;
+        reject(error);
+      }, ms)
     ),
   ]);
 }
@@ -604,13 +627,19 @@ export default function Dashboard() {
   // siempre sin que Claudia sepa qué pasó.
   useEffect(() => {
     if (cargasEnCurso === 0) return;
+    // Ojo: el margen tiene que ser MÁS LARGO que el tope más largo que
+    // exista (`TIEMPO_MAXIMO_CARGA_INICIAL_MS`, el de abrir el panel
+    // completo) — si aquí pusiéramos un margen corto, esta red de
+    // seguridad apagaría el círculo ANTES de que la carga inicial (que
+    // legítimamente puede tardar hasta 45s) tuviera oportunidad de
+    // terminar bien.
     const vigilante = setTimeout(() => {
       setCargasEnCurso(0);
       setCargando(false);
       setMensaje(
         'Una acción tardó demasiado en responder y se canceló la espera. Es posible que sí se haya guardado del lado del servidor — revisa antes de repetirla.'
       );
-    }, TIEMPO_MAXIMO_ESPERA_MS + 3000);
+    }, Math.max(TIEMPO_MAXIMO_ESPERA_MS, TIEMPO_MAXIMO_CARGA_INICIAL_MS) + 5000);
     return () => clearTimeout(vigilante);
   }, [cargasEnCurso]);
 
@@ -735,7 +764,7 @@ export default function Dashboard() {
       puedeVer('bitacora') ? listarBitacora(token) : Promise.resolve({ bitacora: [] }),
       (puedeVer('usuarios') || puedeVer('stock')) ? listarUsuarios(token) : Promise.resolve({ usuarios: [] }),
       puedeVer('stock') ? listarTransferencias(token) : Promise.resolve({ transferencias: [] }),
-    ]), 'Cargar datos')
+    ]), 'Cargar datos', { ms: TIEMPO_MAXIMO_CARGA_INICIAL_MS, esLectura: true })
           .then(([p, o, a, op, mv, b, us, tr]) => {
         // Fix "switcheo" de sesión (2026-09): si ya cambiamos de sesión, ignoramos esta respuesta vieja.
         if (miSesionId !== sesionIdRef.current) return;
@@ -750,7 +779,22 @@ export default function Dashboard() {
         setBitacora(b.bitacora || []);
         setUsuarios(us.usuarios || []);
         setTransferencias(tr.transferencias || []);
-        if (!silencioso) setMensaje('');
+        // Arreglo (2026-09-25, reportado por Claudia: el aviso de "sigue
+        // cargando" se quedó pegado en pantalla para siempre, ni el
+        // refresco automático de cada 6s lo quitaba). Antes esta línea
+        // SOLO limpiaba el mensaje en una carga NO silenciosa — un
+        // refresco de fondo que sí tuvo éxito nunca tocaba un aviso viejo.
+        // Ahora, si lo que había en pantalla era justo un aviso o error de
+        // ESTA misma función (cargar datos), se quita solo en cuanto
+        // cualquier carga (silenciosa o no) sí funciona — así el aviso
+        // desaparece apenas la conexión se recupera, sin que Claudia tenga
+        // que darle clic a "Actualizar" a mano.
+        setMensaje((prev) => {
+          if (!silencioso) return '';
+          return prev && (prev.startsWith('Sigue cargando') || prev.startsWith('Error al cargar datos'))
+            ? ''
+            : prev;
+        });
       })
             .catch((err) => {
         // Fix "switcheo" de sesión (2026-09): mismo control que arriba, para no reaccionar a una respuesta vieja.
@@ -764,7 +808,17 @@ export default function Dashboard() {
           setErrorLogin(err.message || 'Tu sesión ya no es válida. Vuelve a iniciar sesión.');
           return;
         }
-        if (!silencioso) setMensaje(`Error al cargar datos: ${err.message}`);
+        // Arreglo (2026-09-25, pedido por Claudia: el mensaje de "tardó
+        // demasiado" al abrir el panel se veía como un error grave y
+        // asustaba, cuando en realidad Apps Script solo estaba tardando en
+        // "despertar"). Si fue justo por el límite de tiempo (no un error
+        // real del servidor), usamos el aviso tranquilo que ya trae
+        // `conLimiteDeTiempo` tal cual — no lo marcamos como "Error". Un
+        // fallo de verdad (por ejemplo el servidor contestó pero con un
+        // problema) sí se muestra como error.
+        if (!silencioso) {
+          setMensaje(err.esLimiteDeTiempo ? err.message : `Error al cargar datos: ${err.message}`);
+        }
       })
            .finally(() => {
         // Bug real (2026-09-24): antes este `return` por "ya no es la
@@ -1261,7 +1315,14 @@ export default function Dashboard() {
         </div>
       )}
 
-      {mensaje && <p className="info-msg error">{mensaje}</p>}
+      {/* Arreglo (2026-09-25, pedido por Claudia: un aviso de "sigue
+          cargando" (no un error de verdad) se veía en rojo fuerte y
+          asustaba). Un mensaje que empieza con "Error" se muestra en rojo;
+          cualquier otro (como el aviso tranquilo de "Sigue cargando…") se
+          muestra en un tono más neutro. */}
+      {mensaje && (
+        <p className={`info-msg ${mensaje.startsWith('Error') ? 'error' : 'aviso'}`}>{mensaje}</p>
+      )}
       {cargando && <p className="info-msg">Actualizando…</p>}
 
       {/* Aviso flotante: se queda pegado abajo de la pantalla aunque hagas
