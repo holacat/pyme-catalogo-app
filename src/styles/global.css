@@ -471,22 +471,30 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
 .table-scroll { width: 100%; overflow-x: auto; }
 
 /* ---- Encabezado fijo de Stock y Pedidos al hacer scroll (2026-09-28,
-   pedido por Claudia) ----
-   "table-scroll" de arriba solo pone "overflow-x: auto", pero el navegador
-   automáticamente pone "overflow-y" en "auto" también en cuanto CUALQUIER
-   eje deja de ser "visible" — y eso, sin querer, convierte a este div en
-   un "contenedor con scroll propio" a ojos de "position: sticky", aunque
-   nunca le salga una barra de scroll vertical de verdad (crece con todo su
-   contenido). Con eso de por medio, el encabezado nunca se pega, porque
-   "sticky" se queda esperando un scroll DENTRO de este div que jamás pasa
-   (el que de verdad se mueve es la página completa). Lo mismo pasa con el
-   "overflow: hidden" de ".data-table" (ahí abajo), puesto para redondear
-   las esquinas de la tabla — también cuenta como "contenedor con scroll
-   propio" y también hay que quitárselo aquí. Por eso esta clase (agregada
-   SOLO en Stock y Pedidos, ver Dashboard.jsx) deshace los dos a propósito
-   — el resto de las tablas de la app no la usan y se quedan exactamente
-   igual que antes. */
-.table-scroll-fijo { overflow-y: visible; }
+   pedido por Claudia; CORREGIDO el mismo día porque el primer intento no
+   funcionaba de verdad) ----
+   Primer intento (no funcionó): quitarle a este div su "overflow-y"
+   automático y ponerlo en "visible", para que el scroll de verdad lo
+   hiciera la página completa. Se veía razonable, pero el CSS tiene una
+   regla que lo deshace solo: si un eje es "auto" (aquí, "overflow-x") y el
+   otro es "visible", el navegador FUERZA al "visible" a volverse "auto"
+   también — así que "overflow-y: visible" nunca se quedaba puesto de
+   verdad, y "position: sticky" seguía sin tener dentro de qué pegarse.
+   **Solución que sí funciona**: en vez de pelearnos con esa regla, le
+   damos a este contenedor un alto máximo y dejamos que TAMBIÉN scrollee
+   verticalmente ÉL MISMO (no la página) — así "overflow-x: auto"
+   y "overflow-y: auto" quedan parejos (sin ese conflicto visible/auto), y
+   "position: sticky" se pega correctamente al tope de ESTE contenedor
+   mientras scrolleas adentro de él, con su propia barra de scroll. Es el
+   mismo patrón que usan las hojas de cálculo (encabezado congelado, tabla
+   con su propio scroll). El "overflow: hidden" de ".data-table" (para
+   redondear las esquinas) también hay que quitárselo aquí, por la misma
+   razón que antes. Solo aplica a Stock y Pedidos (ver Dashboard.jsx) — el
+   resto de las tablas de la app se quedan exactamente igual que antes. */
+.table-scroll-fijo {
+  max-height: 70vh;
+  overflow-y: auto;
+}
 .table-scroll-fijo .stock-table,
 .table-scroll-fijo .pedidos-table {
   overflow: visible;
