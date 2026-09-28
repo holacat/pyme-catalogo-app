@@ -694,6 +694,24 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
    texto normal de ".modal-field", para que se lea como una aclaración, no
    como parte de la etiqueta del campo. */
 .campo-nota { font-size: 0.75rem; font-weight: 400; }
+
+/* ---- Etapa 4, rediseño del candado de Pedidos (2026-09-28) ----
+   Botón "🔓 Desbloquear" que solo aparece dentro de la nota de "pedido
+   bloqueado" para quien SÍ puede saltarse el candado (Admin Central, o
+   quien se lo hayan dado en 🔐 Permisos) — separado un poco del texto de
+   la nota para que no se vea pegado. La nota de "candado abierto" usa el
+   mismo tono ámbar de advertencia que ya se usa en otras partes de la app
+   (ver ".badge-admin-central" arriba) para que, mientras un pedido ajeno
+   sigue desbloqueado, quede claro de un vistazo que es un estado especial
+   y no lo normal. */
+.btn-candado-pedido {
+  margin-left: 0.3rem;
+  vertical-align: baseline;
+}
+.campo-nota-candado-abierto {
+  color: #92400e;
+  font-weight: 600;
+}
 /* Fila con un cambio sin guardar: fondo tenue + una barra de color a la
    izquierda, para verla de un vistazo en toda la tabla. */
 .fila-sin-guardar td {
