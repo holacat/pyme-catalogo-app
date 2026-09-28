@@ -65,6 +65,41 @@ export default function ProductCard({ producto, onAgregarCarrito }) {
   const [detalleAbierto, setDetalleAbierto] = useState(false);
   const articleRef = useRef(null);
 
+  // Arreglo (2026-09-28, pedido por Claudia con captura: "1ra imagen el
+  // catalogo de compu no tenias que ocultarle los detalles como en el
+  // telefono"). Ocultar Categoría/Descripción/Talla/Color detrás de "Ver
+  // más" tenía sentido para compactar la tarjeta angosta del celular, pero
+  // en computadora sobra espacio de sobra y esconder esos datos solo
+  // obliga a un clic extra sin necesidad. Aquí detectamos si la pantalla es
+  // de escritorio (mismo punto de quiebre de 700px que ya se usa en
+  // global.css para todo lo demás) y, si lo es, esos campos se muestran
+  // SIEMPRE completos — el botón "Ver más" ni siquiera aparece, porque ya
+  // no hay nada que expandir. En celular el comportamiento queda idéntico
+  // a como estaba (oculto por default, con "Ver más" para desplegarlo).
+  const [esEscritorio, setEsEscritorio] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia('(min-width: 701px)').matches : true
+  );
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return;
+    const mq = window.matchMedia('(min-width: 701px)');
+    const actualizar = () => setEsEscritorio(mq.matches);
+    actualizar();
+    if (mq.addEventListener) {
+      mq.addEventListener('change', actualizar);
+      return () => mq.removeEventListener('change', actualizar);
+    }
+    // Respaldo para navegadores viejos que no soportan addEventListener en
+    // MediaQueryList (Safari muy antiguo).
+    mq.addListener(actualizar);
+    return () => mq.removeListener(actualizar);
+  }, []);
+
+  // Combina el estado manual (celular, botón "Ver más") con el escritorio
+  // (siempre mostrado): úsalo en vez de "detalleAbierto" a solas para
+  // decidir si se dibuja el detalle completo.
+  const mostrarDetalleCompleto = esEscritorio || detalleAbierto;
+
   // Arreglo (2026-09-25, reportado por Claudia: "al darle click en Ver más
   // se agranda pero tengo que manualmente deslizar para ver todo el cuadro
   // agrandado, eso debe ser automático"). Al abrir "Ver más" dentro del
@@ -88,7 +123,7 @@ export default function ProductCard({ producto, onAgregarCarrito }) {
   const nombreCompleto = producto.Nombre || '';
   const nombreEsLargo = nombreCompleto.length > 26;
   const nombreMostrado =
-    !nombreEsLargo || detalleAbierto ? nombreCompleto : nombreCompleto.slice(0, 26) + '…';
+    !nombreEsLargo || mostrarDetalleCompleto ? nombreCompleto : nombreCompleto.slice(0, 26) + '…';
 
   // Rediseño de la tarjeta compacta (2026-09-25, pedido por Claudia con
   // capturas: "necesito que no se vean tan largos, se ve feo, solo que se
@@ -110,9 +145,10 @@ export default function ProductCard({ producto, onAgregarCarrito }) {
   const tallaCompleta = producto.Talla || '';
 
   // El botón "Ver más" aparece si hay CUALQUIER información extra que
-  // mostrar (sin importar qué tan larga sea) o si el nombre se recortó.
+  // mostrar (sin importar qué tan larga sea) o si el nombre se recortó. En
+  // escritorio nunca aparece: todo ya se muestra completo de por sí.
   const hayInfoExtra = !!(categoriaCompleta || descripcionCompleta || colorCompleto || tallaCompleta);
-  const hayAlgoQueExpandir = nombreEsLargo || hayInfoExtra;
+  const hayAlgoQueExpandir = !esEscritorio && (nombreEsLargo || hayInfoExtra);
 
   function fotoAnterior(e) {
     e.stopPropagation();
@@ -140,7 +176,7 @@ export default function ProductCard({ producto, onAgregarCarrito }) {
   }
 
   return (
-    <article ref={articleRef} className={`product-card ${detalleAbierto ? 'product-card-expandido' : ''}`}>
+    <article ref={articleRef} className={`product-card ${mostrarDetalleCompleto ? 'product-card-expandido' : ''}`}>
       <div className="product-photo">
         {enOferta && <span className="oferta-badge">🔥 Oferta</span>}
         {fotos.length > 0 ? (
@@ -173,7 +209,7 @@ export default function ProductCard({ producto, onAgregarCarrito }) {
       </div>
           <div className="product-body">
         <h3 className="product-nombre">{nombreMostrado}</h3>
-        {detalleAbierto && producto.Categoria && <span className="badge">{categoriaCompleta}</span>}
+        {mostrarDetalleCompleto && producto.Categoria && <span className="badge">{categoriaCompleta}</span>}
         {precioOferta ? (
           <p className="price price-oferta">
             <span className="price-original">${Number(producto.Precio).toLocaleString('es-MX')}</span>
@@ -186,11 +222,11 @@ export default function ProductCard({ producto, onAgregarCarrito }) {
             abajo están deshabilitados); "Disponible: N" (la cantidad exacta)
             se oculta hasta abrir "Ver más", igual que el resto del detalle. */}
         {sinStock && <p className="stock out">Agotado</p>}
-        {detalleAbierto && !sinStock && <p className="stock">Disponible: {producto.Stock}</p>}
+        {mostrarDetalleCompleto && !sinStock && <p className="stock">Disponible: {producto.Stock}</p>}
 
-        {detalleAbierto && descripcionCompleta && <p className="description">{descripcionCompleta}</p>}
-        {detalleAbierto && producto.Talla && <p className="product-talla">Talla: {tallaCompleta}</p>}
-        {detalleAbierto && producto.Color && <p className="product-color">Color: {colorCompleto}</p>}
+        {mostrarDetalleCompleto && descripcionCompleta && <p className="description">{descripcionCompleta}</p>}
+        {mostrarDetalleCompleto && producto.Talla && <p className="product-talla">Talla: {tallaCompleta}</p>}
+        {mostrarDetalleCompleto && producto.Color && <p className="product-color">Color: {colorCompleto}</p>}
 
         {hayAlgoQueExpandir && (
           <button
