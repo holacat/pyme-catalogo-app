@@ -672,6 +672,11 @@ export default function Dashboard() {
   const [filtroEstado, setFiltroEstado] = useState('');
   const [filtroPedidoDesde, setFiltroPedidoDesde] = useState('');
   const [filtroPedidoHasta, setFiltroPedidoHasta] = useState('');
+  // Etapa 4 (Pedidos por dueño, 2026-09-26): '' significa "todos los
+  // pedidos"; cualquier otro valor es un usuarioId — para un Vendedor solo
+  // puede ser el suyo propio ("Mis pedidos"), para un Admin/Admin Central
+  // puede ser el de cualquier persona (selector "Ver pedidos de…").
+  const [filtroPedidoDueno, setFiltroPedidoDueno] = useState('');
   const [fotoAmpliada, setFotoAmpliada] = useState('');
   // Nota de un pedido abierta "en grande" (ver/editar completa). Null cuando
   // no hay ninguna abierta. Guarda también `onChange`, que es el `setNotas`
@@ -963,6 +968,7 @@ export default function Dashboard() {
     setFiltroEstado('');
     setFiltroPedidoDesde('');
     setFiltroPedidoHasta('');
+    setFiltroPedidoDueno('');
     setMensaje('');
   }
 
@@ -1221,9 +1227,16 @@ export default function Dashboard() {
   // cargada.
   const categoriaPorProductoId = {};
   const codigoPorProductoId = {};
+  // Etapa 4 (Pedidos por dueño, 2026-09-26): quién(es) tienen asignado el
+  // stock del producto de cada pedido AHORITA — se resuelve en vivo con los
+  // mismos `Duenos` que ya trae cada producto (los mismos que usa la
+  // pestaña Stock), sin guardar ningún "dueño" fijo en Pedidos. Así, si el
+  // stock cambia de dueño después, el permiso del pedido se actualiza solo.
+  const duenosPorProductoId = {};
   productos.forEach((p) => {
     categoriaPorProductoId[p.ID] = categoriaDeProducto(p);
     codigoPorProductoId[p.ID] = p.CodigoPropio || '';
+    duenosPorProductoId[p.ID] = p.Duenos || [];
   });
 
   const productosPorFecha = productosOrdenados.filter(productoEnRangoDeFecha);
@@ -1282,13 +1295,28 @@ export default function Dashboard() {
   }
 
   const pedidosPorFecha = pedidosOrdenados.filter(pedidoEnRangoDeFecha);
-  const conteoPorEstado = pedidosPorFecha.reduce((acc, p) => {
+
+  // Etapa 4 (Pedidos por dueño): "Todos" (filtroPedidoDueno === '') no
+  // filtra nada — ver todos los pedidos siempre se puede, sin importar de
+  // quién es el producto (la restricción real es de EDICIÓN, no de
+  // visibilidad, ver PedidoRow). Con una persona elegida, solo se quedan
+  // los pedidos cuyo producto tiene a esa persona como dueño (con algo de
+  // cantidad asignada de verdad).
+  function pedidoEsDelDueno(pedido) {
+    if (!filtroPedidoDueno) return true;
+    return (duenosPorProductoId[pedido.ProductoID] || []).some(
+      (d) => String(d.usuarioId) === String(filtroPedidoDueno) && d.cantidad > 0
+    );
+  }
+  const pedidosPorDueno = pedidosPorFecha.filter(pedidoEsDelDueno);
+
+  const conteoPorEstado = pedidosPorDueno.reduce((acc, p) => {
     acc[p.Estado] = (acc[p.Estado] || 0) + 1;
     return acc;
   }, {});
   const pedidosFiltrados = filtroEstado
-    ? pedidosPorFecha.filter((p) => p.Estado === filtroEstado)
-    : pedidosPorFecha;
+    ? pedidosPorDueno.filter((p) => p.Estado === filtroEstado)
+    : pedidosPorDueno;
 
   const filtroPedidoFechaActivo = !!(filtroPedidoDesde || filtroPedidoHasta);
 
@@ -1654,10 +1682,52 @@ export default function Dashboard() {
             )}
           </div>
 
+          {/* Etapa 4 (Pedidos por dueño, 2026-09-26): igual que "Mi stock
+              personal" en Stock — un Vendedor solo puede alternar entre
+              "Todos" y "Mis pedidos" (los suyos); un Admin/Admin Central
+              puede además elegir a CUALQUIER persona para ver nada más los
+              pedidos de lo que ella tiene asignado. Esto solo filtra qué se
+              VE en la tabla — no restringe nada de edición, eso lo hace
+              cada fila por separado (ver PedidoRow) sin importar este
+              filtro. */}
+          <div className="stock-personal-toggle">
+            {esAdministrador ? (
+              <label className="pedidos-filtro-dueno-admin">
+                Ver pedidos de:
+                <select
+                  value={filtroPedidoDueno}
+                  onChange={(e) => setFiltroPedidoDueno(e.target.value)}
+                >
+                  <option value="">Todos</option>
+                  {usuarios.filter((u) => esActivo(u.Activo)).map((u) => (
+                    <option key={u.ID} value={u.ID}>{u.Nombre}</option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className={`resumen-btn ${filtroPedidoDueno === '' ? 'activo' : ''}`}
+                  onClick={() => setFiltroPedidoDueno('')}
+                >
+                  Todos los pedidos
+                </button>
+                <button
+                  type="button"
+                  className={`resumen-btn ${filtroPedidoDueno === usuarioId ? 'activo' : ''}`}
+                  onClick={() => setFiltroPedidoDueno(usuarioId)}
+                >
+                  Mis pedidos
+                </button>
+              </>
+            )}
+          </div>
+
           {/* Tablita de conteo por estado, ARRIBA de la tabla (no al lado),
               para no quitarle ancho a la tabla y así evitar que tenga que
               hacer scroll hacia los lados. Los números ya respetan el
-              filtro de fechas de arriba, si está activo. */}
+              filtro de fechas Y el de dueño de arriba, si están activos. */}
           <div className="pedidos-resumen-fila">
             <span className="pedidos-resumen-titulo">Pedidos por estado:</span>
             <button
@@ -1666,7 +1736,7 @@ export default function Dashboard() {
               onClick={() => setFiltroEstado('')}
             >
               <span>Todos</span>
-              <strong>{pedidosPorFecha.length}</strong>
+              <strong>{pedidosPorDueno.length}</strong>
             </button>
             {ESTADOS_PEDIDO.map((estadoOpcion) => (
               <button
@@ -1686,7 +1756,7 @@ export default function Dashboard() {
               <thead>
                 <tr>
                   <th>Fecha</th><th>Hora</th><th>Cliente</th><th>Teléfono</th><th>Producto</th><th>Categoría</th><th>Código</th>
-                  <th>Cant.</th><th>Precio</th><th>Total</th><th>Notas</th><th>Estado</th><th>Guardar</th>
+                  <th>Cant.</th><th>Precio</th><th>Total</th><th>Notas</th><th>Estado</th><th>Dueño(s)</th><th>Guardar</th>
                 </tr>
               </thead>
               <tbody>
@@ -1696,6 +1766,9 @@ export default function Dashboard() {
                     pedido={ped}
                     categoria={categoriaPorProductoId[ped.ProductoID] || '—'}
                     codigo={codigoPorProductoId[ped.ProductoID] || '—'}
+                    duenos={duenosPorProductoId[ped.ProductoID] || []}
+                    usuarioId={usuarioId}
+                    controlTotal={esAdministrador}
                     onGuardar={handleGuardarPedido}
                     onDirtyChange={marcarSucio}
                     onAbrirNota={(cliente, valor, onChange) => setNotaEnZoom({ cliente, valor, onChange })}
@@ -1704,7 +1777,7 @@ export default function Dashboard() {
               </tbody>
             </table>
             {pedidosFiltrados.length === 0 && (
-              <p className="info-msg">Ningún pedido coincide con el estado o el rango de fechas de arriba.</p>
+              <p className="info-msg">Ningún pedido coincide con el estado, el rango de fechas o el filtro de "Ver pedidos de…" de arriba.</p>
             )}
           </div>
         </>
@@ -4579,7 +4652,28 @@ function AnaliticaTab({ sesionToken }) {
   );
 }
 
-function PedidoRow({ pedido, categoria, codigo, onGuardar, onDirtyChange, onAbrirNota }) {
+function PedidoRow({
+  pedido,
+  categoria,
+  codigo,
+  duenos = [],
+  usuarioId,
+  controlTotal,
+  onGuardar,
+  onDirtyChange,
+  onAbrirNota,
+}) {
+  // Etapa 4 (Pedidos por dueño, 2026-09-26): mismo patrón que ya usa
+  // StockRow para decidir si esta cuenta puede editar la fila — Admin/Admin
+  // Central siempre pueden (controlTotal), o si YO soy uno de los dueños
+  // del producto de este pedido, o si el producto todavía no tiene ningún
+  // dueño registrado (para no bloquear una fila por un dato faltante). A
+  // diferencia de Stock, aquí SOLO se bloquean Cantidad y Estado — Teléfono
+  // y Notas los puede seguir editando cualquiera con permiso de "pedidos",
+  // sea o no dueño (así lo pidió Claudia).
+  const soyDuenoDelPedido = duenos.some((d) => String(d.usuarioId) === String(usuarioId) && d.cantidad > 0);
+  const puedoEditarEstadoCantidad = controlTotal || soyDuenoDelPedido || duenos.length === 0;
+
   const [cantidad, setCantidad] = useState(pedido.Cantidad);
   const [telefono, setTelefono] = useState(() => textoSeguro(pedido.Telefono));
   const [notas, setNotas] = useState(() => notasIniciales(pedido));
@@ -4666,6 +4760,7 @@ function PedidoRow({ pedido, categoria, codigo, onGuardar, onDirtyChange, onAbri
           className={`pedido-input-cant ${cambioCantidad ? 'campo-modificado' : ''}`}
           value={cantidad}
           onChange={(e) => setCantidad(limitarDigitos(e.target.value, MAX_DIGITOS_CANTIDAD))}
+          disabled={!puedoEditarEstadoCantidad}
         />
       </td>
       <td>{precioPedido !== null ? formatearMoneda(precioPedido) : '—'}</td>
@@ -4697,6 +4792,7 @@ function PedidoRow({ pedido, categoria, codigo, onGuardar, onDirtyChange, onAbri
           className={cambioEstado ? 'campo-modificado' : ''}
           value={estado}
           onChange={(e) => handleCambiarEstado(e.target.value)}
+          disabled={!puedoEditarEstadoCantidad}
         >
           <option>Sin solicitud</option>
           <option>En proceso</option>
@@ -4714,9 +4810,28 @@ function PedidoRow({ pedido, categoria, codigo, onGuardar, onDirtyChange, onAbri
                 className="pedido-input-reembolso"
                 value={montoReembolso}
                 onChange={(e) => setMontoReembolso(limitarDigitos(e.target.value, MAX_DIGITOS_PRECIO))}
+                disabled={!puedoEditarEstadoCantidad}
               />
             </label>
           </div>
+        )}
+        {/* Etapa 4 (Pedidos por dueño): mismo patrón visual que ya usa
+            Stock para avisar por qué un campo salió gris. */}
+        {!puedoEditarEstadoCantidad && (
+          <p className="muted campo-nota">🔒 Solo el dueño del producto o un Admin puede cambiar Estado/Cantidad.</p>
+        )}
+      </td>
+      <td>
+        {duenos.length === 0 ? (
+          <span className="muted">Sin asignar</span>
+        ) : (
+          <ul className="pedido-duenos-lista">
+            {duenos.filter((d) => d.cantidad > 0).map((d) => (
+              <li key={d.usuarioId} className={String(d.usuarioId) === String(usuarioId) ? 'pedido-dueno-yo' : ''}>
+                {String(d.usuarioId) === String(usuarioId) ? `Yo (${d.nombre})` : d.nombre}
+              </li>
+            ))}
+          </ul>
         )}
       </td>
       <td>
