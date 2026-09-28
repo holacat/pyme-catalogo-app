@@ -346,6 +346,15 @@ const USUARIO_ID_KEY = 'pyme_sesion_usuario_id';
 // individual). Se guarda como texto JSON, ej. '{"stock":true,"usuarios":false,...}'.
 const PERMISOS_KEY = 'pyme_sesion_permisos';
 
+// Etapa 4, rediseño del candado de Pedidos (2026-09-28): llave del permiso
+// especial "¿puede saltarse el candado de un pedido ajeno?" dentro de ese
+// mismo objeto de permisos — MISMA llave que usa el backend
+// (CLAVE_CANDADO_PEDIDOS en Code.gs). A propósito NO se agrega a
+// PESTANAS_TODAS_PERMITIDAS (el respaldo de "algo salió mal, muestra todo"
+// de abajo): si por lo que sea no se pudieron cargar los permisos reales,
+// el candado se queda APAGADO por default (más seguro que fallar abierto).
+const CLAVE_CANDADO_PEDIDOS = 'candadoPedidos';
+
 // Respaldo seguro: si por lo que sea no hay permisos guardados (una sesión
 // vieja de antes de que existiera esta función, o un error al leerlos), se
 // muestran TODAS las pestañas en vez de ninguna — así nadie se queda con el
@@ -1768,7 +1777,7 @@ export default function Dashboard() {
                     codigo={codigoPorProductoId[ped.ProductoID] || '—'}
                     duenos={duenosPorProductoId[ped.ProductoID] || []}
                     usuarioId={usuarioId}
-                    controlTotal={esAdministrador}
+                    puedeSaltarCandado={esAdminCentral || !!permisos[CLAVE_CANDADO_PEDIDOS]}
                     onGuardar={handleGuardarPedido}
                     onDirtyChange={marcarSucio}
                     onAbrirNota={(cliente, valor, onChange) => setNotaEnZoom({ cliente, valor, onChange })}
@@ -4226,6 +4235,11 @@ function PermisosTab({ sesionToken, usuarios }) {
   const [pestanas, setPestanas] = useState([]);
   const [rolDefaults, setRolDefaults] = useState({ Administrador: {}, Vendedor: {} });
   const [overrides, setOverrides] = useState([]);
+  // Etapa 4, rediseño del candado de Pedidos (2026-09-28): permiso especial
+  // aparte de las pestañas normales (ver comentario junto a
+  // CLAVE_CANDADO_PEDIDOS arriba) — se guarda y se muestra por separado,
+  // aunque reutiliza exactamente las mismas acciones/tabla de abajo.
+  const [permisoCandadoPedidos, setPermisoCandadoPedidos] = useState({ clave: CLAVE_CANDADO_PEDIDOS, etiqueta: 'Editar pedidos de otro dueño (con candado)' });
   const [cargando, setCargando] = useState(true);
   const [mensaje, setMensaje] = useState('');
   const [celdaGuardando, setCeldaGuardando] = useState(''); // "Rol:pestana" en curso, o ''
@@ -4242,6 +4256,7 @@ function PermisosTab({ sesionToken, usuarios }) {
         setPestanas(res.pestanas || []);
         setRolDefaults(res.rolDefaults || { Administrador: {}, Vendedor: {} });
         setOverrides(res.overrides || []);
+        if (res.permisoCandadoPedidos) setPermisoCandadoPedidos(res.permisoCandadoPedidos);
         setMensaje('');
       })
       .catch((err) => setMensaje(`Error al cargar permisos: ${err.message}`))
@@ -4294,6 +4309,7 @@ function PermisosTab({ sesionToken, usuarios }) {
   }
 
   function etiquetaDe(pestanaClave) {
+    if (pestanaClave === CLAVE_CANDADO_PEDIDOS) return permisoCandadoPedidos.etiqueta;
     const encontrada = pestanas.find((p) => p.clave === pestanaClave);
     return encontrada ? encontrada.etiqueta : pestanaClave;
   }
@@ -4346,6 +4362,53 @@ function PermisosTab({ sesionToken, usuarios }) {
         </table>
       </div>
 
+      {/* Etapa 4, rediseño del candado de Pedidos (2026-09-28): permiso
+          ESPECIAL, separado a propósito de la tabla de pestañas de arriba
+          para que no se confunda con "ver o no ver una sección" — esto es
+          la capacidad de saltarse el candado de "este pedido no es tuyo"
+          en la pestaña Pedidos. Reutiliza la MISMA acción de guardado
+          (`toggleRolPermiso`) que la tabla de arriba, solo que con la
+          clave especial "candadoPedidos" en vez de una pestaña real. */}
+      <h3>Permiso especial: candado de Pedidos</h3>
+      <p className="muted">
+        Tú (Admin Central) siempre puedes desbloquear un pedido ajeno con el
+        candado 🔓 (con confirmación antes de cada vez). Por default, NADIE
+        más puede — ni siquiera un Administrador normal: ve el pedido de
+        otra persona bloqueado en gris, igual que un Vendedor. Actívalo aquí
+        solo si quieres que todo un Rol, o una persona en concreto, también
+        pueda desbloquear pedidos ajenos.
+      </p>
+      <div className="table-scroll">
+        <table className="data-table permisos-tabla-roles">
+          <thead>
+            <tr>
+              <th>Rol</th>
+              <th>{permisoCandadoPedidos.etiqueta}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {['Administrador', 'Vendedor'].map((rol) => {
+              const valor = !!(rolDefaults[rol] && rolDefaults[rol][CLAVE_CANDADO_PEDIDOS]);
+              const guardandoEstaCelda = celdaGuardando === `${rol}:${CLAVE_CANDADO_PEDIDOS}`;
+              return (
+                <tr key={rol}>
+                  <td>{rol}</td>
+                  <td className="permisos-celda-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={valor}
+                      disabled={guardandoEstaCelda}
+                      onChange={() => toggleRolPermiso(rol, CLAVE_CANDADO_PEDIDOS, valor)}
+                      title={`${rol} — ${permisoCandadoPedidos.etiqueta}: ${valor ? 'permitido' : 'restringido'}`}
+                    />
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
       <h3>Excepciones por persona</h3>
       <p className="muted">
         Usa esto solo para casos especiales: dar o quitar UNA pestaña
@@ -4363,12 +4426,13 @@ function PermisosTab({ sesionToken, usuarios }) {
           </select>
         </label>
         <label>
-          Pestaña
+          Pestaña / permiso
           <select value={nuevaPestana} onChange={(e) => setNuevaPestana(e.target.value)} required>
             <option value="">Elige…</option>
             {pestanas.map((p) => (
               <option key={p.clave} value={p.clave}>{p.etiqueta}</option>
             ))}
+            <option value={CLAVE_CANDADO_PEDIDOS}>🔒 {permisoCandadoPedidos.etiqueta}</option>
           </select>
         </label>
         <label>
@@ -4747,21 +4811,46 @@ function PedidoRow({
   codigo,
   duenos = [],
   usuarioId,
-  controlTotal,
+  puedeSaltarCandado,
   onGuardar,
   onDirtyChange,
   onAbrirNota,
 }) {
-  // Etapa 4 (Pedidos por dueño, 2026-09-26): mismo patrón que ya usa
-  // StockRow para decidir si esta cuenta puede editar la fila — Admin/Admin
-  // Central siempre pueden (controlTotal), o si YO soy uno de los dueños
-  // del producto de este pedido, o si el producto todavía no tiene ningún
-  // dueño registrado (para no bloquear una fila por un dato faltante). A
-  // diferencia de Stock, aquí SOLO se bloquean Cantidad y Estado — Teléfono
-  // y Notas los puede seguir editando cualquiera con permiso de "pedidos",
-  // sea o no dueño (así lo pidió Claudia).
+  // Etapa 4 (Pedidos por dueño) — REDISEÑADO 2026-09-28 a pedido explícito
+  // de Claudia. Diseño anterior (2026-09-26): cualquier Admin/Admin Central
+  // tenía edición total automática (`controlTotal`) y solo Estado/Cantidad
+  // se bloqueaban; Teléfono/Notas quedaban siempre editables. Claudia pidió
+  // corregir eso:
+  //   1. Teléfono y Notas se bloquean IGUAL que Estado/Cantidad — los 4
+  //      campos, sin excepción, si el pedido no es tuyo.
+  //   2. Un Administrador NORMAL (no Admin Central) ya NO tiene edición
+  //      automática — ve el pedido ajeno bloqueado en gris, IGUAL que un
+  //      Vendedor, para evitar un clic accidental sobre información de
+  //      ventas de otra persona.
+  //   3. Solo el Admin Central puede saltarse el bloqueo, y NUNCA en
+  //      silencio: aparece un candado 🔒 que, al dar clic, pide una
+  //      confirmación explícita antes de desbloquear esa fila en concreto.
+  //   4. Cualquier otra persona (Admin normal o Vendedor) solo obtiene esa
+  //      misma capacidad si se le concede a propósito desde 🔐 Permisos
+  //      (permiso especial nuevo "candadoPedidos", por Rol o por persona,
+  //      APAGADO por default para todos salvo el Admin Central).
+  // `puedeSaltarCandado` ya viene calculado desde el componente padre como
+  // `esAdminCentral || permisos.candadoPedidos` — aquí solo se usa.
   const soyDuenoDelPedido = duenos.some((d) => String(d.usuarioId) === String(usuarioId) && d.cantidad > 0);
-  const puedoEditarEstadoCantidad = controlTotal || soyDuenoDelPedido || duenos.length === 0;
+  const sinDuenoAsignado = duenos.length === 0;
+  // El candado empieza CERRADO siempre que la fila se dibuja — no se
+  // recuerda entre refrescos ni entre pedidos, a propósito: cada vez que se
+  // vaya a tocar un pedido ajeno hay que confirmar de nuevo, nunca queda
+  // "desbloqueado para siempre" por accidente.
+  const [candadoAbierto, setCandadoAbierto] = useState(false);
+  const puedoEditarPedido = soyDuenoDelPedido || sinDuenoAsignado || (puedeSaltarCandado && candadoAbierto);
+
+  function handleAbrirCandado() {
+    const confirmar = window.confirm(
+      'Vas a alterar información de ventas de un producto que no es tuyo. ¿Seguro que quieres continuar?'
+    );
+    if (confirmar) setCandadoAbierto(true);
+  }
 
   const [cantidad, setCantidad] = useState(pedido.Cantidad);
   const [telefono, setTelefono] = useState(() => textoSeguro(pedido.Telefono));
@@ -4837,6 +4926,8 @@ function PedidoRow({
           className={`pedido-input-tel ${cambioTelefono ? 'campo-modificado' : ''}`}
           value={telefono}
           onChange={(e) => setTelefono(limitarTelefono(e.target.value))}
+          disabled={!puedoEditarPedido}
+          title={!puedoEditarPedido ? 'Bloqueado: este pedido no es tuyo' : undefined}
         />
       </td>
       <td>{pedido.Producto}</td>
@@ -4849,7 +4940,7 @@ function PedidoRow({
           className={`pedido-input-cant ${cambioCantidad ? 'campo-modificado' : ''}`}
           value={cantidad}
           onChange={(e) => setCantidad(limitarDigitos(e.target.value, MAX_DIGITOS_CANTIDAD))}
-          disabled={!puedoEditarEstadoCantidad}
+          disabled={!puedoEditarPedido}
         />
       </td>
       <td>{precioPedido !== null ? formatearMoneda(precioPedido) : '—'}</td>
@@ -4865,12 +4956,15 @@ function PedidoRow({
             value={notas}
             onChange={(e) => setNotas(e.target.value)}
             placeholder="Sin notas"
+            disabled={!puedoEditarPedido}
+            title={!puedoEditarPedido ? 'Bloqueado: este pedido no es tuyo' : undefined}
           />
           <button
             type="button"
             className="pedido-notas-zoom-btn"
             onClick={() => onAbrirNota(pedido.Cliente, notas, setNotas)}
             title="Ver nota completa"
+            disabled={!puedoEditarPedido}
           >
             🔍
           </button>
@@ -4881,7 +4975,7 @@ function PedidoRow({
           className={cambioEstado ? 'campo-modificado' : ''}
           value={estado}
           onChange={(e) => handleCambiarEstado(e.target.value)}
-          disabled={!puedoEditarEstadoCantidad}
+          disabled={!puedoEditarPedido}
         >
           <option>Sin solicitud</option>
           <option>En proceso</option>
@@ -4899,15 +4993,40 @@ function PedidoRow({
                 className="pedido-input-reembolso"
                 value={montoReembolso}
                 onChange={(e) => setMontoReembolso(limitarDigitos(e.target.value, MAX_DIGITOS_PRECIO))}
-                disabled={!puedoEditarEstadoCantidad}
+                disabled={!puedoEditarPedido}
               />
             </label>
           </div>
         )}
-        {/* Etapa 4 (Pedidos por dueño): mismo patrón visual que ya usa
-            Stock para avisar por qué un campo salió gris. */}
-        {!puedoEditarEstadoCantidad && (
-          <p className="muted campo-nota">🔒 Solo el dueño del producto o un Admin puede cambiar Estado/Cantidad.</p>
+        {/* Etapa 4, rediseño del candado (2026-09-28): mismo patrón visual
+            que ya usa Stock para avisar por qué la fila salió gris — pero
+            ahora, si esta cuenta SÍ tiene permiso de saltarse el candado
+            (Admin Central, o quien se lo hayan dado en 🔐 Permisos), se le
+            ofrece el candadito para desbloquear esta fila EN CONCRETO, con
+            una confirmación explícita antes de abrirlo (nunca en silencio,
+            para evitar un clic accidental sobre ventas de alguien más). */}
+        {!puedoEditarPedido && (
+          <p className="muted campo-nota">
+            🔒 Este pedido es de un producto que no te pertenece — Estado, Cantidad, Teléfono y Notas están bloqueados.
+            {puedeSaltarCandado && (
+              <>
+                {' '}
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-small btn-candado-pedido"
+                  onClick={handleAbrirCandado}
+                  title="Vas a alterar información de ventas de un producto que no es tuyo"
+                >
+                  🔓 Desbloquear
+                </button>
+              </>
+            )}
+          </p>
+        )}
+        {puedoEditarPedido && candadoAbierto && !soyDuenoDelPedido && !sinDuenoAsignado && (
+          <p className="muted campo-nota campo-nota-candado-abierto">
+            🔓 Candado abierto — estás editando un pedido que no es tuyo.
+          </p>
         )}
       </td>
       <td>
