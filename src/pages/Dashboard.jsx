@@ -1885,6 +1885,8 @@ export default function Dashboard() {
           opciones={opciones}
           sesionToken={sesionToken}
           onCambio={() => cargarTodo(sesionToken, { silencioso: true })}
+          iniciarCarga={iniciarCarga}
+          terminarCarga={terminarCarga}
         />
       )}
 
@@ -2043,6 +2045,15 @@ function ProductoForm({ sesionToken, opciones = {}, setOpciones, usuarios = [], 
   const usaEstadoExterno = !esEdicion && formExterno !== undefined && !!setFormExterno;
   const [formInterno, setFormInterno] = useState(() => (esEdicion ? formDesdeProducto(productoExistente) : { ...FORM_INICIAL, duenoId: usuarioId || '' }));
   const [fotosInterno, setFotosInterno] = useState(() => (esEdicion ? fotosDesdeProducto(productoExistente) : []));
+  // Arreglo (2026-09-28, pedido por Claudia): guardamos una "foto" de cómo
+  // estaba el formulario justo al ABRIRSE el modal de "Editar producto".
+  // Como este componente NO se vuelve a montar mientras el modal sigue
+  // abierto (solo cambian sus props si los datos se refrescan en segundo
+  // plano), esta referencia se queda fija con los valores originales — nos
+  // sirve para, al guardar, mandar solo lo que el usuario de verdad cambió
+  // (ver handleSubmit) en vez de reenviar TODO el formulario.
+  const valorOriginalRef = useRef(esEdicion ? formDesdeProducto(productoExistente) : null);
+  const fotosOriginalRef = useRef(esEdicion ? fotosDesdeProducto(productoExistente) : null);
   const form = usaEstadoExterno ? formExterno : formInterno;
   const setForm = usaEstadoExterno ? setFormExterno : setFormInterno;
   const fotos = usaEstadoExterno ? fotosExterno : fotosInterno;
@@ -2215,13 +2226,37 @@ function ProductoForm({ sesionToken, opciones = {}, setOpciones, usuarios = [], 
     // vuelve a poner por default a quien está creando el producto.
     const duenoIdFinal = !esEdicion && !form.duenoId ? usuarioId : form.duenoId;
     const duenoSeleccionado = usuarios.find((u) => u.ID === duenoIdFinal);
-    const datos = {
-      sesionToken,
-      ...form,
-      duenoId: duenoIdFinal,
-      duenoNombre: duenoSeleccionado ? duenoSeleccionado.Nombre : (duenoIdFinal === usuarioId ? nombreSesion : ''),
-      fotoUrl: fotos.join('|'),
-    };
+
+    let datos;
+    if (esEdicion) {
+      // Arreglo (2026-09-28, pedido por Claudia): antes se reenviaban TODOS
+      // los campos del formulario tal cual estaban en pantalla, aunque
+      // nadie los hubiera tocado — eso hacía que la Bitácora reportara
+      // "cambios" en varios datos cuando en realidad solo se editó uno.
+      // Ahora comparamos contra el valor ORIGINAL con el que se abrió el
+      // formulario (valorOriginalRef/fotosOriginalRef) y solo mandamos al
+      // backend los campos que de verdad son distintos.
+      datos = { sesionToken };
+      const original = valorOriginalRef.current || {};
+      Object.keys(form).forEach((campo) => {
+        if (String(original[campo] ?? '') !== String(form[campo] ?? '')) {
+          datos[campo] = form[campo];
+        }
+      });
+      const fotoUrlOriginal = (fotosOriginalRef.current || []).join('|');
+      const fotoUrlActual = fotos.join('|');
+      if (fotoUrlOriginal !== fotoUrlActual) {
+        datos.fotoUrl = fotoUrlActual;
+      }
+    } else {
+      datos = {
+        sesionToken,
+        ...form,
+        duenoId: duenoIdFinal,
+        duenoNombre: duenoSeleccionado ? duenoSeleccionado.Nombre : (duenoIdFinal === usuarioId ? nombreSesion : ''),
+        fotoUrl: fotos.join('|'),
+      };
+    }
     const promesa = conLimiteDeTiempo(
       esEdicion
         ? actualizarProducto({ ...datos, productoId: productoExistente.ID })
@@ -2673,7 +2708,7 @@ function agruparParaOrden(productos, categoriasPredeterminadas, categoriasOculta
 // completa de un jalón; para ocultarla/mostrarla del catálogo sin tocar sus
 // productos; para agregar una categoría nueva vacía; y para quitar o borrar
 // una categoría completa (con o sin sus productos).
-function OrdenTab({ productos, opciones, sesionToken, onCambio }) {
+function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, terminarCarga }) {
   const categoriasPredeterminadas = opciones.categoria || [];
   const categoriasOcultas = opciones.categoriaOculta || [];
   const categoriaOrdenExplicito = opciones.categoriaOrden || [];
@@ -2758,10 +2793,21 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio }) {
     const cambios = grupo.productos.map((p, i) => ({ productoId: p.ID, orden: i + 1 }));
     setGuardando(true);
     setMensaje('');
+    // Arreglo (2026-09-28, pedido por Claudia): "Orden del catálogo" nunca
+    // había estado conectado al pacman (indicador de carga global) — todas
+    // sus acciones (mover, renombrar, ocultar, agregar y eliminar
+    // categoría) solo tenían su propio texto/botón local de "Guardando…" o
+    // "Aplicando…", fácil de perder de vista, sobre todo en la acción de
+    // "Eliminar categoría y sus productos" que puede tardar más. Ahora
+    // TODAS avisan también al pacman, igual que Stock/Pedidos.
+    iniciarCarga?.();
     actualizarOrdenMultiple({ sesionToken, cambios, resumen })
       .then(() => onCambio())
       .catch((err) => setMensaje(`Error al guardar el orden: ${err.message}`))
-      .finally(() => setGuardando(false));
+      .finally(() => {
+        setGuardando(false);
+        terminarCarga?.();
+      });
   }
 
   // Sube (dirección -1) o baja (dirección +1) una CATEGORÍA COMPLETA un
@@ -2789,10 +2835,14 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio }) {
 
       setGuardando(true);
       setMensaje('');
+      iniciarCarga?.();
       actualizarOrdenCategorias({ sesionToken, categorias: nuevos.map((g) => g.nombre), resumen })
         .then(() => onCambio())
         .catch((err) => setMensaje(`Error al guardar el orden de categorías: ${err.message}`))
-        .finally(() => setGuardando(false));
+        .finally(() => {
+          setGuardando(false);
+          terminarCarga?.();
+        });
 
       return nuevos;
     });
@@ -2807,13 +2857,22 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio }) {
     const nuevo = nombreNuevo.trim();
     if (!nuevo || !renombrando) return;
     setGuardandoNombre(true);
+    iniciarCarga?.();
     renombrarCategoria({ sesionToken, categoriaAnterior: renombrando, categoriaNueva: nuevo })
       .then(() => {
         setRenombrando(null);
-        onCambio();
+        // Arreglo (2026-09-28): antes faltaba el "return" aquí — el pacman
+        // (una vez conectado) se hubiera cerrado en cuanto el servidor
+        // confirmara el renombrado, sin esperar a que los datos nuevos de
+        // verdad llegaran a la pantalla. Mismo bug que ya se había
+        // encontrado y corregido en el Dashboard principal.
+        return onCambio();
       })
       .catch((err) => setMensaje(`Error al renombrar la categoría: ${err.message}`))
-      .finally(() => setGuardandoNombre(false));
+      .finally(() => {
+        setGuardandoNombre(false);
+        terminarCarga?.();
+      });
   }
 
   function abrirAgregarCategoria() {
@@ -2825,13 +2884,17 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio }) {
     const nombre = nombreCategoriaNueva.trim();
     if (!nombre) return;
     setGuardandoCategoriaNueva(true);
+    iniciarCarga?.();
     agregarOpcion({ sesionToken, campo: 'categoria', valor: nombre })
       .then(() => {
         setAgregandoCategoria(false);
-        onCambio();
+        return onCambio();
       })
       .catch((err) => setMensaje(`Error al agregar la categoría: ${err.message}`))
-      .finally(() => setGuardandoCategoriaNueva(false));
+      .finally(() => {
+        setGuardandoCategoriaNueva(false);
+        terminarCarga?.();
+      });
   }
 
   // Ocultar/mostrar es reversible y NO toca los productos ni su categoría:
@@ -2841,6 +2904,7 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio }) {
   function toggleOcultarCategoria(grupo) {
     setOcultandoCategoria(grupo.nombre);
     setMensaje('');
+    iniciarCarga?.();
     const promesa = grupo.oculta
       ? eliminarOpcion({ sesionToken, campo: 'categoriaOculta', valor: grupo.nombre })
       : agregarOpcion({ sesionToken, campo: 'categoriaOculta', valor: grupo.nombre });
@@ -2849,7 +2913,10 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio }) {
       .catch((err) =>
         setMensaje(`Error al ${grupo.oculta ? 'volver a mostrar' : 'ocultar'} la categoría: ${err.message}`)
       )
-      .finally(() => setOcultandoCategoria(''));
+      .finally(() => {
+        setOcultandoCategoria('');
+        terminarCarga?.();
+      });
   }
 
   function abrirEliminar(grupo) {
@@ -2862,13 +2929,23 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio }) {
     if (!eliminando) return;
     if (borrarProductosTambien && !confirmoBorrarProductos) return;
     setGuardandoEliminar(true);
+    // Arreglo (2026-09-28, pedido por Claudia): esta es justo la acción que
+    // señaló como "se alenta y como el pacman no sale, genera problemas" —
+    // borrar una categoría CON sus productos puede tardar más que las demás
+    // acciones de esta pestaña (borra un producto a la vez del lado del
+    // servidor), y antes su única señal de progreso era el texto
+    // "Aplicando…" del botón dentro del modal, fácil de perder de vista.
+    iniciarCarga?.();
     eliminarCategoria({ sesionToken, categoria: eliminando.nombre, borrarProductos: borrarProductosTambien })
       .then(() => {
         setEliminando(null);
-        onCambio();
+        return onCambio();
       })
       .catch((err) => setMensaje(`Error al quitar/borrar la categoría: ${err.message}`))
-      .finally(() => setGuardandoEliminar(false));
+      .finally(() => {
+        setGuardandoEliminar(false);
+        terminarCarga?.();
+      });
   }
 
   return (
