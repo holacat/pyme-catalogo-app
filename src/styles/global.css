@@ -470,6 +470,34 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
 
 .table-scroll { width: 100%; overflow-x: auto; }
 
+/* ---- Encabezado fijo de Stock y Pedidos al hacer scroll (2026-09-28,
+   pedido por Claudia) ----
+   "table-scroll" de arriba solo pone "overflow-x: auto", pero el navegador
+   automáticamente pone "overflow-y" en "auto" también en cuanto CUALQUIER
+   eje deja de ser "visible" — y eso, sin querer, convierte a este div en
+   un "contenedor con scroll propio" a ojos de "position: sticky", aunque
+   nunca le salga una barra de scroll vertical de verdad (crece con todo su
+   contenido). Con eso de por medio, el encabezado nunca se pega, porque
+   "sticky" se queda esperando un scroll DENTRO de este div que jamás pasa
+   (el que de verdad se mueve es la página completa). Lo mismo pasa con el
+   "overflow: hidden" de ".data-table" (ahí abajo), puesto para redondear
+   las esquinas de la tabla — también cuenta como "contenedor con scroll
+   propio" y también hay que quitárselo aquí. Por eso esta clase (agregada
+   SOLO en Stock y Pedidos, ver Dashboard.jsx) deshace los dos a propósito
+   — el resto de las tablas de la app no la usan y se quedan exactamente
+   igual que antes. */
+.table-scroll-fijo { overflow-y: visible; }
+.table-scroll-fijo .stock-table,
+.table-scroll-fijo .pedidos-table {
+  overflow: visible;
+}
+.stock-table thead th,
+.pedidos-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
 /* ---- Pestaña Pedidos: fila de conteo por estado, arriba de la tabla ----
    Antes esta tablita iba a un lado de la tabla (ver .pedidos-layout, ya no
    se usa), pero eso le quitaba ancho a la tabla y por eso salía la barra de
@@ -522,28 +550,40 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
 /* ---- Tabla de Pedidos: más compacta (hoy son 13 columnas: Fecha, Hora,
    Cliente, Teléfono, Producto, Categoría, Código, Cant., Precio, Total,
    Notas, Estado, Guardar) para que se vea completa sin necesitar la barra
-   de scroll hacia los lados. Achicamos un poco el espacio entre columnas
-   y dejamos que el nombre del Cliente y del Producto se acomoden en dos
-   líneas en vez de estirar la tabla. Ver también el comentario junto a
-   "main" arriba en este archivo — el contenedor general también se
-   ensanchó para dejarle más espacio real a esta tabla. */
+   de scroll hacia los lados. Ver también el comentario junto a "main" arriba
+   en este archivo — el contenedor general también se ensanchó para dejarle
+   más espacio real a esta tabla. */
 .pedidos-table th,
 .pedidos-table td {
   padding: 0.45rem 0.4rem;
   font-size: 0.8rem;
 }
 
+/* Bug reportado por Claudia (2026-09-28, con captura): Cliente/Producto con
+   texto largo y SIN espacios (por ejemplo, productos de prueba con puras
+   "x" seguidas) no podían partirse en varias líneas con solo
+   "white-space: normal" — un texto de una sola "palabra" nunca se envuelve,
+   así que se salía de su columna y se encimaba sobre Precio/Total,
+   rompiendo la fila. Esto además obligaba a la tabla completa a verse "más
+   angosta" de lo normal, porque el navegador le robaba espacio a las demás
+   columnas para intentar acomodar esa columna gigante. Mismo bug (y misma
+   solución) que ya se había corregido en Stock: ahora Cliente, Producto,
+   Categoría y Código usan "CeldaTruncada" (recorte con "…" + clic para ver
+   completo — ver Dashboard.jsx), así que el "max-width" de aquí abajo sí
+   se respeta pase lo que pase, sin excepción. */
 .pedidos-table th:nth-child(3),
 .pedidos-table td:nth-child(3),
 .pedidos-table th:nth-child(5),
 .pedidos-table td:nth-child(5) {
-  white-space: normal;
   max-width: 120px;
 }
 .pedidos-table th:nth-child(6),
 .pedidos-table td:nth-child(6) {
-  white-space: normal;
   max-width: 100px;
+}
+.pedidos-table th:nth-child(7),
+.pedidos-table td:nth-child(7) {
+  max-width: 90px;
 }
 
 .pedidos-table select { font-size: 0.8rem; padding: 0.3rem; border-radius: 6px; border: 1px solid var(--border); }
@@ -1843,6 +1883,20 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
 .badge-cargo {
   background: #fde0e0;
   color: #a3251f;
+}
+/* Columnas separadas de Cargo/Abono (2026-09-28, pedido por Claudia: quería
+   poder contar cuántos cargos y abonos hay de un vistazo, en vez de tenerlos
+   revueltos en una sola columna "Tipo"). Mismos colores que ya usaban los
+   badges de arriba, pero ahora como texto simple dentro de su propia
+   columna — la columna ya deja claro de qué tipo es, así que no hace falta
+   la forma de "pastilla". */
+.texto-cargo {
+  color: #a3251f;
+  font-weight: 600;
+}
+.texto-abono {
+  color: #1c7a3b;
+  font-weight: 600;
 }
 
 .estado-cuenta-totales {
