@@ -1587,7 +1587,18 @@ export default function Dashboard() {
             )}
           </div>
 
-          <div className="table-scroll">
+          {/* Pedido de Claudia (2026-09-28): que el encabezado de Stock y de
+              Pedidos se quede fijo/visible arriba al hacer scroll hacia
+              abajo, para no perder de vista qué es cada columna en tablas
+              largas. "table-scroll-fijo" (ver global.css) desactiva el
+              recorte vertical que traía "table-scroll" por default — ese
+              recorte, aunque nunca se notaba a simple vista, le impedía a
+              "position: sticky" funcionar (bug clásico de CSS: un
+              antepasado con "overflow" puesto en algo distinto de
+              "visible" rompe el pegado, aunque ese antepasado nunca llegue
+              a necesitar su propio scroll). Solo se activa aquí y en
+              Pedidos — el resto de las tablas de la app se quedan igual. */}
+          <div className="table-scroll table-scroll-fijo">
             <table className="data-table stock-table">
               <thead>
                 <tr>
@@ -1760,7 +1771,7 @@ export default function Dashboard() {
             ))}
           </div>
 
-          <div className="table-scroll">
+          <div className="table-scroll table-scroll-fijo">
             <table className="data-table pedidos-table">
               <thead>
                 <tr>
@@ -3773,12 +3784,22 @@ function EstadoCuentaTab({ movimientos, pedidos, productos }) {
                 <th>Cliente</th>
                 <th>Producto</th>
                 <th>Código</th>
-                <th>Tipo</th>
-                <th>Monto</th>
+                <th>Cargo</th>
+                <th>Abono</th>
                 <th>Concepto</th>
               </tr>
             </thead>
             <tbody>
+              {/* Corrección 2026-09-28 (pedida por Claudia): antes Cargo y
+                  Abono vivían juntos en una sola columna "Tipo" (con un
+                  badge de color) más una columna "Monto" aparte — para
+                  contar rápido cuántos cargos y cuántos abonos hay de un
+                  vistazo, pidió que cada uno tenga SU PROPIA columna, con
+                  el monto solo puesto del lado que corresponde (y un "—"
+                  del otro lado). Esta misma tabla es la que se ve en
+                  pantalla Y la que se imprime/guarda como PDF (mismo
+                  elemento, ver el "id=estado-cuenta-imprimible" de arriba),
+                  así que este cambio se refleja en los dos automáticamente. */}
               {movimientosFiltrados.map((m) => (
                 <tr key={m.ID}>
                   <td>{formatearFechaHora(m.Fecha)}</td>
@@ -3786,11 +3807,15 @@ function EstadoCuentaTab({ movimientos, pedidos, productos }) {
                   <td>{productoDelMovimiento(m)}</td>
                   <td>{codigoDelMovimiento(m)}</td>
                   <td>
-                    <span className={`badge-movimiento ${m.Tipo === 'Abono' ? 'badge-abono' : 'badge-cargo'}`}>
-                      {m.Tipo}
-                    </span>
+                    {m.Tipo === 'Cargo' ? (
+                      <span className="texto-cargo">{formatearMoneda(Number(m.Monto) || 0)}</span>
+                    ) : '—'}
                   </td>
-                  <td>{formatearMoneda(Number(m.Monto) || 0)}</td>
+                  <td>
+                    {m.Tipo === 'Abono' ? (
+                      <span className="texto-abono">{formatearMoneda(Number(m.Monto) || 0)}</span>
+                    ) : '—'}
+                  </td>
                   <td>{m.Concepto || '—'}</td>
                 </tr>
               ))}
@@ -4852,6 +4877,15 @@ function PedidoRow({
     if (confirmar) setCandadoAbierto(true);
   }
 
+  // Corrección 2026-09-28 (reportada por Claudia): faltaba la manera de
+  // "quitar" el candado otra vez después de haberlo abierto — la única forma
+  // de volver a bloquear la fila era refrescar toda la página. Volver a
+  // bloquear es la dirección segura (nunca alteras nada al hacerlo), así que
+  // esto no pide confirmación, a diferencia de abrirlo.
+  function handleCerrarCandado() {
+    setCandadoAbierto(false);
+  }
+
   const [cantidad, setCantidad] = useState(pedido.Cantidad);
   const [telefono, setTelefono] = useState(() => textoSeguro(pedido.Telefono));
   const [notas, setNotas] = useState(() => notasIniciales(pedido));
@@ -4918,7 +4952,15 @@ function PedidoRow({
     <tr className={sinGuardar ? 'fila-sin-guardar' : ''}>
       <td>{fecha.toLocaleDateString('es-MX')}</td>
       <td>{fecha.toLocaleTimeString('es-MX')}</td>
-      <td>{pedido.Cliente}</td>
+      {/* Bug reportado por Claudia (2026-09-28, con captura): un Cliente o
+          Producto con texto muy largo y sin espacios (como los productos de
+          prueba con puras "x" seguidas) se salía de su columna y se veía
+          encimado sobre Precio/Total, rompiendo la fila entera. Mismo bug
+          que ya se había corregido en Stock — reusamos el mismo componente
+          "CeldaTruncada" aquí para Cliente, Producto, Categoría y Código,
+          que son los 4 campos de texto libre de este renglón (no deben
+          romper la tabla bajo ninguna circunstancia). */}
+      <td><CeldaTruncada texto={pedido.Cliente} /></td>
       <td>
         <input
           type="tel"
@@ -4930,9 +4972,9 @@ function PedidoRow({
           title={!puedoEditarPedido ? 'Bloqueado: este pedido no es tuyo' : undefined}
         />
       </td>
-      <td>{pedido.Producto}</td>
-      <td>{categoria}</td>
-      <td>{codigo}</td>
+      <td><CeldaTruncada texto={pedido.Producto} /></td>
+      <td><CeldaTruncada texto={categoria} /></td>
+      <td>{codigo ? <CeldaTruncada texto={codigo} /> : '—'}</td>
       <td>
         <input
           type="text"
@@ -5025,7 +5067,15 @@ function PedidoRow({
         )}
         {puedoEditarPedido && candadoAbierto && !soyDuenoDelPedido && !sinDuenoAsignado && (
           <p className="muted campo-nota campo-nota-candado-abierto">
-            🔓 Candado abierto — estás editando un pedido que no es tuyo.
+            🔓 Candado abierto — estás editando un pedido que no es tuyo.{' '}
+            <button
+              type="button"
+              className="btn btn-secondary btn-small btn-candado-pedido"
+              onClick={handleCerrarCandado}
+              title="Vuelve a bloquear esta fila"
+            >
+              🔒 Bloquear de nuevo
+            </button>
           </p>
         )}
       </td>
