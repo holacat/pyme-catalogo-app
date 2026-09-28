@@ -2187,6 +2187,37 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
   color: #1a7a3c;
 }
 
+/* Etapa 4 (Pedidos por dueño, 2026-09-26): mismo look que la lista de
+   dueños de Stock, pero más chica (aquí no hay botones de Solicitar/
+   Ofrecer/Asignar, solo se muestra a quién le pertenece el producto). */
+.pedido-duenos-lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 110px;
+  font-size: 0.85rem;
+}
+
+.pedido-dueno-yo {
+  color: #1a7a3c;
+  font-weight: 600;
+}
+
+.pedidos-filtro-dueno-admin {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.pedidos-filtro-dueno-admin select {
+  font-weight: 400;
+}
+
 .stock-solicitar-caja,
 .stock-asignar-caja {
   display: flex;
