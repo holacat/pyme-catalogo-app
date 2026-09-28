@@ -733,7 +733,22 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
    de un usuario que no se puede editar) — más chica y sin negritas que el
    texto normal de ".modal-field", para que se lea como una aclaración, no
    como parte de la etiqueta del campo. */
-.campo-nota { font-size: 0.75rem; font-weight: 400; }
+.campo-nota { font-size: 0.75rem; font-weight: 400; white-space: normal; }
+
+/* Columna Estado de Pedidos (2026-09-28, reportado por Claudia con
+   captura): el aviso de "pedido bloqueado" es un <p> normal, pero al vivir
+   dentro de un <td> de ".data-table" heredaba el "white-space: nowrap" de
+   ahí (ver arriba) — un texto largo entonces se negaba a partirse en
+   líneas y estiraba muchísimo esta columna (y por lo tanto, toda la tabla,
+   obligando a un scroll horizontal exagerado que Claudia no quería). Con
+   ".campo-nota" ya en "normal" (arriba) esto ya no debería repetirse, pero
+   además se le da un ancho máximo razonable a la columna misma para que el
+   aviso se acomode en 2-3 líneas cortas en vez de una sola línea ancha. */
+.pedidos-table th:nth-child(12),
+.pedidos-table td:nth-child(12) {
+  white-space: normal;
+  max-width: 170px;
+}
 
 /* ---- Etapa 4, rediseño del candado de Pedidos (2026-09-28) ----
    Botón "🔓 Desbloquear" que solo aparece dentro de la nota de "pedido
