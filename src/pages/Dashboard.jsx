@@ -5047,9 +5047,17 @@ function PedidoRow({
             ofrece el candadito para desbloquear esta fila EN CONCRETO, con
             una confirmación explícita antes de abrirlo (nunca en silencio,
             para evitar un clic accidental sobre ventas de alguien más). */}
+        {/* Corrección 2026-09-28 (pedida por Claudia): el texto largo de
+            este aviso, al heredar "white-space: nowrap" de ".data-table td"
+            (ver global.css), se negaba a partirse en varias líneas y
+            estiraba muchísimo la columna Estado (y con ella, toda la
+            tabla) — obligando a un scroll horizontal exagerado. Se acortó
+            el mensaje Y se le puso "white-space: normal" + un ancho máximo
+            a esta columna para que ya no pueda volver a pasar, sin
+            importar qué tan largo sea el texto que se ponga aquí. */}
         {!puedoEditarPedido && (
           <p className="muted campo-nota">
-            🔒 Este pedido es de un producto que no te pertenece — Estado, Cantidad, Teléfono y Notas están bloqueados.
+            🔒 No te pertenece este pedido.
             {puedeSaltarCandado && (
               <>
                 {' '}
