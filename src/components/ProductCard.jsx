@@ -95,10 +95,11 @@ export default function ProductCard({ producto, onAgregarCarrito }) {
     return () => mq.removeListener(actualizar);
   }, []);
 
-  // Combina el estado manual (celular, botón "Ver más") con el escritorio
-  // (siempre mostrado): úsalo en vez de "detalleAbierto" a solas para
-  // decidir si se dibuja el detalle completo.
-  const mostrarDetalleCompleto = esEscritorio || detalleAbierto;
+  // "¿Se dibujan estos campos EN ABSOLUTO?" — en escritorio siempre sí; en
+  // celular solo si el cliente le dio clic a "Ver más". Ojo: esto NO decide
+  // si el texto se ve completo o recortado (eso es "detalleAbierto" a
+  // solas, ver más abajo) — son dos cosas distintas ahora.
+  const mostrarCampos = esEscritorio || detalleAbierto;
 
   // Arreglo (2026-09-25, reportado por Claudia: "al darle click en Ver más
   // se agranda pero tengo que manualmente deslizar para ver todo el cuadro
@@ -123,32 +124,56 @@ export default function ProductCard({ producto, onAgregarCarrito }) {
   const nombreCompleto = producto.Nombre || '';
   const nombreEsLargo = nombreCompleto.length > 26;
   const nombreMostrado =
-    !nombreEsLargo || mostrarDetalleCompleto ? nombreCompleto : nombreCompleto.slice(0, 26) + '…';
+    !nombreEsLargo || detalleAbierto ? nombreCompleto : nombreCompleto.slice(0, 26) + '…';
 
   // Rediseño de la tarjeta compacta (2026-09-25, pedido por Claudia con
   // capturas: "necesito que no se vean tan largos, se ve feo, solo que se
   // vea la imagen, el nombre del producto y el precio, y lo demás que esté
   // oculto y solo se vea si le damos Ver más... lo que debe de ocultarse es
-  // la descripción, talla, color y lo demás"). Antes, Categoría/
-  // Descripción/Talla/Color se mostraban SIEMPRE (solo se les recortaba el
-  // texto si eran muy largos). Ahora esos campos NO se dibujan en absoluto
-  // mientras la tarjeta está cerrada — aparecen completos únicamente al
-  // abrir "Ver más" — así que ya no hace falta la lógica de "cortar a N
-  // caracteres": o se esconden por completo, o se muestran completos. La
-  // única excepción es "Agotado": se deja visible siempre (aunque el resto
-  // de la línea de existencias se oculte) porque explica por qué los
-  // botones de abajo están deshabilitados; el detalle exacto de cuánto hay
-  // en existencia ("Disponible: N") si se oculta hasta abrir "Ver más".
+  // la descripción, talla, color y lo demás"). En CELULAR, Categoría/
+  // Descripción/Talla/Color NO se dibujan en absoluto mientras la tarjeta
+  // está cerrada — aparecen completos únicamente al abrir "Ver más".
+  //
+  // Arreglo (2026-09-28, reportado por Claudia con captura: "en compu no
+  // tenias que ocultarle los detalles... pero no debiste haber quitado la
+  // opción de Ver más, esa es útil por si llegara a haber productos con
+  // textos o descripciones largas... por default si pasan de lo normal se
+  // debe recortar"). En ESCRITORIO estos campos ya se dibujan siempre (ver
+  // "mostrarCampos" arriba) — pero eso no significa mostrarlos SIN límite:
+  // si el texto es más largo de lo normal, se recorta con "…" igual que el
+  // Nombre, y "Ver más" lo expande a completo. Antes de este arreglo no
+  // había ningún límite para Descripción/Talla/Color, así que un texto
+  // exageradamente largo (la prueba de Claudia con "rrrrr...") rompía la
+  // tarjeta en vez de recortarse.
   const categoriaCompleta = producto.Categoria || '';
   const descripcionCompleta = producto.Descripcion || '';
   const colorCompleto = producto.Color || '';
   const tallaCompleta = producto.Talla || '';
 
-  // El botón "Ver más" aparece si hay CUALQUIER información extra que
-  // mostrar (sin importar qué tan larga sea) o si el nombre se recortó. En
-  // escritorio nunca aparece: todo ya se muestra completo de por sí.
+  const LIMITE_DESCRIPCION = 100;
+  const LIMITE_COLOR_TALLA = 30;
+  const descripcionEsLarga = descripcionCompleta.length > LIMITE_DESCRIPCION;
+  const colorEsLargo = colorCompleto.length > LIMITE_COLOR_TALLA;
+  const tallaEsLarga = tallaCompleta.length > LIMITE_COLOR_TALLA;
+
+  const descripcionMostrada =
+    !descripcionEsLarga || detalleAbierto ? descripcionCompleta : descripcionCompleta.slice(0, LIMITE_DESCRIPCION) + '…';
+  const colorMostrado =
+    !colorEsLargo || detalleAbierto ? colorCompleto : colorCompleto.slice(0, LIMITE_COLOR_TALLA) + '…';
+  const tallaMostrada =
+    !tallaEsLarga || detalleAbierto ? tallaCompleta : tallaCompleta.slice(0, LIMITE_COLOR_TALLA) + '…';
+  // Categoría no necesita este recorte por JS: la "pastilla" (.badge en
+  // global.css) ya la recorta sola con "text-overflow: ellipsis" sin salirse
+  // nunca de su forma, así que una categoría larga no puede romper la
+  // tarjeta aunque no tenga su propio "Ver más".
+
+  // El botón "Ver más" aparece por DOS razones distintas según la pantalla:
+  // en celular, porque hay información extra oculta que revelar (sin
+  // importar qué tan larga sea); en escritorio, porque algún texto de los
+  // que ya se ven SÍ se recortó por ser más largo de lo normal.
   const hayInfoExtra = !!(categoriaCompleta || descripcionCompleta || colorCompleto || tallaCompleta);
-  const hayAlgoQueExpandir = !esEscritorio && (nombreEsLargo || hayInfoExtra);
+  const hayTextoRecortado = nombreEsLargo || descripcionEsLarga || colorEsLargo || tallaEsLarga;
+  const hayAlgoQueExpandir = esEscritorio ? hayTextoRecortado : (nombreEsLargo || hayInfoExtra);
 
   function fotoAnterior(e) {
     e.stopPropagation();
@@ -176,7 +201,7 @@ export default function ProductCard({ producto, onAgregarCarrito }) {
   }
 
   return (
-    <article ref={articleRef} className={`product-card ${mostrarDetalleCompleto ? 'product-card-expandido' : ''}`}>
+    <article ref={articleRef} className={`product-card ${mostrarCampos ? 'product-card-expandido' : ''}`}>
       <div className="product-photo">
         {enOferta && <span className="oferta-badge">🔥 Oferta</span>}
         {fotos.length > 0 ? (
@@ -209,7 +234,7 @@ export default function ProductCard({ producto, onAgregarCarrito }) {
       </div>
           <div className="product-body">
         <h3 className="product-nombre">{nombreMostrado}</h3>
-        {mostrarDetalleCompleto && producto.Categoria && <span className="badge">{categoriaCompleta}</span>}
+        {mostrarCampos && producto.Categoria && <span className="badge">{categoriaCompleta}</span>}
         {precioOferta ? (
           <p className="price price-oferta">
             <span className="price-original">${Number(producto.Precio).toLocaleString('es-MX')}</span>
@@ -222,11 +247,11 @@ export default function ProductCard({ producto, onAgregarCarrito }) {
             abajo están deshabilitados); "Disponible: N" (la cantidad exacta)
             se oculta hasta abrir "Ver más", igual que el resto del detalle. */}
         {sinStock && <p className="stock out">Agotado</p>}
-        {mostrarDetalleCompleto && !sinStock && <p className="stock">Disponible: {producto.Stock}</p>}
+        {mostrarCampos && !sinStock && <p className="stock">Disponible: {producto.Stock}</p>}
 
-        {mostrarDetalleCompleto && descripcionCompleta && <p className="description">{descripcionCompleta}</p>}
-        {mostrarDetalleCompleto && producto.Talla && <p className="product-talla">Talla: {tallaCompleta}</p>}
-        {mostrarDetalleCompleto && producto.Color && <p className="product-color">Color: {colorCompleto}</p>}
+        {mostrarCampos && descripcionCompleta && <p className="description">{descripcionMostrada}</p>}
+        {mostrarCampos && producto.Talla && <p className="product-talla">Talla: {tallaMostrada}</p>}
+        {mostrarCampos && producto.Color && <p className="product-color">Color: {colorMostrado}</p>}
 
         {hayAlgoQueExpandir && (
           <button
