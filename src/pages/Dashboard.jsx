@@ -3863,7 +3863,19 @@ function BitacoraTab({ bitacora }) {
                 <td>{formatearFechaHora(b.Fecha)}</td>
                 <td>{b.Usuario || '—'}</td>
                 <td>{b.Accion || '—'}</td>
-                <td>{b.Detalle || '—'}</td>
+                {/* Arreglo (2026-09-28, reportado por Claudia con captura: "en la
+                    bitacora no soy capaz de ver bien que cambios agregué").
+                    "Detalle" puede traer un texto largo (varios campos
+                    cambiados, cada uno con su valor antes/después) que antes
+                    se cortaba en una sola línea horizontal sin forma de
+                    leerlo completo (la tabla entera usa "white-space:
+                    nowrap"). Reusamos "CeldaTruncada" — el mismo componente
+                    de "clic para ver completo" que ya se usa en Producto/
+                    Categoría/Código de la pestaña Stock — para que cada
+                    línea se vea compacta por default y, con un clic, se
+                    pueda leer el detalle completo envuelto en varias líneas
+                    dentro de la misma celda. */}
+                <td><CeldaTruncada texto={b.Detalle || '—'} /></td>
               </tr>
             ))}
           </tbody>
