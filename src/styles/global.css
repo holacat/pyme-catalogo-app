@@ -741,6 +741,23 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
   text-overflow: clip;
 }
 
+/* ---- Tabla de Bitácora: la columna "Detalle" (2026-09-28, reportado por
+   Claudia con captura: "no soy capaz de ver bien que cambios agregué"). El
+   backend arma este texto juntando TODOS los campos que cambiaron en un
+   edit (Nombre, Descripción, Precio, etc. cada uno con su "antes → después"),
+   así que puede ser bastante largo — con "white-space: nowrap" heredado de
+   ".data-table" (arriba), esa línea se salía muchísimo hacia la derecha y
+   había que adivinar que existía una barra de scroll horizontal para poder
+   leerla completa. Igual que en Producto/Categoría/Código de la tabla de
+   Stock, la celda ahora se recorta con "…" y basta un clic (CeldaTruncada,
+   en Dashboard.jsx) para verla completa, envuelta en varias líneas dentro
+   de la misma columna. El "max-width" es lo que de verdad activa el
+   recorte — sin un ancho fijo en la celda, la tabla simplemente se hubiera
+   ensanchado para que quepa todo el texto sin cortar nada. */
+.bitacora-table td:last-child {
+  max-width: 420px;
+}
+
 /* ---- Indicador minimalista de "cargando" (2026-09-24, rediseñado el mismo
    día) ----
    Circulito fijo en la esquina inferior derecha que se dibuja SOLO
