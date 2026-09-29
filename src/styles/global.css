@@ -41,14 +41,21 @@ body {
 
 .app-header nav a.active { color: white; text-decoration: underline; }
 
-/* Bug reportado por Claudia (2026-09): la tabla de Pedidos (13 columnas)
-   necesitaba scroll lateral incluso en pantallas grandes, porque este
-   contenedor limitaba el ancho disponible a 1100px sin importar qué tan
-   ancha fuera la ventana. Se subió a 1500px para que en la mayoría de
-   compus/monitores la tabla quepa completa sin scroll — en pantallas más
-   angostas que eso puede seguir apareciendo un poco de scroll, porque
-   son muchas columnas de verdad, pero ya no es un límite artificial. */
-main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%; }
+/* Bug reportado por Claudia (2026-09): la tabla de Pedidos necesitaba scroll
+   lateral incluso en pantallas grandes, porque este contenedor limitaba el
+   ancho disponible a 1100px sin importar qué tan ancha fuera la ventana. Se
+   subió a 1500px para que en la mayoría de compus/monitores la tabla quepa
+   completa sin scroll.
+   Corrección (2026-09-29, pedido explícito de Claudia): después se agregó
+   la columna "Dueño(s)" a Pedidos (ahora son 14 columnas) y volvió a salir
+   la barra de scroll horizontal — pidió que se le diera MÁS espacio en vez
+   de achicar/congelar nada. Se sube otra vez, ahora a 1800px, para dejarle
+   a la tabla todo el ancho real que se pueda en pantallas grandes (en
+   pantallas más angostas que eso puede seguir apareciendo un poco de
+   scroll, porque son muchas columnas de verdad, pero ya no es un límite
+   artificial). Ver también ".pedido-duenos-lista" más abajo, que era la
+   columna que más ancho de más estaba pidiendo. */
+main { flex: 1; padding: 1.5rem; max-width: 1800px; margin: 0 auto; width: 100%; }
 .app-footer {
   text-align: center;
   padding: 1rem;
@@ -602,12 +609,12 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
 }
 .data-table th { background: #f3f4f6; }
 
-/* ---- Tabla de Pedidos: más compacta (hoy son 13 columnas: Fecha, Hora,
+/* ---- Tabla de Pedidos: más compacta (hoy son 14 columnas: Fecha, Hora,
    Cliente, Teléfono, Producto, Categoría, Código, Cant., Precio, Total,
-   Notas, Estado, Guardar) para que se vea completa sin necesitar la barra
-   de scroll hacia los lados. Ver también el comentario junto a "main" arriba
-   en este archivo — el contenedor general también se ensanchó para dejarle
-   más espacio real a esta tabla. */
+   Notas, Estado, Dueño(s), Guardar) para que se vea completa sin necesitar
+   la barra de scroll hacia los lados. Ver también el comentario junto a
+   "main" arriba en este archivo — el contenedor general también se
+   ensanchó para dejarle más espacio real a esta tabla. */
 .pedidos-table th,
 .pedidos-table td {
   padding: 0.45rem 0.4rem;
@@ -2382,6 +2389,17 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
   flex-direction: column;
   gap: 2px;
   min-width: 110px;
+  /* Corrección (2026-09-29, pedido de Claudia): esta lista heredaba el
+     "white-space: nowrap" de ".data-table td", así que un nombre largo
+     (por ejemplo "JUANA ADMIN PRUEBA") no podía partirse en dos líneas y
+     empujaba el ancho de toda la columna (y con ella, la tabla completa)
+     — esa era la razón principal de que volviera a salir la barra de
+     scroll horizontal en Pedidos. Ahora el texto SÍ se puede partir en
+     varias líneas dentro de un ancho fijo: no se recorta ni se esconde
+     nada, el nombre completo se sigue viendo, solo ocupa más alto en vez
+     de más ancho. */
+  max-width: 150px;
+  white-space: normal;
   font-size: 0.85rem;
 }
 
