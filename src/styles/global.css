@@ -510,6 +510,49 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
   z-index: 2;
 }
 
+/* Pedido de Claudia (2026-09-29): que el botón "Guardar" de Pedidos (la
+   última de las 14 columnas) nunca se quede recortado/tapado por tener que
+   scrollear hasta el final hacia la derecha. Con 14 columnas la barra de
+   scroll horizontal es inevitable, pero "congelamos" esta columna a la
+   derecha (mismo patrón que el encabezado fijo de arriba, solo que en el
+   eje horizontal) para que el botón de Guardar se quede siempre a la
+   vista, sin importar qué tanto hayas scrolleado el resto de la tabla
+   hacia los lados. Necesita un fondo sólido (blanco, el mismo que ya usa
+   toda la tabla) porque si no, las demás columnas se alcanzarían a ver
+   "por debajo" al scrollear. */
+.pedidos-table td:nth-child(14) {
+  position: sticky;
+  right: 0;
+  background: white;
+  z-index: 1;
+}
+.pedidos-table thead th:nth-child(14) {
+  /* Esta celda es a la vez parte del encabezado fijo (arriba) Y de la
+     columna fija (a la derecha) — necesita quedar por encima de las dos. */
+  position: sticky;
+  right: 0;
+  z-index: 3;
+}
+
+/* Pedido de Claudia (2026-09-29): la barra de scroll horizontal de
+   Stock/Pedidos se sentía como que "quitaba espacio" a la tabla — la
+   hacemos más delgada (en vez de quitarla, que sigue haciendo falta con
+   tantas columnas) para que estorbe menos visualmente. */
+.table-scroll-fijo {
+  scrollbar-width: thin; /* Firefox */
+}
+.table-scroll-fijo::-webkit-scrollbar {
+  height: 10px;
+  width: 10px;
+}
+.table-scroll-fijo::-webkit-scrollbar-thumb {
+  background: #c7ccd4;
+  border-radius: 999px;
+}
+.table-scroll-fijo::-webkit-scrollbar-track {
+  background: transparent;
+}
+
 /* ---- Pestaña Pedidos: fila de conteo por estado, arriba de la tabla ----
    Antes esta tablita iba a un lado de la tabla (ver .pedidos-layout, ya no
    se usa), pero eso le quitaba ancho a la tabla y por eso salía la barra de
