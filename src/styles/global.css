@@ -732,6 +732,18 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
   color: var(--muted);
   font-size: 0.75rem;
 }
+/* Pedido de Claudia (2026-09-29): punto verde para la columna de Stock que
+   NO está ordenando la tabla ahorita, en vez de la doble flecha "↕" — del
+   mismo tamaño que las flechas ▲/▼ de al lado, para que sea fácil de
+   distinguir de un vistazo. */
+.orden-header-punto {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--brand);
+  vertical-align: middle;
+}
 .stock-table .stock-thumb,
 .stock-table .stock-thumb-vacia {
   width: 28px;
@@ -2171,6 +2183,19 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
 
 .analitica-linea-punto:hover {
   r: 6;
+}
+
+/* Recuadro con la fecha y el monto exacto que aparece al darle clic a un
+   punto de "Tendencia de ventas por día" (2026-09-29, arregla que el clic
+   no mostraba nada — antes solo existía el tooltip nativo del navegador,
+   que solo aparece con el mouse quieto encima y casi nunca en celular). */
+.analitica-linea-tooltip rect {
+  fill: var(--brand-dark);
+}
+.analitica-linea-tooltip text {
+  fill: white;
+  font-size: 11px;
+  font-family: inherit;
 }
 .analitica-barra-valor {
   font-size: 0.82rem;
