@@ -293,9 +293,29 @@ const INTERVALO_REFRESCO_MS = 6000;
 //     aviso apenas un refresco de fondo sí funciona).
 const TIEMPO_MAXIMO_ESPERA_MS = 25000;
 const TIEMPO_MAXIMO_CARGA_INICIAL_MS = 45000;
+
+// Ajuste (2026-09-29, reportado por Claudia): la primera vez que movió el
+// Estado de un pedido a "En proceso" tardó mucho y salió el aviso de "tardó
+// demasiado" — aunque el panel ya había cargado bien antes de eso. La razón
+// es que Google Apps Script arranca las peticiones de LECTURA (`doGet`,
+// usada para cargar el panel) y las de ESCRITURA (`doPost`, usada para
+// guardar cualquier cambio) como dos "entradas" separadas: que `doGet` ya
+// esté "caliente" no significa que `doPost` también lo esté, así que la
+// PRIMERA escritura de toda la sesión puede tardar tanto como la carga
+// inicial, aunque sea una acción chica. Antes esa primera escritura usaba
+// el mismo tope corto de 25s que las demás (pensado ya para un servidor
+// "caliente") y por eso saltaba el aviso de más antes de tiempo. Ahora, SOLO
+// la primera escritura de la sesión usa el mismo margen generoso que la
+// carga inicial (45s); de ahí en adelante, ya con `doPost` "caliente", se
+// usa el tope normal de 25s.
+let primeraEscrituraDeLaSesionYaHecha_ = false;
 function conLimiteDeTiempo(promesa, etiqueta, opciones = {}) {
-  const ms = opciones.ms || TIEMPO_MAXIMO_ESPERA_MS;
   const esLectura = !!opciones.esLectura;
+  let ms = opciones.ms || TIEMPO_MAXIMO_ESPERA_MS;
+  if (!esLectura && !primeraEscrituraDeLaSesionYaHecha_) {
+    ms = Math.max(ms, TIEMPO_MAXIMO_CARGA_INICIAL_MS);
+    primeraEscrituraDeLaSesionYaHecha_ = true;
+  }
   return Promise.race([
     promesa,
     new Promise((_, reject) =>
