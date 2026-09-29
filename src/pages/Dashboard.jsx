@@ -490,6 +490,15 @@ function esActivo(valor) {
 export default function Dashboard() {
   const [sesionToken, setSesionToken] = useState(() => localStorage.getItem(TOKEN_KEY) || '');
   const sesionIdRef = useRef(0);
+  // Pedido de Claudia (2026-09-29): "tab" en la firma de una función que se
+  // arma en un render viejo (como el "onGuardado" de "+ Agregar producto",
+  // más abajo) siempre va a valer lo mismo que tenía AL CREARSE esa función
+  // — no lo que está viendo Claudia en pantalla en este momento. Este ref
+  // (mismo patrón que "sesionIdRef" arriba, para el bug de "switcheo" de
+  // sesión) siempre trae el valor MÁS RECIENTE de la pestaña activa, para
+  // poder comprobar "¿de verdad sigue ahí?" justo antes de mandarla a otro
+  // lado por sorpresa.
+  const tabRef = useRef('stock');
   const [rol, setRol] = useState(() => localStorage.getItem(ROL_KEY) || '');
    const [nombreSesion, setNombreSesion] = useState(() => localStorage.getItem(NOMBRE_KEY) || '');
   // Arreglo (2026-09-23, pedido por Claudia): lo que se lleva escrito en
@@ -512,6 +521,9 @@ export default function Dashboard() {
   const [verificandoLogin, setVerificandoLogin] = useState(false);
   const [errorLogin, setErrorLogin] = useState('');
   const [tab, setTab] = useState('stock'); // stock | pedidos | alertas | cuenta | bitacora | usuarios | analitica | orden | nuevo
+  useEffect(() => {
+    tabRef.current = tab;
+  }, [tab]);
   const [productos, setProductos] = useState([]);
   const [pedidos, setPedidos] = useState([]);
   const [alertas, setAlertas] = useState([]);
@@ -1892,6 +1904,8 @@ export default function Dashboard() {
           sesionToken={sesionToken}
           soyAdminCentral={esAdminCentral}
           onCambio={() => cargarTodo(sesionToken, { silencioso: true })}
+          iniciarCarga={iniciarCarga}
+          terminarCarga={terminarCarga}
         />
       )}
 
@@ -1929,14 +1943,30 @@ export default function Dashboard() {
             // promesa de cargarTodo, así que ProductoForm cerraba su
             // círculo de carga sin esperar a que los datos nuevos de
             // verdad llegaran — mismo bug que en handleActualizarStock.
-            setTab('stock');
+            //
+            // Arreglo (2026-09-29, reportado por Claudia): si el guardado
+            // tardó y mientras tanto ella ya se había ido sola a revisar
+            // otra pestaña, esto la regresaba a Stock de sorpresa en
+            // cuanto el guardado terminaba, sin avisar — interrumpiendo lo
+            // que estuviera viendo. Ahora solo saltamos a Stock si SIGUE
+            // en "Agregar producto" esperando el resultado (`tabRef`,
+            // mismo patrón que "sesionIdRef", siempre trae la pestaña
+            // real más reciente, no la que había cuando se creó esta
+            // función). Si ya se fue a otro lado, la dejamos donde está —
+            // el producto de todas formas ya quedó guardado.
+            if (tabRef.current === 'nuevo') setTab('stock');
             return cargarTodo(sesionToken, { silencioso: true });
           }}
         />
       )}
 
       {tab === 'permisos' && esAdminCentral && (
-        <PermisosTab sesionToken={sesionToken} usuarios={usuarios} />
+        <PermisosTab
+          sesionToken={sesionToken}
+          usuarios={usuarios}
+          iniciarCarga={iniciarCarga}
+          terminarCarga={terminarCarga}
+        />
       )}
 
       {productoEditando && (
@@ -3901,7 +3931,7 @@ function noPuedeTocarAdminDe(u, soyAdminCentral) {
   return u.Rol === 'Administrador' && !soyAdminCentral;
 }
 
-function UsuariosTab({ usuarios, sesionToken, soyAdminCentral, onCambio }) {
+function UsuariosTab({ usuarios, sesionToken, soyAdminCentral, onCambio, iniciarCarga, terminarCarga }) {
   const [mensaje, setMensaje] = useState('');
 
   const [agregando, setAgregando] = useState(false);
@@ -3936,6 +3966,10 @@ function UsuariosTab({ usuarios, sesionToken, soyAdminCentral, onCambio }) {
     if (!nuevoNombre.trim() || !nuevoUsuario.trim() || nuevaContrasena.length < 4) return;
     setGuardandoNuevo(true);
     setMensaje('');
+    // Pedido de Claudia (2026-09-29): el círculo de carga (pacman) también
+    // debe verse aquí, igual que en Stock/Pedidos — antes solo se veía el
+    // botón deshabilitado, sin el indicador global.
+    iniciarCarga?.();
     crearUsuario({
       sesionToken,
       nombre: nuevoNombre.trim(),
@@ -3948,7 +3982,10 @@ function UsuariosTab({ usuarios, sesionToken, soyAdminCentral, onCambio }) {
         onCambio();
       })
       .catch((err) => setMensaje(`Error al crear el usuario: ${err.message}`))
-      .finally(() => setGuardandoNuevo(false));
+      .finally(() => {
+        setGuardandoNuevo(false);
+        terminarCarga?.();
+      });
   }
 
   function abrirEditar(u) {
@@ -3963,13 +4000,17 @@ function UsuariosTab({ usuarios, sesionToken, soyAdminCentral, onCambio }) {
     if (!editando || !editNombre.trim()) return;
     setGuardandoEdit(true);
     setMensaje('');
+    iniciarCarga?.();
     actualizarUsuario({ sesionToken, usuarioId: editando.ID, nombre: editNombre.trim(), rol: editRol })
       .then(() => {
         setEditando(null);
         onCambio();
       })
       .catch((err) => setMensaje(`Error al editar el usuario: ${err.message}`))
-      .finally(() => setGuardandoEdit(false));
+      .finally(() => {
+        setGuardandoEdit(false);
+        terminarCarga?.();
+      });
   }
 
   function abrirCambiarClave(u) {
@@ -3983,26 +4024,34 @@ function UsuariosTab({ usuarios, sesionToken, soyAdminCentral, onCambio }) {
     if (!cambiandoClave || claveNueva.length < 4) return;
     setGuardandoClave(true);
     setMensaje('');
+    iniciarCarga?.();
     cambiarContrasenaUsuario({ sesionToken, usuarioId: cambiandoClave.ID, contrasenaNueva: claveNueva })
       .then(() => {
         setCambiandoClave(null);
         onCambio();
       })
       .catch((err) => setMensaje(`Error al cambiar la contraseña: ${err.message}`))
-      .finally(() => setGuardandoClave(false));
+      .finally(() => {
+        setGuardandoClave(false);
+        terminarCarga?.();
+      });
   }
 
   function toggleActivo(u) {
     const activo = esActivo(u.Activo);
     setCambiandoEstadoId(u.ID);
     setMensaje('');
+    iniciarCarga?.();
     const promesa = activo
       ? inhabilitarUsuario({ sesionToken, usuarioId: u.ID })
       : habilitarUsuario({ sesionToken, usuarioId: u.ID });
     promesa
       .then(() => onCambio())
       .catch((err) => setMensaje(`Error: ${err.message}`))
-      .finally(() => setCambiandoEstadoId(''));
+      .finally(() => {
+        setCambiandoEstadoId('');
+        terminarCarga?.();
+      });
   }
 
   return (
@@ -4210,7 +4259,7 @@ function UsuariosTab({ usuarios, sesionToken, soyAdminCentral, onCambio }) {
 // tabla Rol × Pestaña con casillas para el default de cada Rol, y (2) una
 // lista de excepciones por persona (dar o quitar UNA pestaña puntual a
 // alguien en concreto, sin tocar el default de su Rol). ----
-function PermisosTab({ sesionToken, usuarios }) {
+function PermisosTab({ sesionToken, usuarios, iniciarCarga, terminarCarga }) {
   const [pestanas, setPestanas] = useState([]);
   const [rolDefaults, setRolDefaults] = useState({ Administrador: {}, Vendedor: {} });
   const [overrides, setOverrides] = useState([]);
@@ -4250,10 +4299,16 @@ function PermisosTab({ sesionToken, usuarios }) {
   function toggleRolPermiso(rol, pestanaClave, valorActual) {
     const llave = `${rol}:${pestanaClave}`;
     setCeldaGuardando(llave);
+    // Pedido de Claudia (2026-09-29): el pacman también debe verse en
+    // Permisos, igual que en las demás pestañas que guardan cambios.
+    iniciarCarga?.();
     actualizarPermisoRol({ sesionToken, rol, pestana: pestanaClave, permitido: !valorActual })
       .then(cargar)
       .catch((err) => setMensaje(`Error al guardar: ${err.message}`))
-      .finally(() => setCeldaGuardando(''));
+      .finally(() => {
+        setCeldaGuardando('');
+        terminarCarga?.();
+      });
   }
 
   // Solo tiene sentido poner una excepción a alguien que no sea el Admin
@@ -4265,6 +4320,7 @@ function PermisosTab({ sesionToken, usuarios }) {
     e.preventDefault();
     if (!nuevoUsuarioId || !nuevaPestana) return;
     setGuardandoExcepcion(true);
+    iniciarCarga?.();
     actualizarPermisoUsuario({
       sesionToken,
       usuarioId: nuevoUsuarioId,
@@ -4278,13 +4334,18 @@ function PermisosTab({ sesionToken, usuarios }) {
         cargar();
       })
       .catch((err) => setMensaje(`Error al guardar la excepción: ${err.message}`))
-      .finally(() => setGuardandoExcepcion(false));
+      .finally(() => {
+        setGuardandoExcepcion(false);
+        terminarCarga?.();
+      });
   }
 
   function quitarExcepcion(usuarioId, pestanaClave) {
+    iniciarCarga?.();
     actualizarPermisoUsuario({ sesionToken, usuarioId, pestana: pestanaClave, quitar: true })
       .then(cargar)
-      .catch((err) => setMensaje(`Error al quitar la excepción: ${err.message}`));
+      .catch((err) => setMensaje(`Error al quitar la excepción: ${err.message}`))
+      .finally(() => terminarCarga?.());
   }
 
   function etiquetaDe(pestanaClave) {
