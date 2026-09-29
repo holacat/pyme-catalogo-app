@@ -492,7 +492,11 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
    razón que antes. Solo aplica a Stock y Pedidos (ver Dashboard.jsx) — el
    resto de las tablas de la app se quedan exactamente igual que antes. */
 .table-scroll-fijo {
-  max-height: 70vh;
+  /* Pedido de Claudia (2026-09-29): quitamos el bloque de "Ver historial
+     de transferencias" que iba debajo de la tabla de Stock (ya era
+     redundante con la Bitácora), así que le damos más alto a la tabla
+     en sí para que se vea la info desglosada sin sentirse apretada. */
+  max-height: 80vh;
   overflow-y: auto;
 }
 .table-scroll-fijo .stock-table,
@@ -2392,10 +2396,6 @@ main { flex: 1; padding: 1.5rem; max-width: 1500px; margin: 0 auto; width: 100%;
 @keyframes destacarFila {
   0% { background-color: #fff59d; }
   100% { background-color: transparent; }
-}
-
-.transferencias-historial {
-  margin-top: 16px;
 }
 /* Funcionalidad 2 (Stock personal, 2026-09): que un botón o campo
    deshabilitado se vea claramente apagado/gris, en vez de verse igual
