@@ -552,15 +552,6 @@ function esActivo(valor) {
 export default function Dashboard() {
   const [sesionToken, setSesionToken] = useState(() => localStorage.getItem(TOKEN_KEY) || '');
   const sesionIdRef = useRef(0);
-  // Pedido de Claudia (2026-09-29): "tab" en la firma de una función que se
-  // arma en un render viejo (como el "onGuardado" de "+ Agregar producto",
-  // más abajo) siempre va a valer lo mismo que tenía AL CREARSE esa función
-  // — no lo que está viendo Claudia en pantalla en este momento. Este ref
-  // (mismo patrón que "sesionIdRef" arriba, para el bug de "switcheo" de
-  // sesión) siempre trae el valor MÁS RECIENTE de la pestaña activa, para
-  // poder comprobar "¿de verdad sigue ahí?" justo antes de mandarla a otro
-  // lado por sorpresa.
-  const tabRef = useRef('stock');
   const [rol, setRol] = useState(() => localStorage.getItem(ROL_KEY) || '');
    const [nombreSesion, setNombreSesion] = useState(() => localStorage.getItem(NOMBRE_KEY) || '');
   // Arreglo (2026-09-23, pedido por Claudia): lo que se lleva escrito en
@@ -583,9 +574,6 @@ export default function Dashboard() {
   const [verificandoLogin, setVerificandoLogin] = useState(false);
   const [errorLogin, setErrorLogin] = useState('');
   const [tab, setTab] = useState('stock'); // stock | pedidos | alertas | cuenta | bitacora | usuarios | analitica | orden | nuevo
-  useEffect(() => {
-    tabRef.current = tab;
-  }, [tab]);
   const [productos, setProductos] = useState([]);
   const [pedidos, setPedidos] = useState([]);
   const [alertas, setAlertas] = useState([]);
@@ -2006,17 +1994,17 @@ export default function Dashboard() {
             // círculo de carga sin esperar a que los datos nuevos de
             // verdad llegaran — mismo bug que en handleActualizarStock.
             //
-            // Arreglo (2026-09-29, reportado por Claudia): si el guardado
-            // tardó y mientras tanto ella ya se había ido sola a revisar
-            // otra pestaña, esto la regresaba a Stock de sorpresa en
-            // cuanto el guardado terminaba, sin avisar — interrumpiendo lo
-            // que estuviera viendo. Ahora solo saltamos a Stock si SIGUE
-            // en "Agregar producto" esperando el resultado (`tabRef`,
-            // mismo patrón que "sesionIdRef", siempre trae la pestaña
-            // real más reciente, no la que había cuando se creó esta
-            // función). Si ya se fue a otro lado, la dejamos donde está —
-            // el producto de todas formas ya quedó guardado.
-            if (tabRef.current === 'nuevo') setTab('stock');
+            // Arreglo (2026-09-29, reportado por Claudia): al guardar un
+            // producto, esto la mandaba automáticamente a la pestaña
+            // Stock. Primero se intentó arreglar solo el caso en que ella
+            // ya se había ido a otra pestaña mientras esperaba (con
+            // `tabRef`, ver historial), pero luego pidió explícitamente
+            // que YA NO SE HAGA ESE SALTO EN ABSOLUTO, ni siquiera si se
+            // queda esperando en "Agregar producto": "no quiero que me
+            // redireccione a la pestaña de Stock". Se quitó por completo
+            // — después de guardar, se queda donde esté, y el listado se
+            // actualiza solo de fondo (silencioso) para que el producto ya
+            // aparezca en Stock la próxima vez que Claudia entre ahí.
             return cargarTodo(sesionToken, { silencioso: true });
           }}
         />
@@ -2304,6 +2292,36 @@ function ProductoForm({ sesionToken, opciones = {}, setOpciones, usuarios = [], 
     return (e) => setForm((f) => ({ ...f, [campo]: String(e.target.value).slice(0, maxCaracteres) }));
   }
 
+  // Bug reportado por Claudia (2026-09-29, con capturas): Nombre, Código
+  // propio, Categoría, Marca, Talla y Color usan un <input> con <datalist>
+  // (la lista de opciones predeterminadas que se administra con el botón
+  // ⚙️) — y por comportamiento normal del navegador, en cuanto el campo ya
+  // tiene un texto que coincide con una opción, la próxima vez que abres
+  // la lista solo aparece ESA opción, no las demás; hay que borrar el
+  // campo a mano para que reaparezcan todas. Nada práctico si quieres
+  // cambiar de una opción a otra. Arreglo: al darle clic/enfocar el campo
+  // se vacía MOMENTÁNEAMENTE (el valor real se guarda aparte en
+  // `valoresAntesDeAbrirLista_`, no se pierde) para que el navegador
+  // muestre la lista completa; si sales del campo sin elegir ni escribir
+  // nada nuevo, se regresa solo el valor que tenía antes.
+  const valoresAntesDeAbrirLista_ = useRef({});
+  function crearHandlersListaDesplegable(campo) {
+    return {
+      onFocus: (e) => {
+        valoresAntesDeAbrirLista_.current[campo] = e.target.value;
+        setForm((f) => ({ ...f, [campo]: '' }));
+      },
+      onBlur: () => {
+        setForm((f) => {
+          if (f[campo] === '' && valoresAntesDeAbrirLista_.current[campo]) {
+            return { ...f, [campo]: valoresAntesDeAbrirLista_.current[campo] };
+          }
+          return f;
+        });
+      },
+    };
+  }
+
   // Para casillas (checkboxes) como "En oferta": a diferencia de los demás
   // campos, lo que importa es si está marcada o no (e.target.checked), no
   // el texto que se escribió.
@@ -2409,7 +2427,7 @@ function ProductoForm({ sesionToken, opciones = {}, setOpciones, usuarios = [], 
               ⚙️
             </button>
           </span>
-          <input value={form.nombre} onChange={handleChangeTexto('nombre', MAX_CARACTERES_NOMBRE)} required maxLength={MAX_CARACTERES_NOMBRE} list="lista-nombre" />
+          <input value={form.nombre} onChange={handleChangeTexto('nombre', MAX_CARACTERES_NOMBRE)} {...crearHandlersListaDesplegable('nombre')} required maxLength={MAX_CARACTERES_NOMBRE} list="lista-nombre" />
           <datalist id="lista-nombre">
             {(opciones.nombre || []).map((v) => (
               <option key={v} value={v} />
@@ -2426,6 +2444,7 @@ function ProductoForm({ sesionToken, opciones = {}, setOpciones, usuarios = [], 
           <input
             value={form.codigoPropio}
             onChange={handleChangeTexto('codigoPropio', MAX_CARACTERES_CODIGO)}
+            {...crearHandlersListaDesplegable('codigoPropio')}
             placeholder="Ej. PLY-001"
             maxLength={MAX_CARACTERES_CODIGO}
             list="lista-codigoPropio"
@@ -2443,7 +2462,7 @@ function ProductoForm({ sesionToken, opciones = {}, setOpciones, usuarios = [], 
               ⚙️
             </button>
           </span>
-          <input value={form.categoria} onChange={handleChangeTexto('categoria', MAX_CARACTERES_CATEGORIA)} maxLength={MAX_CARACTERES_CATEGORIA} list="lista-categoria" />
+          <input value={form.categoria} onChange={handleChangeTexto('categoria', MAX_CARACTERES_CATEGORIA)} {...crearHandlersListaDesplegable('categoria')} maxLength={MAX_CARACTERES_CATEGORIA} list="lista-categoria" />
           <datalist id="lista-categoria">
             {(opciones.categoria || []).map((v) => (
               <option key={v} value={v} />
@@ -2457,7 +2476,7 @@ function ProductoForm({ sesionToken, opciones = {}, setOpciones, usuarios = [], 
               ⚙️
             </button>
           </span>
-          <input value={form.marca} onChange={handleChangeTexto('marca', MAX_CARACTERES_MARCA)} maxLength={MAX_CARACTERES_MARCA} list="lista-marca" />
+          <input value={form.marca} onChange={handleChangeTexto('marca', MAX_CARACTERES_MARCA)} {...crearHandlersListaDesplegable('marca')} maxLength={MAX_CARACTERES_MARCA} list="lista-marca" />
           <datalist id="lista-marca">
             {(opciones.marca || []).map((v) => (
               <option key={v} value={v} />
@@ -2471,7 +2490,7 @@ function ProductoForm({ sesionToken, opciones = {}, setOpciones, usuarios = [], 
               ⚙️
             </button>
           </span>
-          <input value={form.talla} onChange={handleChangeTexto('talla', MAX_CARACTERES_TALLA)} maxLength={MAX_CARACTERES_TALLA} list="lista-talla" />
+          <input value={form.talla} onChange={handleChangeTexto('talla', MAX_CARACTERES_TALLA)} {...crearHandlersListaDesplegable('talla')} maxLength={MAX_CARACTERES_TALLA} list="lista-talla" />
           <datalist id="lista-talla">
             {(opciones.talla || []).map((v) => (
               <option key={v} value={v} />
@@ -2485,7 +2504,7 @@ function ProductoForm({ sesionToken, opciones = {}, setOpciones, usuarios = [], 
               ⚙️
             </button>
           </span>
-          <input value={form.color} onChange={handleChangeTexto('color', MAX_CARACTERES_COLOR)} maxLength={MAX_CARACTERES_COLOR} list="lista-color" />
+          <input value={form.color} onChange={handleChangeTexto('color', MAX_CARACTERES_COLOR)} {...crearHandlersListaDesplegable('color')} maxLength={MAX_CARACTERES_COLOR} list="lista-color" />
           <datalist id="lista-color">
             {(opciones.color || []).map((v) => (
               <option key={v} value={v} />
