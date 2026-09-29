@@ -214,11 +214,21 @@ function ordenarProductosStock(lista, orden) {
   return copia;
 }
 
-// Texto (▲, ▼ o ↕) que se muestra junto al nombre de la columna, para que
-// Claudia vea de un vistazo si esa columna está ordenando la tabla y en
-// qué dirección.
+// Lo que se muestra junto al nombre de la columna, para que Claudia vea de
+// un vistazo si esa columna está ordenando la tabla y en qué dirección.
+//
+// Arreglo (2026-09-29, pedido por Claudia): antes, la columna que NO
+// estaba ordenando la tabla mostraba una doble flecha "↕" — pidió
+// cambiarla por un punto verde (el mismo verde de la marca), del mismo
+// tamaño, porque es más fácil de reconocer de un vistazo "no le hemos
+// movido el orden a esto" que una flecha que apunta para los dos lados.
+// Las flechas ▲/▼ de la columna que SÍ está ordenando activamente se
+// quedan exactamente igual que antes — Claudia solo pidió cambiar la de
+// "sin ordenar", no esas.
 function indicadorOrdenStock(orden, campo) {
-  if (!orden || orden.campo !== campo) return '↕';
+  if (!orden || orden.campo !== campo) {
+    return <span className="orden-header-punto" aria-hidden="true" />;
+  }
   return orden.direccion === 1 ? '▲' : '▼';
 }
 
@@ -4543,6 +4553,20 @@ const RANGOS_RAPIDOS_ANALITICA = ['Hoy', 'Esta semana', 'Este mes'];
 // veía como barras sin escala, y el monto exacto solo aparecía al pasar el
 // mouse encima.
 function GraficaLineaTendencia({ serie }) {
+  // Arreglo (2026-09-29, reportado por Claudia: "al darle clic a sus
+  // puntos ya no dice info"). El CSS de ".analitica-linea-punto" ya traía
+  // "cursor: pointer" y se agranda al pasar el mouse (dando a entender que
+  // se puede/debe darle clic), pero el único mecanismo real para ver la
+  // fecha y el monto era el tooltip NATIVO del navegador (una etiqueta
+  // "<title>" de SVG, que solo aparece dejando el mouse quieto encima un
+  // instante) — nunca respondía a un clic de verdad, y en pantallas
+  // táctiles (celular) ese tooltip nativo prácticamente no aparece nunca.
+  // Ahora, al darle clic (o tap) a un punto, se abre un recuadro con la
+  // fecha y el monto exacto dibujado directo en la gráfica — se mantiene
+  // visible hasta que se le da clic a otro punto o al mismo para cerrarlo.
+  // El tooltip nativo del navegador se deja también, como respaldo extra
+  // para quien prefiera solo pasar el mouse.
+  const [indiceActivo, setIndiceActivo] = useState(null);
   const ANCHO = 600;
   const ALTO = 220;
   const MARGEN_IZQ = 58;
@@ -4583,6 +4607,8 @@ function GraficaLineaTendencia({ serie }) {
   // todos los días, solo se oculta el TEXTO de la fecha).
   const saltoEtiquetas = Math.max(1, Math.ceil(serie.length / 8));
 
+  const puntoActivo = indiceActivo != null ? serie[indiceActivo] : null;
+
   return (
     <svg className="analitica-linea-svg" viewBox={`0 0 ${ANCHO} ${ALTO}`} preserveAspectRatio="none" role="img">
       {lineasEje.map((linea, i) => (
@@ -4610,7 +4636,13 @@ function GraficaLineaTendencia({ serie }) {
 
       {serie.map((d, i) => (
         <g key={d.fecha}>
-          <circle cx={coordX(i)} cy={coordY(d.total)} r="4" className="analitica-linea-punto">
+          <circle
+            cx={coordX(i)}
+            cy={coordY(d.total)}
+            r={indiceActivo === i ? 6 : 4}
+            className="analitica-linea-punto"
+            onClick={() => setIndiceActivo((actual) => (actual === i ? null : i))}
+          >
             <title>{`${d.fecha}: ${formatearMoneda(d.total)}`}</title>
           </circle>
           {i % saltoEtiquetas === 0 && (
@@ -4620,6 +4652,29 @@ function GraficaLineaTendencia({ serie }) {
           )}
         </g>
       ))}
+
+      {puntoActivo && (() => {
+        const x = coordX(indiceActivo);
+        const y = coordY(puntoActivo.total);
+        const texto = `${puntoActivo.fecha}: ${formatearMoneda(puntoActivo.total)}`;
+        const anchoCaja = Math.min(areaAncho, Math.max(90, texto.length * 5.6 + 16));
+        let cajaX = x - anchoCaja / 2;
+        if (cajaX < MARGEN_IZQ) cajaX = MARGEN_IZQ;
+        if (cajaX + anchoCaja > ANCHO - MARGEN_DER) cajaX = ANCHO - MARGEN_DER - anchoCaja;
+        const cajaAlto = 22;
+        // Si el punto está muy arriba de la gráfica, no cabe una caja
+        // encima — en ese caso se dibuja debajo del punto en vez de arriba.
+        const arriba = y - cajaAlto - 10 >= 0;
+        const cajaY = arriba ? y - cajaAlto - 10 : y + 10;
+        return (
+          <g className="analitica-linea-tooltip">
+            <rect x={cajaX} y={cajaY} width={anchoCaja} height={cajaAlto} rx="4" />
+            <text x={cajaX + anchoCaja / 2} y={cajaY + cajaAlto / 2 + 4} textAnchor="middle">
+              {texto}
+            </text>
+          </g>
+        );
+      })()}
     </svg>
   );
 }
@@ -4835,8 +4890,8 @@ function AnaliticaTab({ sesionToken }) {
               <GraficaLineaTendencia serie={datos.serieTiempo} />
             )}
             <p className="muted">
-              Cada punto es el total neto de ventas de ese día (abonos menos cargos). Pasa el mouse
-              sobre un punto para ver la fecha y el monto exacto.
+              Cada punto es el total neto de ventas de ese día (abonos menos cargos). Dale clic a un
+              punto para ver la fecha y el monto exacto (vuelve a darle clic para cerrarlo).
             </p>
           </section>
         </>
