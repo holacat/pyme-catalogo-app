@@ -1667,8 +1667,6 @@ export default function Dashboard() {
               <p className="info-msg">Ningún producto coincide con la búsqueda o los filtros de arriba.</p>
             )}
           </div>
-
-          {esAdministrador && <TransferenciasHistorialTab transferencias={transferencias} />}
         </>
       )}
 
@@ -3589,50 +3587,6 @@ function StockRow({
   );
 }
 
-// ---- Historial de transferencias (solo Administrador/Admin Central,
-// dentro de la pestaña Stock) — lista completa de solicitudes, más
-// reciente primero, con un botón para mostrarla/ocultarla. ----
-function TransferenciasHistorialTab({ transferencias }) {
-  const [abierto, setAbierto] = useState(false);
-  const ordenadas = (transferencias || []).slice().reverse();
-
-  return (
-    <div className="transferencias-historial">
-      <button type="button" className="btn btn-secondary btn-small" onClick={() => setAbierto((a) => !a)}>
-        {abierto ? '▲ Ocultar historial de transferencias' : '▼ Ver historial de transferencias'}
-      </button>
-      {abierto && (
-        <div className="table-scroll">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Fecha</th>
-                <th>Solicitante</th>
-                <th>Dueño</th>
-                <th>Producto</th>
-                <th>Cantidad</th>
-                <th>Estado</th>
-              </tr>
-            </thead>
-            <tbody>
-              {ordenadas.map((t) => (
-                <tr key={t.ID}>
-                  <td>{formatearFechaHora(t.Fecha)}</td>
-                  <td>{t.SolicitanteNombre}</td>
-                  <td>{t.DuenoNombre}</td>
-                  <td>{t.Producto}</td>
-                  <td>{t.Cantidad}</td>
-                  <td>{t.Estado}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {ordenadas.length === 0 && <p className="info-msg">Todavía no hay transferencias registradas.</p>}
-        </div>
-      )}
-    </div>
-  );
-}
 // Precio guardado en el pedido (fijado al momento del pedido). Los pedidos
 // de antes de esta versión no tienen nada guardado ahí, así que en esos
 // casos devolvemos null (para mostrar "—" en vez de inventar un $0).
