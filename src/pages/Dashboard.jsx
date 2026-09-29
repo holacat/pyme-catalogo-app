@@ -335,6 +335,38 @@ function conLimiteDeTiempo(promesa, etiqueta, opciones = {}) {
 
 const ESTADOS_PEDIDO = ['Sin solicitud', 'En proceso', 'Pagado', 'Reembolsado', 'Cancelado'];
 
+// Flujo de Estados de Pedido (2026-09-29, diseño explícito de Claudia):
+// desde cada Estado solo se puede avanzar a los que se listan aquí — nunca
+// saltarse pasos ni regresar a mano. Mismo mapa que ya se validaba en
+// "Code.gs" (acción "actualizarPedido"); aquí se usa solo para que el menú
+// desplegable de Estado de cada pedido NO OFREZCA siquiera las opciones
+// que el servidor de todos modos rechazaría — así Claudia no se topa con
+// el error después de elegir, ve directamente las opciones válidas.
+//   - "Sin solicitud" → únicamente "En proceso".
+//   - "En proceso" → "Pagado" o "Cancelado" (todavía no hay dinero de por
+//     medio que revertir).
+//   - "Pagado" → únicamente "Reembolsado" (para que el Cargo que revierte
+//     el Abono SIEMPRE quede registrado en Estado de cuenta).
+//   - "Cancelado" → puede regresar a "En proceso" (por si se le dio clic
+//     por accidente) — seguro porque "En proceso" nunca registra dinero.
+//   - "Reembolsado" sigue siendo final: a diferencia de "Cancelado", sí
+//     registró un Cargo real, y reabrirlo necesitaría además deshacer ese
+//     Cargo (no se pidió, y se presta a confusión contable).
+const SIGUIENTE_ESTADO_VALIDO_PEDIDO = {
+  'Sin solicitud': ['Sin solicitud', 'En proceso'],
+  'En proceso': ['En proceso', 'Pagado', 'Cancelado'],
+  Pagado: ['Pagado', 'Reembolsado'],
+  Cancelado: ['Cancelado', 'En proceso'],
+  Reembolsado: ['Reembolsado'],
+};
+
+// Si el Estado guardado no es ninguno de los 5 conocidos (dato viejo o
+// atípico), se muestran los 5 sin restringir — mismo respaldo que ya usa
+// "Code.gs" para no atorar un dato raro.
+function opcionesEstadoPedido(estadoActual) {
+  return SIGUIENTE_ESTADO_VALIDO_PEDIDO[estadoActual] || ESTADOS_PEDIDO;
+}
+
 // Ya no existe una sola "clave de administrador" compartida: cada persona
 // inicia sesión con su propio usuario y contraseña (hoja "Usuarios"), y el
 // servidor regresa un "token" de sesión que se guarda aquí, junto con el
@@ -5109,11 +5141,14 @@ function PedidoRow({
           onChange={(e) => handleCambiarEstado(e.target.value)}
           disabled={!puedoEditarPedido}
         >
-          <option>Sin solicitud</option>
-          <option>En proceso</option>
-          <option>Pagado</option>
-          <option>Reembolsado</option>
-          <option>Cancelado</option>
+          {/* Flujo de Estados (2026-09-29): solo se ofrecen los siguientes
+              pasos válidos desde el Estado GUARDADO del pedido (nunca desde
+              el que esté seleccionado sin guardar todavía) — así nunca se
+              puede ni siquiera elegir un salto que el servidor rechazaría
+              (por ejemplo, regresar un "Pagado" directo a "Cancelado"). */}
+          {opcionesEstadoPedido(pedido.Estado).map((opcion) => (
+            <option key={opcion}>{opcion}</option>
+          ))}
         </select>
         {estado === 'Reembolsado' && (
           <div className="pedido-reembolso-caja">
