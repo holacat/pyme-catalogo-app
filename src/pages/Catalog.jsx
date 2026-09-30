@@ -179,6 +179,23 @@ export default function Catalog() {
 
   const [clienteGuardado, setClienteGuardado] = useState(() => leerClienteGuardado());
 
+  // Bug reportado por Claudia (2026-09-30): pidió un producto de prueba y
+  // NO apareció solo en la pestaña Pedidos del Dashboard — hasta que le dio
+  // manualmente "Actualizar" ahí sí apareció. Causa real: "crearPedido" se
+  // mandaba "al aire" (sin esperar su respuesta) justo DESPUÉS de abrir
+  // WhatsApp, y si esa petición fallaba, el único aviso era un
+  // "console.warn" que nadie ve (ni la clienta ni Claudia) — el pedido se
+  // podía perder en silencio total. Además, en celular, saltar a la app de
+  // WhatsApp puede hacer que el navegador quede en segundo plano justo
+  // cuando esas peticiones apenas iban a mandarse, lo que también puede
+  // retrasarlas o interrumpirlas sin ningún aviso. Con estos dos estados
+  // nuevos, ahora SÍ se espera a que el pedido quede registrado en el
+  // servidor ANTES de mandar a la clienta a WhatsApp (ver
+  // "registrarYAbrirWhatsAppCarrito" más abajo), y si algo falla se avisa
+  // claramente con un botón para "Reintentar" en vez de fallar callado.
+  const [registrandoPedido, setRegistrandoPedido] = useState(false);
+  const [errorRegistroPedido, setErrorRegistroPedido] = useState('');
+
   // Arreglo (2026-09-25, reportado por Claudia: "al salirme del catálogo y
   // volverme a meter tengo que actualizarlo manualmente, ya que si no dice
   // 'no se pudo cargar el catálogo, failed to fetch'... el usuario se va a
@@ -265,21 +282,44 @@ export default function Catalog() {
     );
   }
 
-  function registrarYAbrirWhatsAppCarrito(items, { nombre, telefono }) {
-    window.open(buildWhatsAppLinkCarrito(items, nombre), '_blank', 'noopener,noreferrer');
-
-    // Cada producto queda como su propia fila en la hoja de Pedidos (mismo
-    // cliente y teléfono), para que se vean igual que los demás pedidos.
-    items.forEach(({ producto, cantidad }) => {
-      crearPedido({
-        cliente: nombre,
-        telefono,
-        producto: producto.Nombre,
-        productoId: producto.ID,
-        cantidad,
-        notas: '',
-      }).catch((err) => console.warn('No se pudo registrar el pedido:', err.message));
-    });
+  // Arreglo (2026-09-30): ahora se ESPERA (con Promise.all) a que TODOS los
+  // productos del carrito queden registrados en la hoja de Pedidos, y solo
+  // si eso funciona bien se abre WhatsApp y se vacía el carrito. Antes el
+  // orden era al revés (abrir WhatsApp primero, registrar "al aire"
+  // después sin esperar nada) — ver la nota junto a "registrandoPedido"
+  // arriba de por qué eso podía perder un pedido en silencio.
+  async function registrarYAbrirWhatsAppCarrito(items, { nombre, telefono }) {
+    if (registrandoPedido) return; // evita doble envío si alguien alcanza a darle "Reintentar" dos veces
+    setErrorRegistroPedido('');
+    setRegistrandoPedido(true);
+    try {
+      // Cada producto queda como su propia fila en la hoja de Pedidos
+      // (mismo cliente y teléfono), para que se vean igual que los demás
+      // pedidos.
+      await Promise.all(
+        items.map(({ producto, cantidad }) =>
+          crearPedido({
+            cliente: nombre,
+            telefono,
+            producto: producto.Nombre,
+            productoId: producto.ID,
+            cantidad,
+            notas: '',
+          })
+        )
+      );
+      window.open(buildWhatsAppLinkCarrito(items, nombre), '_blank', 'noopener,noreferrer');
+      setCarrito([]);
+    } catch (err) {
+      // El carrito NO se vacía si esto falla, para que "Reintentar" pueda
+      // volver a mandar exactamente lo mismo sin que la clienta tenga que
+      // rehacer su pedido desde cero.
+      setErrorRegistroPedido(
+        'No pudimos registrar tu pedido (puede ser tu conexión a internet). Tu pedido sigue guardado aquí — dale "Reintentar".'
+      );
+    } finally {
+      setRegistrandoPedido(false);
+    }
   }
 
   // Se llama al darle "Continuar" dentro del modal del carrito.
@@ -287,7 +327,6 @@ export default function Catalog() {
     setCarritoAbierto(false);
     if (clienteGuardado) {
       registrarYAbrirWhatsAppCarrito(carrito, clienteGuardado);
-      setCarrito([]);
     } else {
       setPidiendoDatosCarrito(true);
     }
@@ -302,7 +341,14 @@ export default function Catalog() {
     setClienteGuardado({ nombre, telefono });
 
     registrarYAbrirWhatsAppCarrito(carrito, { nombre, telefono });
-    setCarrito([]);
+  }
+
+  // Botón "Reintentar" del aviso de error: usa el carrito y los datos del
+  // cliente tal como se quedaron (ninguno de los dos se borra si falla el
+  // registro), así que reintentar es simplemente volver a llamar a la
+  // misma función con lo que ya se tenía.
+  function handleReintentarRegistroPedido() {
+    if (clienteGuardado) registrarYAbrirWhatsAppCarrito(carrito, clienteGuardado);
   }
 
   function handleCambiarDatos() {
@@ -367,6 +413,24 @@ export default function Catalog() {
             ¿No eres tú? Cambiar datos
           </button>
         </p>
+      )}
+
+      {/* Aviso mientras se registra el pedido en el servidor (2026-09-30) —
+          se muestra justo antes de saltar a WhatsApp, para que la clienta
+          sepa que hay que esperar un momento en vez de pensar que la app se
+          congeló. */}
+      {registrandoPedido && <p className="info-msg aviso">Registrando tu pedido…</p>}
+
+      {/* Si el registro falla, se avisa claramente y se ofrece reintentar
+          con el mismo carrito (que NO se borra en ese caso) en vez de
+          fallar en silencio (que era el bug original). */}
+      {errorRegistroPedido && (
+        <div className="catalogo-error-carga">
+          <p className="info-msg error">{errorRegistroPedido}</p>
+          <button type="button" className="btn btn-secondary" onClick={handleReintentarRegistroPedido}>
+            🔄 Reintentar
+          </button>
+        </div>
       )}
 
       {/* ---- Vista normal: categorías, cada una en su propia cajita con
@@ -442,7 +506,11 @@ export default function Catalog() {
         </>
       )}
 
-      {totalProductosEnCarrito > 0 && (
+      {/* Oculto mientras se está registrando un pedido (2026-09-30): el
+          carrito modal ya se cerró en ese momento, así que no hay nada que
+          "reabrir" — y evita que alguien le dé doble clic por accidente
+          mientras espera. */}
+      {totalProductosEnCarrito > 0 && !registrandoPedido && (
         <button type="button" className="carrito-flotante" onClick={() => setCarritoAbierto(true)}>
           🛒 {totalProductosEnCarrito} producto{totalProductosEnCarrito === 1 ? '' : 's'} — Ver pedido
         </button>
