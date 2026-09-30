@@ -285,12 +285,16 @@ export function listarUsuarios(sesionToken) {
   return get('listarUsuarios', { sesionToken });
 }
 
-export function crearUsuario({ sesionToken, nombre, usuario, contrasena, rol }) {
-  return post({ action: 'crearUsuario', sesionToken, nombre, usuario, contrasena, rol });
+// "telefonoPedidos" (2026-09-30, catálogos personales): opcional — el
+// número de WhatsApp al que le llegan los pedidos de esta persona. Por
+// ahora solo se usa el de quien esté marcado 👑 Admin Central (para el
+// catálogo Global), pero ya se manda y se guarda por persona.
+export function crearUsuario({ sesionToken, nombre, usuario, contrasena, rol, telefonoPedidos }) {
+  return post({ action: 'crearUsuario', sesionToken, nombre, usuario, contrasena, rol, telefonoPedidos });
 }
 
-export function actualizarUsuario({ sesionToken, usuarioId, nombre, rol }) {
-  return post({ action: 'actualizarUsuario', sesionToken, usuarioId, nombre, rol });
+export function actualizarUsuario({ sesionToken, usuarioId, nombre, rol, telefonoPedidos }) {
+  return post({ action: 'actualizarUsuario', sesionToken, usuarioId, nombre, rol, telefonoPedidos });
 }
 
 export function cambiarContrasenaUsuario({ sesionToken, usuarioId, contrasenaNueva }) {
@@ -369,4 +373,23 @@ export function responderTransferencia({ sesionToken, transferenciaId, aceptar }
 // para que deje de aparecer en el aviso de Alertas.
 export function marcarTransferenciaVista({ sesionToken, transferenciaId }) {
   return post({ action: 'marcarTransferenciaVista', sesionToken, transferenciaId });
+}
+
+// ---- Solicitudes de reembolso (2026-09-30): mismo patrón que las dos
+// funciones de Transferencias de arriba, pero para la hoja
+// "SolicitudesReembolso" — se crean solas del lado del servidor cuando
+// alguien sin el permiso "candadoReembolsos" intenta pasar un pedido de
+// "Pagado" a "Reembolsado" (ver "actualizarPedido" en Code.gs). ----
+
+// Acepta o rechaza una solicitud de reembolso (solo puede quien tenga el
+// permiso especial "candadoReembolsos", o el Admin Central — el backend
+// también lo revisa).
+export function responderSolicitudReembolso({ sesionToken, solicitudId, aceptar }) {
+  return post({ action: 'responderSolicitudReembolso', sesionToken, solicitudId, aceptar });
+}
+
+// Marca como "ya la vi" una solicitud de reembolso mía que ya fue
+// aprobada o rechazada, para que deje de aparecer en el aviso de Alertas.
+export function marcarSolicitudReembolsoVista({ sesionToken, solicitudId }) {
+  return post({ action: 'marcarSolicitudReembolsoVista', sesionToken, solicitudId });
 }
