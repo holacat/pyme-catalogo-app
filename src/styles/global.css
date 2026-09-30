@@ -1213,6 +1213,44 @@ main { flex: 1; padding: 1.5rem; max-width: 1800px; margin: 0 auto; width: 100%;
   padding: 0.1rem 0.3rem;
 }
 
+/* ---- Combobox propio de Nombre/Código propio/Categoría/Marca/Talla/Color
+   (2026-09-30, reemplaza al <input list="…">+<datalist> nativo — ver la
+   nota junto a "CampoConOpciones" en Dashboard.jsx del porqué). ---- */
+.campo-opciones { position: relative; }
+
+.campo-opciones-lista {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  max-height: 180px;
+  overflow-y: auto;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.12);
+}
+
+.campo-opciones-lista li { margin: 0; }
+
+.campo-opciones-lista button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0.5rem 0.6rem;
+  font-size: 0.85rem;
+  font-weight: 400;
+  cursor: pointer;
+}
+
+.campo-opciones-lista button:hover { background: #f3f4f6; }
+
 .form-field-fotos {
   display: flex;
   flex-direction: column;
