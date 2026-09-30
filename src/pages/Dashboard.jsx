@@ -2158,6 +2158,13 @@ function ProductoForm({ sesionToken, opciones = {}, setOpciones, usuarios = [], 
   const setFotos = usaEstadoExterno ? setFotosExterno : setFotosInterno;
   const [enviando, setEnviando] = useState(false);
   const [mensaje, setMensaje] = useState('');
+  // Bug reportado por Claudia (2026-09-30): subir una foto puede tardar, y
+  // si en ese ratito le da clic a "Agregar producto" por accidente, el
+  // producto se guardaba sin esperar a que la foto terminara de subir.
+  // "ImageUploader" ahora avisa aquí cada vez que hay (o deja de haber)
+  // una foto subiéndose (ver "onSubiendoCambio" en ese componente); con
+  // eso, "handleSubmit" puede preguntar antes de guardar.
+  const [fotosSubiendo, setFotosSubiendo] = useState(false);
 
   const duenosEdicion = esEdicion ? (productoExistente.Duenos || []) : [];
   const miPropioEdicion = duenosEdicion.find((d) => String(d.usuarioId) === String(usuarioId));
@@ -2333,6 +2340,17 @@ function ProductoForm({ sesionToken, opciones = {}, setOpciones, usuarios = [], 
     if (!form.nombre.trim() || !form.precio) {
       setMensaje('Error: el nombre y el precio de venta son obligatorios.');
       return;
+    }
+    // Bug reportado por Claudia (2026-09-30): subir fotos puede tardar, y
+    // es fácil confundirse y darle a "Guardar"/"Agregar producto" antes de
+    // que termine. Si eso pasa, se pregunta explícitamente en vez de
+    // guardar de una vez sin avisar — así ella decide si de verdad quiere
+    // seguir sin esa foto, o prefiere cancelar y esperar.
+    if (fotosSubiendo) {
+      const seguirSinEsperar = window.confirm(
+        'Todavía se están cargando cambios (una o más fotos siguen subiendo). ¿Estás segura de que quieres seguir de todos modos?'
+      );
+      if (!seguirSinEsperar) return;
     }
     setEnviando(true);
     setMensaje('');
@@ -2622,7 +2640,7 @@ function ProductoForm({ sesionToken, opciones = {}, setOpciones, usuarios = [], 
 
       <div className="form-field-fotos">
         <label>Fotos del producto</label>
-        <ImageUploader sesionToken={sesionToken} value={fotos} onChange={setFotos} />
+        <ImageUploader sesionToken={sesionToken} value={fotos} onChange={setFotos} onSubiendoCambio={setFotosSubiendo} />
       </div>
 
       {mensaje && (
