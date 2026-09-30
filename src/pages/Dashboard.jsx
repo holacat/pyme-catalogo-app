@@ -417,6 +417,13 @@ const PERMISOS_KEY = 'pyme_sesion_permisos';
 // el candado se queda APAGADO por default (más seguro que fallar abierto).
 const CLAVE_CANDADO_PEDIDOS = 'candadoPedidos';
 
+// Candado nuevo, aparte del de arriba (2026-09-30, pedido por Claudia):
+// llave del permiso especial "¿puede marcar un pedido como Reembolsado?" —
+// MISMA llave que usa el backend (CLAVE_CANDADO_REEMBOLSOS en Code.gs).
+// Igual que el de arriba, APAGADO por default si algo falla al cargar los
+// permisos reales.
+const CLAVE_CANDADO_REEMBOLSOS = 'candadoReembolsos';
+
 // Respaldo seguro: si por lo que sea no hay permisos guardados (una sesión
 // vieja de antes de que existiera esta función, o un error al leerlos), se
 // muestran TODAS las pestañas en vez de ninguna — así nadie se queda con el
@@ -1310,6 +1317,23 @@ export default function Dashboard() {
     duenosPorProductoId[p.ID] = p.Duenos || [];
   });
 
+  // Bug reportado por Claudia (2026-09-30): después de guardar un pedido
+  // como "Reembolsado", el cuadro de texto de "Monto a reembolsar" se
+  // quedaba visible y editable (aunque ya no tuviera ningún efecto,
+  // Guardar seguía deshabilitado) — nomás estorbaba y ensanchaba la fila.
+  // Para reemplazarlo por un texto fijo ("Reembolsado: $X") una vez
+  // guardado, se necesita el monto que de verdad se reembolsó — y eso NO
+  // se guarda en la propia fila del pedido, solo en el "Cargo" que
+  // "actualizarPedido" ya registra en Movimientos (ver Code.gs). Aquí se
+  // arma un mapa PedidoID -> monto para poder mostrarlo sin tener que
+  // agregar una columna nueva a la hoja de Pedidos.
+  const montoReembolsadoPorPedidoId = {};
+  movimientos.forEach((m) => {
+    if (m.Tipo === 'Cargo' && m.PedidoID && m.Concepto === 'Reembolso de pedido') {
+      montoReembolsadoPorPedidoId[m.PedidoID] = Number(m.Monto) || 0;
+    }
+  });
+
   const productosPorFecha = productosOrdenados.filter(productoEnRangoDeFecha);
   const productosPorCategoria = filtroCategoriaStock
     ? productosPorFecha.filter((p) => categoriaDeProducto(p) === filtroCategoriaStock)
@@ -1849,6 +1873,8 @@ export default function Dashboard() {
                     duenos={duenosPorProductoId[ped.ProductoID] || []}
                     usuarioId={usuarioId}
                     puedeSaltarCandado={esAdminCentral || !!permisos[CLAVE_CANDADO_PEDIDOS]}
+                    puedeReembolsar={esAdminCentral || !!permisos[CLAVE_CANDADO_REEMBOLSOS]}
+                    montoReembolsado={montoReembolsadoPorPedidoId[ped.ID]}
                     onGuardar={handleGuardarPedido}
                     onDirtyChange={marcarSucio}
                     onAbrirNota={(cliente, valor, onChange) => setNotaEnZoom({ cliente, valor, onChange })}
@@ -4412,6 +4438,12 @@ function PermisosTab({ sesionToken, usuarios, iniciarCarga, terminarCarga }) {
   // CLAVE_CANDADO_PEDIDOS arriba) — se guarda y se muestra por separado,
   // aunque reutiliza exactamente las mismas acciones/tabla de abajo.
   const [permisoCandadoPedidos, setPermisoCandadoPedidos] = useState({ clave: CLAVE_CANDADO_PEDIDOS, etiqueta: 'Editar pedidos de otro dueño (con candado)' });
+  // Candado nuevo, aparte (2026-09-30): igual que el de arriba, pero para
+  // el permiso especial de marcar pedidos como "Reembolsado".
+  const [permisoCandadoReembolsos, setPermisoCandadoReembolsos] = useState({
+    clave: CLAVE_CANDADO_REEMBOLSOS,
+    etiqueta: 'Marcar pedidos como Reembolsado (con candado)',
+  });
   const [cargando, setCargando] = useState(true);
   const [mensaje, setMensaje] = useState('');
   const [celdaGuardando, setCeldaGuardando] = useState(''); // "Rol:pestana" en curso, o ''
@@ -4429,6 +4461,7 @@ function PermisosTab({ sesionToken, usuarios, iniciarCarga, terminarCarga }) {
         setRolDefaults(res.rolDefaults || { Administrador: {}, Vendedor: {} });
         setOverrides(res.overrides || []);
         if (res.permisoCandadoPedidos) setPermisoCandadoPedidos(res.permisoCandadoPedidos);
+        if (res.permisoCandadoReembolsos) setPermisoCandadoReembolsos(res.permisoCandadoReembolsos);
         setMensaje('');
       })
       .catch((err) => setMensaje(`Error al cargar permisos: ${err.message}`))
@@ -4494,6 +4527,7 @@ function PermisosTab({ sesionToken, usuarios, iniciarCarga, terminarCarga }) {
 
   function etiquetaDe(pestanaClave) {
     if (pestanaClave === CLAVE_CANDADO_PEDIDOS) return permisoCandadoPedidos.etiqueta;
+    if (pestanaClave === CLAVE_CANDADO_REEMBOLSOS) return permisoCandadoReembolsos.etiqueta;
     const encontrada = pestanas.find((p) => p.clave === pestanaClave);
     return encontrada ? encontrada.etiqueta : pestanaClave;
   }
@@ -4593,6 +4627,51 @@ function PermisosTab({ sesionToken, usuarios, iniciarCarga, terminarCarga }) {
         </table>
       </div>
 
+      {/* Candado nuevo, aparte (2026-09-30, pedido por Claudia): reembolsar
+          un pedido es una acción delicada sin importar de quién sea el
+          pedido — a diferencia del candado de arriba, esto NO tiene que
+          ver con "de quién es el pedido". Mismo patrón de tabla y misma
+          acción de guardado (`toggleRolPermiso`), con la clave especial
+          "candadoReembolsos". */}
+      <h3>Permiso especial: candado de Reembolsos</h3>
+      <p className="muted">
+        Tú (Admin Central) siempre puedes marcar un pedido como
+        "Reembolsado". Por default, NADIE más puede — ni siquiera un
+        Administrador normal, ni un Vendedor dueño de su propio pedido.
+        Actívalo aquí solo si quieres que todo un Rol, o una persona en
+        concreto, también pueda reembolsar sin pedirte permiso cada vez.
+      </p>
+      <div className="table-scroll">
+        <table className="data-table permisos-tabla-roles">
+          <thead>
+            <tr>
+              <th>Rol</th>
+              <th>{permisoCandadoReembolsos.etiqueta}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {['Administrador', 'Vendedor'].map((rol) => {
+              const valor = !!(rolDefaults[rol] && rolDefaults[rol][CLAVE_CANDADO_REEMBOLSOS]);
+              const guardandoEstaCelda = celdaGuardando === `${rol}:${CLAVE_CANDADO_REEMBOLSOS}`;
+              return (
+                <tr key={rol}>
+                  <td>{rol}</td>
+                  <td className="permisos-celda-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={valor}
+                      disabled={guardandoEstaCelda}
+                      onChange={() => toggleRolPermiso(rol, CLAVE_CANDADO_REEMBOLSOS, valor)}
+                      title={`${rol} — ${permisoCandadoReembolsos.etiqueta}: ${valor ? 'permitido' : 'restringido'}`}
+                    />
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
       <h3>Excepciones por persona</h3>
       <p className="muted">
         Usa esto solo para casos especiales: dar o quitar UNA pestaña
@@ -4617,6 +4696,7 @@ function PermisosTab({ sesionToken, usuarios, iniciarCarga, terminarCarga }) {
               <option key={p.clave} value={p.clave}>{p.etiqueta}</option>
             ))}
             <option value={CLAVE_CANDADO_PEDIDOS}>🔒 {permisoCandadoPedidos.etiqueta}</option>
+            <option value={CLAVE_CANDADO_REEMBOLSOS}>🔒 {permisoCandadoReembolsos.etiqueta}</option>
           </select>
         </label>
         <label>
@@ -5041,6 +5121,8 @@ function PedidoRow({
   duenos = [],
   usuarioId,
   puedeSaltarCandado,
+  puedeReembolsar,
+  montoReembolsado,
   onGuardar,
   onDirtyChange,
   onAbrirNota,
@@ -5113,16 +5195,46 @@ function PedidoRow({
   const cambioEstado = estado !== pedido.Estado;
   const sinGuardar = cambioCantidad || cambioTelefono || cambioNotas || cambioEstado;
 
-  // Al elegir "Reembolsado" en el menú (viniendo de cualquier otro estado),
-  // precargamos la cajita de monto con el total del pedido. Si Claudia
-  // vuelve a cambiar de estado y regresa a "Reembolsado", se recalcula de
-  // nuevo con la cantidad que tenga en ese momento.
+  // Arreglo (2026-09-30, pedido por Claudia): antes, al elegir "Reembolsado"
+  // en el menú, la cajita de monto se precargaba SOLA con el total del
+  // pedido — eso permitía guardar de inmediato sin que nadie hubiera
+  // escrito ni revisado a propósito el monto. Ahora la cajita empieza
+  // VACÍA a propósito (con el total sugerido nomás como "placeholder", de
+  // referencia) — hay que escribir un monto mayor a cero a propósito antes
+  // de que "Guardar" se habilite (ver "montoReembolsoInvalido" abajo).
   function handleCambiarEstado(nuevoEstado) {
     if (nuevoEstado === 'Reembolsado' && estado !== 'Reembolsado') {
-      setMontoReembolso(totalPedido !== null ? totalPedido.toFixed(2) : '');
+      setMontoReembolso('');
     }
     setEstado(nuevoEstado);
   }
+
+  // "reembolsoYaConfirmado": el pedido YA quedó guardado como Reembolsado
+  // en el servidor (viene del Estado real del pedido, no de lo que esté
+  // elegido sin guardar todavía) — a partir de aquí la cajita de monto ya
+  // no debe aparecer NUNCA más, solo un texto fijo con lo que se reembolsó.
+  // "seleccionandoReembolsoPendiente": se eligió "Reembolsado" pero
+  // TODAVÍA no se ha guardado — aquí es cuando sí debe verse la cajita
+  // (editable) para escribir el monto.
+  const reembolsoYaConfirmado = pedido.Estado === 'Reembolsado';
+  const seleccionandoReembolsoPendiente = estado === 'Reembolsado' && !reembolsoYaConfirmado;
+  // Bloquea "Guardar" (lo deja en gris) mientras se esté por marcar
+  // "Reembolsado" y todavía no se haya escrito un monto mayor a cero — tal
+  // como pidió Claudia: "que aún no se cambie ni deje guardar... hasta que
+  // se especifique el monto a reembolsar ya permitirá guardar".
+  const montoReembolsoInvalido = seleccionandoReembolsoPendiente && !(Number(montoReembolso) > 0);
+
+  // Candado nuevo (2026-09-30): un pedido "Cancelado" ya no se puede
+  // regresar a "En proceso" después de 1 hora de haberse cancelado. El
+  // servidor YA lo rechaza (ver Code.gs) — esto es solo para no siquiera
+  // OFRECER esa opción en el menú si ya se sabe que se va a rechazar. Un
+  // pedido de ANTES de que existiera la columna "FechaCambioEstado" se
+  // trata como "ya pasó el límite", mismo criterio que usa el servidor.
+  const LIMITE_REABRIR_CANCELADO_MS = 60 * 60 * 1000; // 1 hora
+  const puedeReabrirCancelado =
+    pedido.Estado === 'Cancelado' &&
+    !!pedido.FechaCambioEstado &&
+    Date.now() - new Date(pedido.FechaCambioEstado).getTime() <= LIMITE_REABRIR_CANCELADO_MS;
 
   // OJO: este efecto depende de los VALORES actuales (cantidad, telefono,
   // notas, estado), no solo de los booleanos "cambió sí/no". Si solo
@@ -5227,12 +5339,33 @@ function PedidoRow({
               pasos válidos desde el Estado GUARDADO del pedido (nunca desde
               el que esté seleccionado sin guardar todavía) — así nunca se
               puede ni siquiera elegir un salto que el servidor rechazaría
-              (por ejemplo, regresar un "Pagado" directo a "Cancelado"). */}
-          {opcionesEstadoPedido(pedido.Estado).map((opcion) => (
-            <option key={opcion}>{opcion}</option>
-          ))}
+              (por ejemplo, regresar un "Pagado" directo a "Cancelado").
+              Arreglo (2026-09-30): además se quitan del menú, si aplica,
+              "Reembolsado" (si esta cuenta no tiene el candado especial de
+              Reembolsos) y "En proceso" viniendo de "Cancelado" ya pasada
+              la 1a hora — en los dos casos el servidor de todos modos lo
+              rechazaría, así que ni siquiera se ofrecen. */}
+          {opcionesEstadoPedido(pedido.Estado)
+            .filter((opcion) => opcion !== 'Reembolsado' || puedeReembolsar)
+            .filter((opcion) => !(pedido.Estado === 'Cancelado' && opcion === 'En proceso' && !puedeReabrirCancelado))
+            .map((opcion) => (
+              <option key={opcion}>{opcion}</option>
+            ))}
         </select>
-        {estado === 'Reembolsado' && (
+        {pedido.Estado === 'Pagado' && !puedeReembolsar && (
+          <p className="muted campo-nota">
+            🔒 Reembolsar necesita permiso especial — pídeselo al Administrador.
+          </p>
+        )}
+        {pedido.Estado === 'Cancelado' && !puedeReabrirCancelado && (
+          <p className="muted campo-nota">Ya pasó más de 1 hora — este pedido cancelado ya no se puede reabrir.</p>
+        )}
+        {/* Arreglo (2026-09-30): esta cajita SOLO aparece mientras se eligió
+            "Reembolsado" y todavía no se ha guardado — una vez guardado
+            (reembolsoYaConfirmado) desaparece por completo y se reemplaza
+            por el texto fijo de abajo, para no dejar un cuadro de texto sin
+            ningún uso ya estorbando y ensanchando la fila. */}
+        {seleccionandoReembolsoPendiente && (
           <div className="pedido-reembolso-caja">
             <label>
               Monto a reembolsar
@@ -5242,10 +5375,17 @@ function PedidoRow({
                 className="pedido-input-reembolso"
                 value={montoReembolso}
                 onChange={(e) => setMontoReembolso(limitarDigitos(e.target.value, MAX_DIGITOS_PRECIO))}
+                placeholder={totalPedido !== null ? `Ej. ${totalPedido.toFixed(2)} (total)` : 'Escribe el monto'}
                 disabled={!puedoEditarPedido}
               />
             </label>
           </div>
+        )}
+        {reembolsoYaConfirmado && (
+          <p className="muted campo-nota">
+            Reembolsado:{' '}
+            {montoReembolsado !== undefined ? formatearMoneda(montoReembolsado) : 'Sin registrar (antes de esta función)'}
+          </p>
         )}
         {/* Etapa 4, rediseño del candado (2026-09-28): mismo patrón visual
             que ya usa Stock para avisar por qué la fila salió gris — pero
@@ -5308,7 +5448,12 @@ function PedidoRow({
         )}
       </td>
       <td>
-        <button className="btn btn-small" onClick={handleGuardar} disabled={!sinGuardar || guardando}>
+        <button
+          className="btn btn-small"
+          onClick={handleGuardar}
+          disabled={!sinGuardar || guardando || montoReembolsoInvalido}
+          title={montoReembolsoInvalido ? 'Escribe el monto a reembolsar antes de guardar' : undefined}
+        >
           {guardando ? 'Guardando…' : 'Guardar'}
         </button>
       </td>
