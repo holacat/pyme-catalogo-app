@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { subirFoto } from '../api.js';
 
 const TAMANO_MAXIMO_MB = 5;
@@ -33,11 +33,26 @@ function archivoABase64(archivo) {
 // arriba — ver la nota completa junto a `subirArchivos` de por qué.
 const TOKEN_KEY_LOCAL = 'pyme_sesion_token';
 
-export default function ImageUploader({ sesionToken, value, onChange }) {
+// `onSubiendoCambio` (2026-09-30, pedido por Claudia): avisa hacia afuera
+// cada vez que cambia si hay una foto subiéndose ahora mismo o no. Antes
+// "subiendo" solo vivía adentro de este componente y nadie más se
+// enteraba — el problema real que reportó: la subida de una foto puede
+// tardar, y si le da clic a "Agregar producto" justo en ese ratito por
+// accidente, el producto se guardaba sin esperar a que la foto terminara
+// de subir. Con este aviso, quien use este componente (ver
+// "ProductoForm" en Dashboard.jsx) puede preguntar antes de guardar. Es
+// opcional (`onSubiendoCambio?.(...)`) para no romper ningún otro lugar
+// que use "ImageUploader" sin necesitarlo.
+export default function ImageUploader({ sesionToken, value, onChange, onSubiendoCambio }) {
   const [subiendo, setSubiendo] = useState(false);
   const [error, setError] = useState('');
   const [sobreZona, setSobreZona] = useState(false);
   const inputRef = useRef(null);
+
+  useEffect(() => {
+    onSubiendoCambio?.(subiendo);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subiendo]);
 
   async function subirArchivos(archivos) {
     setError('');
