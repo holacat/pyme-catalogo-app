@@ -4266,11 +4266,18 @@ function UsuariosTab({ usuarios, sesionToken, soyAdminCentral, onCambio, iniciar
   const [nuevoUsuario, setNuevoUsuario] = useState('');
   const [nuevaContrasena, setNuevaContrasena] = useState('');
   const [nuevoRol, setNuevoRol] = useState('Vendedor');
+  // Teléfono de pedidos (2026-09-30, pedido por Claudia): el número de
+  // WhatsApp al que le llegan los pedidos de esta persona — hoy solo se usa
+  // el de quien esté marcado 👑 Admin Central (para el catálogo Global),
+  // pero ya se guarda por persona para cuando existan los catálogos
+  // personales. A propósito opcional: se puede dejar vacío.
+  const [nuevoTelefonoPedidos, setNuevoTelefonoPedidos] = useState('');
   const [guardandoNuevo, setGuardandoNuevo] = useState(false);
 
   const [editando, setEditando] = useState(null); // usuario completo, o null
   const [editNombre, setEditNombre] = useState('');
   const [editRol, setEditRol] = useState('Vendedor');
+  const [editTelefonoPedidos, setEditTelefonoPedidos] = useState('');
   const [guardandoEdit, setGuardandoEdit] = useState(false);
 
   const [cambiandoClave, setCambiandoClave] = useState(null); // usuario, o null
@@ -4284,6 +4291,7 @@ function UsuariosTab({ usuarios, sesionToken, soyAdminCentral, onCambio, iniciar
     setNuevoUsuario('');
     setNuevaContrasena('');
     setNuevoRol('Vendedor');
+    setNuevoTelefonoPedidos('');
     setMensaje('');
     setAgregando(true);
   }
@@ -4303,6 +4311,7 @@ function UsuariosTab({ usuarios, sesionToken, soyAdminCentral, onCambio, iniciar
       usuario: nuevoUsuario.trim(),
       contrasena: nuevaContrasena,
       rol: nuevoRol,
+      telefonoPedidos: nuevoTelefonoPedidos.trim(),
     })
       .then(() => {
         setAgregando(false);
@@ -4319,6 +4328,7 @@ function UsuariosTab({ usuarios, sesionToken, soyAdminCentral, onCambio, iniciar
     setEditando(u);
     setEditNombre(u.Nombre || '');
     setEditRol(u.Rol || 'Vendedor');
+    setEditTelefonoPedidos(u.TelefonoPedidos || '');
     setMensaje('');
   }
 
@@ -4328,7 +4338,13 @@ function UsuariosTab({ usuarios, sesionToken, soyAdminCentral, onCambio, iniciar
     setGuardandoEdit(true);
     setMensaje('');
     iniciarCarga?.();
-    actualizarUsuario({ sesionToken, usuarioId: editando.ID, nombre: editNombre.trim(), rol: editRol })
+    actualizarUsuario({
+      sesionToken,
+      usuarioId: editando.ID,
+      nombre: editNombre.trim(),
+      rol: editRol,
+      telefonoPedidos: editTelefonoPedidos.trim(),
+    })
       .then(() => {
         setEditando(null);
         onCambio();
@@ -4407,6 +4423,7 @@ function UsuariosTab({ usuarios, sesionToken, soyAdminCentral, onCambio, iniciar
               <th>Nombre</th>
               <th>Usuario</th>
               <th>Rol</th>
+              <th>Tel. de pedidos</th>
               <th>Estado</th>
               <th>Acciones</th>
             </tr>
@@ -4427,6 +4444,12 @@ function UsuariosTab({ usuarios, sesionToken, soyAdminCentral, onCambio, iniciar
                   </td>
                   <td>{u.Usuario}</td>
                   <td>{u.Rol}</td>
+                  {/* Teléfono de pedidos (2026-09-30): el número de WhatsApp
+                      al que le llegan los pedidos de esta persona — hoy solo
+                      se usa el de 👑 Admin Central, para el catálogo Global.
+                      Se muestra aquí para que sea fácil ver/confirmar de un
+                      vistazo cuál tiene configurado cada quien. */}
+                  <td>{u.TelefonoPedidos || <span className="muted">— sin configurar —</span>}</td>
                   <td>{activo ? 'Activo' : 'Inhabilitado'}</td>
                                  <td className="celda-acciones">
                     {esFilaAdminCentral(u) && !soyAdminCentral ? (
@@ -4499,6 +4522,19 @@ function UsuariosTab({ usuarios, sesionToken, soyAdminCentral, onCambio, iniciar
                 <option value="Administrador">Administrador</option>
               </select>
             </label>
+            <label className="modal-field">
+              Teléfono de pedidos (opcional)
+              <input
+                value={nuevoTelefonoPedidos}
+                onChange={(e) => setNuevoTelefonoPedidos(e.target.value)}
+                placeholder="Ej. 521XXXXXXXXXX"
+              />
+              <span className="muted campo-nota">
+                Número de WhatsApp (con código de país, sin espacios ni signos) al que le
+                llegarían los pedidos de esta persona. Por ahora solo se usa el de quien esté
+                marcado 👑 Admin Central, para el catálogo Global.
+              </span>
+            </label>
             <div className="modal-actions">
               <button type="button" className="btn btn-secondary" onClick={() => setAgregando(false)}>
                 Cancelar
@@ -4536,6 +4572,20 @@ function UsuariosTab({ usuarios, sesionToken, soyAdminCentral, onCambio, iniciar
                     : 'Solo el Admin Central puede cambiarle el rol a otro Administrador.'}
                 </span>
               )}
+            </label>
+            <label className="modal-field">
+              Teléfono de pedidos (opcional)
+              <input
+                value={editTelefonoPedidos}
+                onChange={(e) => setEditTelefonoPedidos(e.target.value)}
+                placeholder="Ej. 521XXXXXXXXXX"
+              />
+              <span className="muted campo-nota">
+                Número de WhatsApp (con código de país, sin espacios ni signos) al que le
+                llegarían los pedidos de esta persona. Por ahora solo se usa el de quien esté
+                marcado 👑 Admin Central, para el catálogo Global — cambiarlo aquí y guardar es
+                todo lo que hace falta, sin tocar Vercel ni volver a desplegar nada.
+              </span>
             </label>
             <div className="modal-actions">
               <button type="button" className="btn btn-secondary" onClick={() => setEditando(null)}>
