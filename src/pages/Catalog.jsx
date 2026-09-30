@@ -35,8 +35,17 @@ function borrarClienteGuardado() {
 }
 
 // Mensaje de WhatsApp para pedir VARIOS productos juntos (carrito).
-function buildWhatsAppLinkCarrito(items, nombre) {
-  const phone = import.meta.env.VITE_WHATSAPP_NUMBER;
+// "telefonoDinamico" (2026-09-30, pedido por Claudia): el número ya NO está
+// fijo en la variable de entorno de Vercel — el servidor lo manda junto con
+// el catálogo (ver "cargarProductos" más abajo), leyéndolo del campo
+// "Teléfono de pedidos" de quien esté marcado 👑 Admin Central en el
+// Dashboard (pestaña 👤 Usuarios) — así Claudia lo puede cambiar ella
+// misma, sin tocar Vercel ni volver a desplegar nada. Si por algún motivo
+// todavía no está configurado (campo vacío), se usa la variable de entorno
+// vieja como respaldo, para no dejar el catálogo sin número de un día para
+// otro.
+function buildWhatsAppLinkCarrito(items, nombre, telefonoDinamico) {
+  const phone = telefonoDinamico || import.meta.env.VITE_WHATSAPP_NUMBER;
   const lineas = items
     .map(
       ({ producto, cantidad }) =>
@@ -196,6 +205,12 @@ export default function Catalog() {
   const [registrandoPedido, setRegistrandoPedido] = useState(false);
   const [errorRegistroPedido, setErrorRegistroPedido] = useState('');
 
+  // Teléfono de pedidos del catálogo Global (2026-09-30) — viene del
+  // servidor junto con el catálogo (ver "cargarProductos" más abajo), en
+  // vez de estar fijo en una variable de entorno. Ver nota junto a
+  // "buildWhatsAppLinkCarrito" arriba.
+  const [telefonoPedidos, setTelefonoPedidos] = useState('');
+
   // Arreglo (2026-09-25, reportado por Claudia: "al salirme del catálogo y
   // volverme a meter tengo que actualizarlo manualmente, ya que si no dice
   // 'no se pudo cargar el catálogo, failed to fetch'... el usuario se va a
@@ -222,6 +237,11 @@ export default function Catalog() {
     listarProductos()
       .then((data) => {
         setProductos(data.productos);
+        // Arreglo (2026-09-30): si esta recarga en particular no trajera el
+        // campo (por ejemplo, una respuesta vieja en caché), no borramos un
+        // número que ya se había cargado bien antes — solo lo actualizamos
+        // cuando de verdad viene algo.
+        if (data.telefonoPedidos !== undefined) setTelefonoPedidos(data.telefonoPedidos || '');
         setEstado('listo');
       })
       .catch((err) => {
@@ -308,7 +328,7 @@ export default function Catalog() {
           })
         )
       );
-      window.open(buildWhatsAppLinkCarrito(items, nombre), '_blank', 'noopener,noreferrer');
+      window.open(buildWhatsAppLinkCarrito(items, nombre, telefonoPedidos), '_blank', 'noopener,noreferrer');
       setCarrito([]);
     } catch (err) {
       // El carrito NO se vacía si esto falla, para que "Reintentar" pueda
