@@ -2552,3 +2552,22 @@ select:disabled {
   border-radius: 6px;
   padding: 8px 12px;
 }
+
+/* Solicitudes de reembolso (2026-09-30): la de "pendiente" necesita dos
+   botones (Confirmar/Cancelar) en vez del único "Entendido" que ya usan
+   las listas de Transferencias — se le agrega su propio layout en flex,
+   encima de los colores/bordes que ya trae por compartir la clase
+   "transferencias-en-proceso-lista li". */
+.solicitud-reembolso-pendiente {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.solicitud-reembolso-botones {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
