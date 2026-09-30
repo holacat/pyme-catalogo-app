@@ -2129,6 +2129,78 @@ const CAMPOS_CON_OPCIONES = [
   { campo: 'color', etiqueta: 'Color' },
 ];
 
+// Arreglo (2026-09-30, pedido por Claudia): reemplaza al <input list="…">
+// + <datalist> nativo que usaban Nombre, Código propio, Categoría, Marca,
+// Talla y Color. El datalist del navegador tiene un problema sin solución
+// limpia: en cuanto el campo ya tiene un texto que coincide con una
+// opción, la próxima vez que abres la lista solo aparece ESA opción, no
+// las demás. El arreglo anterior (2026-09-29) vaciaba el campo al
+// enfocarlo para forzar que el navegador mostrara la lista completa, pero
+// Claudia reportó que no le gusta que el campo se vea vacío al dar
+// clic/tocarlo — "debe de seguirse pudiendo ver, y ya solo si selecciono
+// otra categoría que se limpie". Por eso este combobox es propio (no usa
+// <datalist> en absoluto): el campo de texto SIEMPRE muestra el valor
+// actual (nunca se vacía solo), y al enfocarlo/tocarlo se abre una lista
+// propia (un <ul> normal) con TODAS las opciones predeterminadas, sin
+// filtrar por lo que ya esté escrito. Si eliges una opción de la lista, el
+// valor del campo cambia a esa opción y la lista se cierra; si no eliges
+// nada, el valor que ya tenía se queda igual. También se puede seguir
+// escribiendo libremente como antes (no es obligatorio elegir de la
+// lista).
+function CampoConOpciones({ id, valor, onChange, opciones = [], placeholder, maxLength, required }) {
+  const [abierta, setAbierta] = useState(false);
+  const wrapperRef = useRef(null);
+
+  // Cierra la lista si se hace clic fuera de este campo (en vez de usar
+  // onBlur del <input>, que se dispararía ANTES del clic en una opción y
+  // la cerraría antes de que ese clic pudiera registrarse).
+  useEffect(() => {
+    if (!abierta) return undefined;
+    function alHacerClicFuera(e) {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target)) {
+        setAbierta(false);
+      }
+    }
+    document.addEventListener('mousedown', alHacerClicFuera);
+    return () => document.removeEventListener('mousedown', alHacerClicFuera);
+  }, [abierta]);
+
+  function elegirOpcion(v) {
+    onChange(v);
+    setAbierta(false);
+  }
+
+  return (
+    <div className="campo-opciones" ref={wrapperRef}>
+      <input
+        id={id}
+        value={valor}
+        onChange={(e) => onChange(e.target.value)}
+        onFocus={() => setAbierta(true)}
+        placeholder={placeholder}
+        maxLength={maxLength}
+        required={required}
+        autoComplete="off"
+      />
+      {abierta && opciones.length > 0 && (
+        <ul className="campo-opciones-lista">
+          {opciones.map((v) => (
+            <li key={v}>
+              {/* onMouseDown con preventDefault (en vez de onClick solo) para
+                  que el clic elija la opción ANTES de que el <input> pierda
+                  el foco — así no hay parpadeo ni carrera con el cierre por
+                  clic-fuera de arriba. */}
+              <button type="button" onMouseDown={(e) => { e.preventDefault(); elegirOpcion(v); }}>
+                {v}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 // Sirve tanto para dar de alta un producto nuevo como para editar uno que
 // ya existe: si le pasas `productoExistente`, precarga sus datos y guarda
 // con "actualizarProducto" en vez de "crearProducto".
@@ -2299,34 +2371,12 @@ function ProductoForm({ sesionToken, opciones = {}, setOpciones, usuarios = [], 
     return (e) => setForm((f) => ({ ...f, [campo]: String(e.target.value).slice(0, maxCaracteres) }));
   }
 
-  // Bug reportado por Claudia (2026-09-29, con capturas): Nombre, Código
-  // propio, Categoría, Marca, Talla y Color usan un <input> con <datalist>
-  // (la lista de opciones predeterminadas que se administra con el botón
-  // ⚙️) — y por comportamiento normal del navegador, en cuanto el campo ya
-  // tiene un texto que coincide con una opción, la próxima vez que abres
-  // la lista solo aparece ESA opción, no las demás; hay que borrar el
-  // campo a mano para que reaparezcan todas. Nada práctico si quieres
-  // cambiar de una opción a otra. Arreglo: al darle clic/enfocar el campo
-  // se vacía MOMENTÁNEAMENTE (el valor real se guarda aparte en
-  // `valoresAntesDeAbrirLista_`, no se pierde) para que el navegador
-  // muestre la lista completa; si sales del campo sin elegir ni escribir
-  // nada nuevo, se regresa solo el valor que tenía antes.
-  const valoresAntesDeAbrirLista_ = useRef({});
-  function crearHandlersListaDesplegable(campo) {
-    return {
-      onFocus: (e) => {
-        valoresAntesDeAbrirLista_.current[campo] = e.target.value;
-        setForm((f) => ({ ...f, [campo]: '' }));
-      },
-      onBlur: () => {
-        setForm((f) => {
-          if (f[campo] === '' && valoresAntesDeAbrirLista_.current[campo]) {
-            return { ...f, [campo]: valoresAntesDeAbrirLista_.current[campo] };
-          }
-          return f;
-        });
-      },
-    };
+  // Igual que handleChangeTexto, pero para usarse con "CampoConOpciones"
+  // (el combobox propio de Nombre, Código propio, Categoría, Marca, Talla
+  // y Color, ver esa función arriba) — ese componente entrega el valor de
+  // texto directamente en vez de un evento de <input>.
+  function handleChangeTextoValor(campo, maxCaracteres) {
+    return (valor) => setForm((f) => ({ ...f, [campo]: String(valor).slice(0, maxCaracteres) }));
   }
 
   // Para casillas (checkboxes) como "En oferta": a diferencia de los demás
@@ -2445,12 +2495,13 @@ function ProductoForm({ sesionToken, opciones = {}, setOpciones, usuarios = [], 
               ⚙️
             </button>
           </span>
-          <input value={form.nombre} onChange={handleChangeTexto('nombre', MAX_CARACTERES_NOMBRE)} {...crearHandlersListaDesplegable('nombre')} required maxLength={MAX_CARACTERES_NOMBRE} list="lista-nombre" />
-          <datalist id="lista-nombre">
-            {(opciones.nombre || []).map((v) => (
-              <option key={v} value={v} />
-            ))}
-          </datalist>
+          <CampoConOpciones
+            valor={form.nombre}
+            onChange={handleChangeTextoValor('nombre', MAX_CARACTERES_NOMBRE)}
+            opciones={opciones.nombre || []}
+            required
+            maxLength={MAX_CARACTERES_NOMBRE}
+          />
         </label>
         <label>
           <span className="form-label-fila">
@@ -2459,19 +2510,13 @@ function ProductoForm({ sesionToken, opciones = {}, setOpciones, usuarios = [], 
               ⚙️
             </button>
           </span>
-          <input
-            value={form.codigoPropio}
-            onChange={handleChangeTexto('codigoPropio', MAX_CARACTERES_CODIGO)}
-            {...crearHandlersListaDesplegable('codigoPropio')}
+          <CampoConOpciones
+            valor={form.codigoPropio}
+            onChange={handleChangeTextoValor('codigoPropio', MAX_CARACTERES_CODIGO)}
+            opciones={opciones.codigoPropio || []}
             placeholder="Ej. PLY-001"
             maxLength={MAX_CARACTERES_CODIGO}
-            list="lista-codigoPropio"
           />
-          <datalist id="lista-codigoPropio">
-            {(opciones.codigoPropio || []).map((v) => (
-              <option key={v} value={v} />
-            ))}
-          </datalist>
         </label>
         <label>
           <span className="form-label-fila">
@@ -2480,12 +2525,12 @@ function ProductoForm({ sesionToken, opciones = {}, setOpciones, usuarios = [], 
               ⚙️
             </button>
           </span>
-          <input value={form.categoria} onChange={handleChangeTexto('categoria', MAX_CARACTERES_CATEGORIA)} {...crearHandlersListaDesplegable('categoria')} maxLength={MAX_CARACTERES_CATEGORIA} list="lista-categoria" />
-          <datalist id="lista-categoria">
-            {(opciones.categoria || []).map((v) => (
-              <option key={v} value={v} />
-            ))}
-          </datalist>
+          <CampoConOpciones
+            valor={form.categoria}
+            onChange={handleChangeTextoValor('categoria', MAX_CARACTERES_CATEGORIA)}
+            opciones={opciones.categoria || []}
+            maxLength={MAX_CARACTERES_CATEGORIA}
+          />
         </label>
         <label>
           <span className="form-label-fila">
@@ -2494,12 +2539,12 @@ function ProductoForm({ sesionToken, opciones = {}, setOpciones, usuarios = [], 
               ⚙️
             </button>
           </span>
-          <input value={form.marca} onChange={handleChangeTexto('marca', MAX_CARACTERES_MARCA)} {...crearHandlersListaDesplegable('marca')} maxLength={MAX_CARACTERES_MARCA} list="lista-marca" />
-          <datalist id="lista-marca">
-            {(opciones.marca || []).map((v) => (
-              <option key={v} value={v} />
-            ))}
-          </datalist>
+          <CampoConOpciones
+            valor={form.marca}
+            onChange={handleChangeTextoValor('marca', MAX_CARACTERES_MARCA)}
+            opciones={opciones.marca || []}
+            maxLength={MAX_CARACTERES_MARCA}
+          />
         </label>
         <label>
           <span className="form-label-fila">
@@ -2508,12 +2553,12 @@ function ProductoForm({ sesionToken, opciones = {}, setOpciones, usuarios = [], 
               ⚙️
             </button>
           </span>
-          <input value={form.talla} onChange={handleChangeTexto('talla', MAX_CARACTERES_TALLA)} {...crearHandlersListaDesplegable('talla')} maxLength={MAX_CARACTERES_TALLA} list="lista-talla" />
-          <datalist id="lista-talla">
-            {(opciones.talla || []).map((v) => (
-              <option key={v} value={v} />
-            ))}
-          </datalist>
+          <CampoConOpciones
+            valor={form.talla}
+            onChange={handleChangeTextoValor('talla', MAX_CARACTERES_TALLA)}
+            opciones={opciones.talla || []}
+            maxLength={MAX_CARACTERES_TALLA}
+          />
         </label>
               <label>
           <span className="form-label-fila">
@@ -2522,12 +2567,12 @@ function ProductoForm({ sesionToken, opciones = {}, setOpciones, usuarios = [], 
               ⚙️
             </button>
           </span>
-          <input value={form.color} onChange={handleChangeTexto('color', MAX_CARACTERES_COLOR)} {...crearHandlersListaDesplegable('color')} maxLength={MAX_CARACTERES_COLOR} list="lista-color" />
-          <datalist id="lista-color">
-            {(opciones.color || []).map((v) => (
-              <option key={v} value={v} />
-            ))}
-          </datalist>
+          <CampoConOpciones
+            valor={form.color}
+            onChange={handleChangeTextoValor('color', MAX_CARACTERES_COLOR)}
+            opciones={opciones.color || []}
+            maxLength={MAX_CARACTERES_COLOR}
+          />
         </label>
         {esAdministrador && !esEdicion && (
           <label>
