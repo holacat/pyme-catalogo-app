@@ -34,6 +34,13 @@ import {
   responderTransferencia,
   marcarTransferenciaVista,
   asignarStockDueno,
+  // NUEVO (2026-09-30, candado de Reembolsos → solicitud/aprobación):
+  // estas dos funciones todavía no existen en api.js — hay que agregarlas
+  // a mano ahí (ver instrucciones aparte), copiando exactamente el mismo
+  // patrón de "responderTransferencia"/"marcarTransferenciaVista" que ya
+  // están arriba en este mismo import.
+  responderSolicitudReembolso,
+  marcarSolicitudReembolsoVista,
 } from '../api.js';
 import ImageUploader from '../components/ImageUploader.jsx';
 import ImageLightbox from '../components/ImageLightbox.jsx';
@@ -613,6 +620,18 @@ export default function Dashboard() {
   // pendiente en Stock, salta a la fila de ese producto y la resalta unos
   // segundos en amarillo.
   const [productoResaltadoId, setProductoResaltadoId] = useState(null);
+  // Solicitudes de reembolso (2026-09-30, pedido por Claudia): mismo
+  // patrón que las Transferencias de arriba. "Pendientes" solo le llega a
+  // quien puede responderlas (permiso candadoReembolsos/Admin Central);
+  // "Resueltas" (sin ver) le llega a quien la pidió, para saber si se
+  // aprobó o se rechazó.
+  const [solicitudesReembolsoPendientes, setSolicitudesReembolsoPendientes] = useState([]);
+  const [solicitudesReembolsoResueltas, setSolicitudesReembolsoResueltas] = useState([]);
+  const [solicitudesReembolsoEnAccion, setSolicitudesReembolsoEnAccion] = useState(new Set());
+  // Igual que "productoResaltadoId" de arriba, pero para saltar a la
+  // pestaña Pedidos y resaltar la fila de un pedido en concreto (se usa
+  // desde el aviso de una solicitud de reembolso en Alertas).
+  const [pedidoResaltadoId, setPedidoResaltadoId] = useState(null);
 
   // 'todo' muestra el stock completo (con el dueño de cada quien); 'mio'
   // filtra solo los productos donde yo tengo algo asignado.
@@ -868,6 +887,8 @@ export default function Dashboard() {
         setTransferenciasPendientes(r.transferenciasPendientes || []);
         setTransferenciasResueltas(r.transferenciasResueltas || []);
         setTransferenciasEnProceso(r.transferenciasEnProceso || []);         setTransferenciasAplicadas(r.transferenciasAplicadas || []);
+        setSolicitudesReembolsoPendientes(r.solicitudesReembolsoPendientes || []);
+        setSolicitudesReembolsoResueltas(r.solicitudesReembolsoResueltas || []);
         setOpciones(r.opciones || {});
         setMovimientos(r.movimientos || []);
         setBitacora(r.bitacora || []);
@@ -961,6 +982,16 @@ export default function Dashboard() {
     if (fila) fila.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }, [productoResaltadoId, tab]);
 
+  // Mismo mecanismo que el de arriba, pero para saltar a un pedido en
+  // concreto en la pestaña Pedidos (ver "irAPedidoYResaltar", pedido por
+  // Claudia para poder identificar rápido, desde Alertas, el pedido al que
+  // corresponde una solicitud de reembolso).
+  useEffect(() => {
+    if (!pedidoResaltadoId || tab !== 'pedidos') return;
+    const fila = document.getElementById(`pedido-fila-${pedidoResaltadoId}`);
+    if (fila) fila.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [pedidoResaltadoId, tab]);
+
   // Entra al Dashboard con usuario y contraseña (hoja "Usuarios"). Si están
   // mal, NUNCA se activa `autenticado` — así nadie que escriba mal sus
   // datos llega a ver la estructura del Dashboard, aunque sea sin datos.
@@ -1031,6 +1062,9 @@ export default function Dashboard() {
     setTransferenciasResueltas([]);
     setTransferenciasEnProceso([]);
     setTransferenciasAplicadas([]);
+    setSolicitudesReembolsoPendientes([]);
+    setSolicitudesReembolsoResueltas([]);
+    setPedidoResaltadoId(null);
     setOpciones({});
     // Bug reportado por Claudia (2026-09): un filtro que dejaba puesto una
     // persona (búsqueda, categoría, fechas, estado, orden de columnas...) se
@@ -1097,7 +1131,16 @@ export default function Dashboard() {
       actualizarPedido({ sesionToken, pedidoId, cantidad, telefono, notas, estado, montoReembolso }),
       'Actualizar pedido'
     )
-      .then(() => cargarTodo(sesionToken, { silencioso: true }))
+      .then((res) => cargarTodo(sesionToken, { silencioso: true }).then(() => res))
+      .then((res) => {
+        // Candado de Reembolsos (2026-09-30, pedido por Claudia): si el
+        // pedido no cambió de Estado de verdad porque hacía falta permiso,
+        // el servidor creó una solicitud en vez de rechazar — avisamos aquí
+        // para que no parezca que el guardado no hizo nada.
+        if (res && res.solicitudReembolsoCreada) {
+          setMensaje('Tu solicitud de reembolso se envió al Administrador — en cuanto la confirme o la cancele, este pedido pasará a "Reembolsado" (o se quedará como está).');
+        }
+      })
       .catch((err) => setMensaje(`Error al actualizar pedido: ${err.message}`))
       .finally(terminarCarga);
   }
@@ -1201,6 +1244,51 @@ export default function Dashboard() {
           return siguiente;
         });
       });
+  }
+
+  // Solicitudes de reembolso (2026-09-30, pedido por Claudia): mismo
+  // patrón que handleResponderTransferencia/handleMarcarTransferenciaVista
+  // de arriba, pero para la nueva hoja "SolicitudesReembolso".
+  function handleResponderSolicitudReembolso(solicitudId, aceptar) {
+    setSolicitudesReembolsoEnAccion((prev) => new Set(prev).add(solicitudId));
+    iniciarCarga();
+    conLimiteDeTiempo(responderSolicitudReembolso({ sesionToken, solicitudId, aceptar }), 'Responder solicitud de reembolso')
+      .then(() => cargarTodo(sesionToken, { silencioso: true }))
+      .catch((err) => setMensaje(`Error al responder la solicitud de reembolso: ${err.message}`))
+      .finally(() => {
+        terminarCarga();
+        setSolicitudesReembolsoEnAccion((prev) => {
+          const siguiente = new Set(prev);
+          siguiente.delete(solicitudId);
+          return siguiente;
+        });
+      });
+  }
+
+  function handleMarcarSolicitudReembolsoVista(solicitudId) {
+    setSolicitudesReembolsoEnAccion((prev) => new Set(prev).add(solicitudId));
+    iniciarCarga();
+    conLimiteDeTiempo(marcarSolicitudReembolsoVista({ sesionToken, solicitudId }), 'Marcar solicitud vista')
+      .then(() => cargarTodo(sesionToken, { silencioso: true }))
+      .catch((err) => setMensaje(`Error: ${err.message}`))
+      .finally(() => {
+        terminarCarga();
+        setSolicitudesReembolsoEnAccion((prev) => {
+          const siguiente = new Set(prev);
+          siguiente.delete(solicitudId);
+          return siguiente;
+        });
+      });
+  }
+
+  // Feature pedido por Claudia (2026-09-30): cambia a la pestaña Pedidos y
+  // marca ese pedido para que su fila se resalte en amarillo un momento —
+  // igual que "irAStockYResaltar", para poder identificar rápido, desde el
+  // aviso de una solicitud de reembolso en Alertas, a qué pedido corresponde.
+  function irAPedidoYResaltar(pedidoId) {
+    setTab('pedidos');
+    setPedidoResaltadoId(pedidoId);
+    setTimeout(() => setPedidoResaltadoId(null), 4000);
   }
 
   // Feature pedido por Claudia (2026-09): cambia a la pestaña Stock y marca
@@ -1875,6 +1963,7 @@ export default function Dashboard() {
                     puedeSaltarCandado={esAdminCentral || !!permisos[CLAVE_CANDADO_PEDIDOS]}
                     puedeReembolsar={esAdminCentral || !!permisos[CLAVE_CANDADO_REEMBOLSOS]}
                     montoReembolsado={montoReembolsadoPorPedidoId[ped.ID]}
+                    resaltado={ped.ID === pedidoResaltadoId}
                     onGuardar={handleGuardarPedido}
                     onDirtyChange={marcarSucio}
                     onAbrirNota={(cliente, valor, onChange) => setNotaEnZoom({ cliente, valor, onChange })}
@@ -1948,6 +2037,74 @@ export default function Dashboard() {
                     className="btn btn-secondary btn-small"
                     disabled={transferenciasEnAccion.has(t.ID)}
                     onClick={() => handleMarcarTransferenciaVista(t.ID)}
+                  >
+                    Entendido
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+                  {/* Solicitudes de reembolso (2026-09-30, pedido por Claudia): le
+              llegan aquí a quien puede responderlas (permiso
+              "candadoReembolsos" o Admin Central) — dice quién la pide,
+              cuánto, de qué pedido (con su código, y un enlace que salta a
+              esa fila en Pedidos resaltándola) y cuándo. */}
+          {solicitudesReembolsoPendientes.length > 0 && (
+            <ul className="transferencias-en-proceso-lista solicitudes-reembolso-lista">
+              {solicitudesReembolsoPendientes.map((s) => (
+                <li key={s.ID} className="solicitud-reembolso-pendiente">
+                  <span>
+                    🔒 <strong>{s.SolicitanteNombre}</strong> pide permiso para reembolsar{' '}
+                    <strong>{formatearMoneda(Number(s.MontoSolicitado) || 0)}</strong> de{' '}
+                    <button type="button" className="link-button" onClick={() => irAPedidoYResaltar(s.PedidoID)}>
+                      "{s.Producto}"{codigoPorProductoId[s.ProductoID] ? ` (${codigoPorProductoId[s.ProductoID]})` : ''}
+                    </button>
+                    {' '}— {s.Cliente || 'cliente sin nombre'}, cantidad {s.Cantidad}, el{' '}
+                    {formatearFechaSolo(s.Fecha)} a las {formatearHoraSolo(s.Fecha)}
+                  </span>
+                  <span className="solicitud-reembolso-botones">
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-small"
+                      disabled={solicitudesReembolsoEnAccion.has(s.ID)}
+                      onClick={() => handleResponderSolicitudReembolso(s.ID, true)}
+                    >
+                      Confirmar
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-small"
+                      disabled={solicitudesReembolsoEnAccion.has(s.ID)}
+                      onClick={() => handleResponderSolicitudReembolso(s.ID, false)}
+                    >
+                      Cancelar
+                    </button>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {solicitudesReembolsoResueltas.length > 0 && (
+            <ul className="transferencias-resueltas-lista solicitudes-reembolso-lista">
+              {solicitudesReembolsoResueltas.map((s) => (
+                <li
+                  key={s.ID}
+                  className={s.Estado === 'Aprobada' ? 'transferencia-aceptada' : 'transferencia-rechazada'}
+                >
+                  <span>
+                    {s.Estado === 'Aprobada' ? '✅' : '🚫'} Tu solicitud de reembolso de{' '}
+                    <strong>{formatearMoneda(Number(s.MontoSolicitado) || 0)}</strong> de{' '}
+                    <button type="button" className="link-button" onClick={() => irAPedidoYResaltar(s.PedidoID)}>
+                      "{s.Producto}"{codigoPorProductoId[s.ProductoID] ? ` (${codigoPorProductoId[s.ProductoID]})` : ''}
+                    </button>
+                    {' '}fue {s.Estado === 'Aprobada' ? 'aprobada' : 'rechazada'}
+                    {s.RespondidoPor ? <> por <strong>{s.RespondidoPor}</strong></> : null}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-small"
+                    disabled={solicitudesReembolsoEnAccion.has(s.ID)}
+                    onClick={() => handleMarcarSolicitudReembolsoVista(s.ID)}
                   >
                     Entendido
                   </button>
@@ -5123,6 +5280,7 @@ function PedidoRow({
   puedeSaltarCandado,
   puedeReembolsar,
   montoReembolsado,
+  resaltado,
   onGuardar,
   onDirtyChange,
   onAbrirNota,
@@ -5265,7 +5423,10 @@ function PedidoRow({
   const fecha = new Date(pedido.Fecha);
 
   return (
-    <tr className={sinGuardar ? 'fila-sin-guardar' : ''}>
+    <tr
+      id={`pedido-fila-${pedido.ID}`}
+      className={[sinGuardar && 'fila-sin-guardar', resaltado && 'fila-resaltada'].filter(Boolean).join(' ')}
+    >
       <td>{fecha.toLocaleDateString('es-MX')}</td>
       <td>{fecha.toLocaleTimeString('es-MX')}</td>
       {/* Bug reportado por Claudia (2026-09-28, con captura): un Cliente o
@@ -5340,21 +5501,30 @@ function PedidoRow({
               el que esté seleccionado sin guardar todavía) — así nunca se
               puede ni siquiera elegir un salto que el servidor rechazaría
               (por ejemplo, regresar un "Pagado" directo a "Cancelado").
-              Arreglo (2026-09-30): además se quitan del menú, si aplica,
-              "Reembolsado" (si esta cuenta no tiene el candado especial de
-              Reembolsos) y "En proceso" viniendo de "Cancelado" ya pasada
-              la 1a hora — en los dos casos el servidor de todos modos lo
-              rechazaría, así que ni siquiera se ofrecen. */}
+              Arreglo (2026-09-30): se quita del menú "En proceso" viniendo
+              de "Cancelado" ya pasada la 1a hora (el servidor de todos
+              modos lo rechazaría). "Reembolsado" SÍ se sigue ofreciendo
+              aunque esta cuenta no tenga el candado especial de
+              Reembolsos — ver la AMPLIACIÓN de abajo: ahora en vez de
+              bloquearlo, elegirlo y guardar manda una SOLICITUD al Admin
+              en lugar de aplicar el cambio directo. */}
           {opcionesEstadoPedido(pedido.Estado)
-            .filter((opcion) => opcion !== 'Reembolsado' || puedeReembolsar)
             .filter((opcion) => !(pedido.Estado === 'Cancelado' && opcion === 'En proceso' && !puedeReabrirCancelado))
             .map((opcion) => (
               <option key={opcion}>{opcion}</option>
             ))}
         </select>
+        {/* AMPLIACIÓN (2026-09-30, pedido explícito de Claudia): antes esta
+            cuenta ni siquiera podía elegir "Reembolsado" sin el permiso —
+            ahora sí puede, solo que guardar no aplica el cambio directo:
+            se le envía una SOLICITUD de permiso al Administrador (ver
+            Alertas), y el pedido se queda como estaba hasta que él la
+            confirme o la cancele. */}
         {pedido.Estado === 'Pagado' && !puedeReembolsar && (
           <p className="muted campo-nota">
-            🔒 Reembolsar necesita permiso especial — pídeselo al Administrador.
+            🔒 No tienes el permiso para reembolsar directo — si guardas con
+            "Reembolsado" elegido, se le envía una solicitud al
+            Administrador para que la confirme o la cancele.
           </p>
         )}
         {pedido.Estado === 'Cancelado' && !puedeReabrirCancelado && (
