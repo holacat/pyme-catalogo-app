@@ -1422,6 +1422,28 @@ export default function Dashboard() {
     }
   });
 
+  // Arreglo (2026-09-30, reportado por Claudia con capturas): cuando
+  // alguien sin el permiso de reembolsos guarda un pedido como
+  // "Reembolsado", el servidor crea una SOLICITUD y deja el pedido igual a
+  // propósito — pero la fila (PedidoRow) no tenía ninguna manera de
+  // enterarse de que ya se había mandado esa solicitud, así que se quedaba
+  // marcada como "1 cambio sin guardar" para siempre, con el botón
+  // "Guardar" habilitado y bloqueando hasta la salida de la página. Este
+  // mapa le permite a cada fila, por su propio PedidoID, saber si YA existe
+  // una solicitud de reembolso pendiente sobre ella (Code.gs ahora incluye
+  // en "solicitudesReembolsoPendientes" tanto las que puede aprobar esta
+  // cuenta como las que ella misma pidió).
+  const solicitudReembolsoPendientePorPedidoId = {};
+  solicitudesReembolsoPendientes.forEach((s) => {
+    solicitudReembolsoPendientePorPedidoId[s.PedidoID] = s;
+  });
+  // Usado tanto para decidir qué le toca editar a cada PedidoRow como para
+  // decidir, en Alertas, si esta cuenta ve botones de Confirmar/Cancelar en
+  // cada solicitud pendiente o solo un aviso de "tu solicitud sigue en
+  // camino" (ver más abajo — Code.gs ahora también incluye ahí las
+  // solicitudes propias, no solo las que esta cuenta puede aprobar).
+  const puedeResponderReembolso = esAdminCentral || !!permisos[CLAVE_CANDADO_REEMBOLSOS];
+
   const productosPorFecha = productosOrdenados.filter(productoEnRangoDeFecha);
   const productosPorCategoria = filtroCategoriaStock
     ? productosPorFecha.filter((p) => categoriaDeProducto(p) === filtroCategoriaStock)
@@ -1961,8 +1983,9 @@ export default function Dashboard() {
                     duenos={duenosPorProductoId[ped.ProductoID] || []}
                     usuarioId={usuarioId}
                     puedeSaltarCandado={esAdminCentral || !!permisos[CLAVE_CANDADO_PEDIDOS]}
-                    puedeReembolsar={esAdminCentral || !!permisos[CLAVE_CANDADO_REEMBOLSOS]}
+                    puedeReembolsar={puedeResponderReembolso}
                     montoReembolsado={montoReembolsadoPorPedidoId[ped.ID]}
+                    solicitudReembolsoPendiente={solicitudReembolsoPendientePorPedidoId[ped.ID]}
                     resaltado={ped.ID === pedidoResaltadoId}
                     onGuardar={handleGuardarPedido}
                     onDirtyChange={marcarSucio}
@@ -2044,42 +2067,62 @@ export default function Dashboard() {
               ))}
             </ul>
           )}
-                  {/* Solicitudes de reembolso (2026-09-30, pedido por Claudia): le
-              llegan aquí a quien puede responderlas (permiso
-              "candadoReembolsos" o Admin Central) — dice quién la pide,
-              cuánto, de qué pedido (con su código, y un enlace que salta a
-              esa fila en Pedidos resaltándola) y cuándo. */}
+                  {/* Solicitudes de reembolso (2026-09-30, pedido por Claudia).
+              Corrección del mismo día (reportado por Claudia con capturas):
+              esta lista ahora también incluye las solicitudes que hizo la
+              PROPIA cuenta (para que su pantalla sepa que ya se mandaron —
+              ver "haySolicitudPendienteReembolso" en PedidoRow), así que ya
+              no se puede asumir que todo el que aparece aquí se puede
+              aprobar: se branchea por elemento con "puedeResponderReembolso"
+              — quien puede aprobar ve Confirmar/Cancelar; el que solo hizo
+              la solicitud ve nomás un aviso de que sigue en camino (mismo
+              patrón que "transferenciasEnProceso" de arriba). */}
           {solicitudesReembolsoPendientes.length > 0 && (
             <ul className="transferencias-en-proceso-lista solicitudes-reembolso-lista">
               {solicitudesReembolsoPendientes.map((s) => (
                 <li key={s.ID} className="solicitud-reembolso-pendiente">
                   <span>
-                    🔒 <strong>{s.SolicitanteNombre}</strong> pide permiso para reembolsar{' '}
-                    <strong>{formatearMoneda(Number(s.MontoSolicitado) || 0)}</strong> de{' '}
-                    <button type="button" className="link-button" onClick={() => irAPedidoYResaltar(s.PedidoID)}>
-                      "{s.Producto}"{codigoPorProductoId[s.ProductoID] ? ` (${codigoPorProductoId[s.ProductoID]})` : ''}
-                    </button>
-                    {' '}— {s.Cliente || 'cliente sin nombre'}, cantidad {s.Cantidad}, el{' '}
-                    {formatearFechaSolo(s.Fecha)} a las {formatearHoraSolo(s.Fecha)}
+                    {puedeResponderReembolso ? (
+                      <>
+                        🔒 <strong>{s.SolicitanteNombre}</strong> pide permiso para reembolsar{' '}
+                        <strong>{formatearMoneda(Number(s.MontoSolicitado) || 0)}</strong> de{' '}
+                        <button type="button" className="link-button" onClick={() => irAPedidoYResaltar(s.PedidoID)}>
+                          "{s.Producto}"{codigoPorProductoId[s.ProductoID] ? ` (${codigoPorProductoId[s.ProductoID]})` : ''}
+                        </button>
+                        {' '}— {s.Cliente || 'cliente sin nombre'}, cantidad {s.Cantidad}, el{' '}
+                        {formatearFechaSolo(s.Fecha)} a las {formatearHoraSolo(s.Fecha)}
+                      </>
+                    ) : (
+                      <>
+                        ⏳ Tu solicitud para reembolsar{' '}
+                        <strong>{formatearMoneda(Number(s.MontoSolicitado) || 0)}</strong> de{' '}
+                        <button type="button" className="link-button" onClick={() => irAPedidoYResaltar(s.PedidoID)}>
+                          "{s.Producto}"{codigoPorProductoId[s.ProductoID] ? ` (${codigoPorProductoId[s.ProductoID]})` : ''}
+                        </button>
+                        {' '}sigue en camino — el Administrador todavía no la confirma ni la cancela.
+                      </>
+                    )}
                   </span>
-                  <span className="solicitud-reembolso-botones">
-                    <button
-                      type="button"
-                      className="btn btn-primary btn-small"
-                      disabled={solicitudesReembolsoEnAccion.has(s.ID)}
-                      onClick={() => handleResponderSolicitudReembolso(s.ID, true)}
-                    >
-                      Confirmar
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-small"
-                      disabled={solicitudesReembolsoEnAccion.has(s.ID)}
-                      onClick={() => handleResponderSolicitudReembolso(s.ID, false)}
-                    >
-                      Cancelar
-                    </button>
-                  </span>
+                  {puedeResponderReembolso && (
+                    <span className="solicitud-reembolso-botones">
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-small"
+                        disabled={solicitudesReembolsoEnAccion.has(s.ID)}
+                        onClick={() => handleResponderSolicitudReembolso(s.ID, true)}
+                      >
+                        Confirmar
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-small"
+                        disabled={solicitudesReembolsoEnAccion.has(s.ID)}
+                        onClick={() => handleResponderSolicitudReembolso(s.ID, false)}
+                      >
+                        Cancelar
+                      </button>
+                    </span>
+                  )}
                 </li>
               ))}
             </ul>
@@ -5330,6 +5373,7 @@ function PedidoRow({
   puedeSaltarCandado,
   puedeReembolsar,
   montoReembolsado,
+  solicitudReembolsoPendiente,
   resaltado,
   onGuardar,
   onDirtyChange,
@@ -5397,10 +5441,21 @@ function PedidoRow({
   const precioPedido = precioDelPedido(pedido);
   const totalPedido = precioPedido !== null ? precioPedido * (Number(cantidad) || 0) : null;
 
+  // Arreglo (2026-09-30, reportado por Claudia): "haySolicitudPendienteReembolso"
+  // significa que YA se mandó la solicitud de este reembolso al Administrador
+  // (viene del servidor, ver "solicitudReembolsoPendientePorPedidoId" en el
+  // componente padre) — mientras esté pendiente, que el Estado elegido
+  // ("Reembolsado") no coincida todavía con el Estado real del pedido
+  // ("Pagado") ya NO cuenta como "un cambio sin guardar": ya se guardó, lo
+  // único que falta es que el Administrador la confirme o la cancele, y eso
+  // no depende de esta pantalla. Antes, al no distinguir estos dos casos, la
+  // fila se quedaba marcada como "sin guardar" (y bloqueando la salida de la
+  // página con el aviso del navegador) hasta que el Administrador respondía.
+  const haySolicitudPendienteReembolso = !!solicitudReembolsoPendiente;
   const cambioCantidad = String(cantidad) !== String(pedido.Cantidad);
   const cambioTelefono = telefono !== telefonoOriginal;
   const cambioNotas = notas !== notasOriginal;
-  const cambioEstado = estado !== pedido.Estado;
+  const cambioEstado = estado !== pedido.Estado && !(haySolicitudPendienteReembolso && estado === 'Reembolsado');
   const sinGuardar = cambioCantidad || cambioTelefono || cambioNotas || cambioEstado;
 
   // Arreglo (2026-09-30, pedido por Claudia): antes, al elegir "Reembolsado"
@@ -5461,7 +5516,7 @@ function PedidoRow({
     onDirtyChange(llave, sinGuardar, descripcion);
     return () => onDirtyChange(llave, false, '');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cantidad, telefono, notas, estado, pedido, llave]);
+  }, [cantidad, telefono, notas, estado, pedido, llave, haySolicitudPendienteReembolso]);
 
   function handleGuardar() {
     setGuardando(true);
@@ -5570,7 +5625,14 @@ function PedidoRow({
             se le envía una SOLICITUD de permiso al Administrador (ver
             Alertas), y el pedido se queda como estaba hasta que él la
             confirme o la cancele. */}
-        {pedido.Estado === 'Pagado' && !puedeReembolsar && (
+        {/* Arreglo (2026-09-30, reportado por Claudia con captura): este
+            aviso aparecía en TODOS los pedidos "Pagado" sin permiso, aunque
+            nadie hubiera tocado el menú de Estado todavía — ahora solo
+            aparece mientras de verdad se esté eligiendo "Reembolsado" (y
+            solo antes de que la solicitud ya se haya mandado; una vez
+            mandada se reemplaza por el aviso de "⏳ Ya enviaste..." de
+            abajo, para no mostrar los dos a la vez). */}
+        {seleccionandoReembolsoPendiente && !puedeReembolsar && !haySolicitudPendienteReembolso && (
           <p className="muted campo-nota">
             🔒 No tienes el permiso para reembolsar directo — si guardas con
             "Reembolsado" elegido, se le envía una solicitud al
@@ -5585,7 +5647,7 @@ function PedidoRow({
             (reembolsoYaConfirmado) desaparece por completo y se reemplaza
             por el texto fijo de abajo, para no dejar un cuadro de texto sin
             ningún uso ya estorbando y ensanchando la fila. */}
-        {seleccionandoReembolsoPendiente && (
+        {seleccionandoReembolsoPendiente && !haySolicitudPendienteReembolso && (
           <div className="pedido-reembolso-caja">
             <label>
               Monto a reembolsar
@@ -5600,6 +5662,19 @@ function PedidoRow({
               />
             </label>
           </div>
+        )}
+        {/* Arreglo (2026-09-30, reportado por Claudia): una vez que la
+            solicitud YA se mandó, ya no tiene caso seguir mostrando la
+            cajita editable de monto (nada de lo que se escriba ahí hace
+            ya nada) — se reemplaza por este aviso fijo, que además es lo
+            que le avisa a esta misma pantalla que deje de marcar la fila
+            como "sin guardar" (ver "haySolicitudPendienteReembolso" arriba). */}
+        {haySolicitudPendienteReembolso && (
+          <p className="muted campo-nota">
+            ⏳ Ya enviaste una solicitud de reembolso por{' '}
+            {formatearMoneda(Number(solicitudReembolsoPendiente.MontoSolicitado) || 0)} — pendiente de que el
+            Administrador la confirme o la cancele.
+          </p>
         )}
         {reembolsoYaConfirmado && (
           <p className="muted campo-nota">
@@ -5668,13 +5743,17 @@ function PedidoRow({
         )}
       </td>
       <td>
+        {/* Arreglo (2026-09-30, pedido por Claudia): "una vez se haga la
+            solicitud debe de decir en Guardar, en vez de Guardar, 'en
+            espera' o 'pendiente'" — así ya no parece un botón normal
+            esperando a que le den clic otra vez. */}
         <button
           className="btn btn-small"
           onClick={handleGuardar}
           disabled={!sinGuardar || guardando || montoReembolsoInvalido}
           title={montoReembolsoInvalido ? 'Escribe el monto a reembolsar antes de guardar' : undefined}
         >
-          {guardando ? 'Guardando…' : 'Guardar'}
+          {haySolicitudPendienteReembolso ? 'Pendiente' : guardando ? 'Guardando…' : 'Guardar'}
         </button>
       </td>
     </tr>
