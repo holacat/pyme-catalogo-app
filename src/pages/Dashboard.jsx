@@ -352,23 +352,30 @@ function conLimiteDeTiempo(promesa, etiqueta, opciones = {}) {
   ]);
 }
 
-const ESTADOS_PEDIDO = ['Sin solicitud', 'En proceso', 'Pagado', 'Reembolsado', 'Cancelado'];
+// El estado con el que nace un pedido se llama "Pendiente" (2026-10-01,
+// Claudia: "en lugar de que diga Sin solicitud que diga Pendiente... también
+// en la hoja cámbialo"). Antes se llamaba "Sin solicitud". "Code.gs" ya
+// guarda "Pendiente" en los pedidos nuevos y renombra los viejos en la hoja
+// la primera vez que se abre el panel. Mientras eso pasa (o si alguna fila
+// vieja se quedara con el nombre anterior), aquí los dos nombres se tratan
+// como el MISMO estado: se cuentan juntos, se filtran juntos y siempre se
+// muestran como "Pendiente".
+const ESTADO_PENDIENTE = 'Pendiente';
+const ESTADO_PENDIENTE_VIEJO = 'Sin solicitud';
+const ESTADOS_PEDIDO = [ESTADO_PENDIENTE, 'En proceso', 'Pagado', 'Reembolsado', 'Cancelado'];
 
-// Nombre que SE VE en pantalla de cada Estado (2026-10-01, Claudia: "en
-// lugar de que diga Sin solicitud que diga Pendiente"). Solo cambia el
-// letrero: por dentro (en la hoja de Google y en "Code.gs") el estado se
-// sigue llamando "Sin solicitud", así no hay que tocar los 90 pedidos que
-// ya lo tienen guardado ni las reglas del servidor. Si algún día se quiere
-// otro nombre, basta cambiarlo aquí.
-const ETIQUETA_ESTADO_PEDIDO = { 'Sin solicitud': 'Pendiente' };
-function etiquetaEstadoPedido(estado) {
-  return ETIQUETA_ESTADO_PEDIDO[estado] || estado;
+function estadoCanonicoPedido(estado) {
+  return String(estado ?? '').trim() === ESTADO_PENDIENTE_VIEJO ? ESTADO_PENDIENTE : estado;
 }
-// Lo mismo para textos que llegan ya escritos desde el servidor (el detalle
-// de la Bitácora, un mensaje de error): donde digan "Sin solicitud" se
-// muestra "Pendiente".
+// Nombre que SE VE en pantalla de un Estado.
+function etiquetaEstadoPedido(estado) {
+  return estadoCanonicoPedido(estado);
+}
+// Para textos que llegan ya escritos desde el servidor (el detalle de la
+// Bitácora de fechas anteriores al cambio de nombre, un mensaje de error):
+// donde digan "Sin solicitud" se muestra "Pendiente".
 function conEtiquetasDeEstado(texto) {
-  return String(texto ?? '').replace(/Sin solicitud/g, 'Pendiente');
+  return String(texto ?? '').replace(/Sin solicitud/g, ESTADO_PENDIENTE);
 }
 
 // Flujo de Estados de Pedido (2026-09-29, diseño explícito de Claudia):
@@ -378,7 +385,7 @@ function conEtiquetasDeEstado(texto) {
 // desplegable de Estado de cada pedido NO OFREZCA siquiera las opciones
 // que el servidor de todos modos rechazaría — así Claudia no se topa con
 // el error después de elegir, ve directamente las opciones válidas.
-//   - "Sin solicitud" → únicamente "En proceso".
+//   - "Pendiente" → únicamente "En proceso".
 //   - "En proceso" → "Pagado" o "Cancelado" (todavía no hay dinero de por
 //     medio que revertir).
 //   - "Pagado" → únicamente "Reembolsado" (para que el Cargo que revierte
@@ -389,7 +396,7 @@ function conEtiquetasDeEstado(texto) {
 //     registró un Cargo real, y reabrirlo necesitaría además deshacer ese
 //     Cargo (no se pidió, y se presta a confusión contable).
 const SIGUIENTE_ESTADO_VALIDO_PEDIDO = {
-  'Sin solicitud': ['Sin solicitud', 'En proceso'],
+  [ESTADO_PENDIENTE]: [ESTADO_PENDIENTE, 'En proceso'],
   'En proceso': ['En proceso', 'Pagado', 'Cancelado'],
   Pagado: ['Pagado', 'Reembolsado'],
   Cancelado: ['Cancelado', 'En proceso'],
@@ -400,7 +407,13 @@ const SIGUIENTE_ESTADO_VALIDO_PEDIDO = {
 // atípico), se muestran los 5 sin restringir — mismo respaldo que ya usa
 // "Code.gs" para no atorar un dato raro.
 function opcionesEstadoPedido(estadoActual) {
-  return SIGUIENTE_ESTADO_VALIDO_PEDIDO[estadoActual] || ESTADOS_PEDIDO;
+  const canonico = estadoCanonicoPedido(estadoActual);
+  const lista = SIGUIENTE_ESTADO_VALIDO_PEDIDO[canonico];
+  if (!lista) return ESTADOS_PEDIDO;
+  // La opción "quedarse como está" conserva el valor EXACTO que tiene
+  // guardado el pedido (si aún dijera "Sin solicitud", se manda tal cual y
+  // el servidor lo entiende); en pantalla se ve como "Pendiente".
+  return lista.map((opcion) => (opcion === canonico ? estadoActual : opcion));
 }
 
 // Ya no existe una sola "clave de administrador" compartida: cada persona
@@ -1722,12 +1735,15 @@ export default function Dashboard() {
   }
   const pedidosPorDueno = pedidosPorFecha.filter(pedidoEsDelDueno);
 
+  // "estadoCanonicoPedido": un pedido que todavía diga "Sin solicitud"
+  // (nombre viejo) cuenta y se filtra como "Pendiente".
   const conteoPorEstado = pedidosPorDueno.reduce((acc, p) => {
-    acc[p.Estado] = (acc[p.Estado] || 0) + 1;
+    const estadoPedido = estadoCanonicoPedido(p.Estado);
+    acc[estadoPedido] = (acc[estadoPedido] || 0) + 1;
     return acc;
   }, {});
   const pedidosFiltrados = filtroEstado
-    ? pedidosPorDueno.filter((p) => p.Estado === filtroEstado)
+    ? pedidosPorDueno.filter((p) => estadoCanonicoPedido(p.Estado) === filtroEstado)
     : pedidosPorDueno;
 
   const filtroPedidoFechaActivo = !!(filtroPedidoDesde || filtroPedidoHasta);
