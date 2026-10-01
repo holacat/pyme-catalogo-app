@@ -263,6 +263,11 @@ export default function Catalog() {
   // vez de estar fijo en una variable de entorno. Ver nota junto a
   // "buildWhatsAppLinkCarrito" arriba.
   const [telefonoPedidos, setTelefonoPedidos] = useState('');
+  // Zona "🔥 Ofertas" (2026-10-01, pendiente P11): desde "Orden del
+  // catálogo" se puede ocultar completa y acomodar el orden de su carrusel;
+  // el servidor manda las dos cosas junto con el catálogo.
+  const [ofertasOculta, setOfertasOculta] = useState(false);
+  const [ofertasOrden, setOfertasOrden] = useState([]);
 
   // Arreglo (2026-09-25, reportado por Claudia: "al salirme del catálogo y
   // volverme a meter tengo que actualizarlo manualmente, ya que si no dice
@@ -295,6 +300,8 @@ export default function Catalog() {
         // número que ya se había cargado bien antes — solo lo actualizamos
         // cuando de verdad viene algo.
         if (data.telefonoPedidos !== undefined) setTelefonoPedidos(data.telefonoPedidos || '');
+        if (data.ofertasOculta !== undefined) setOfertasOculta(!!data.ofertasOculta);
+        if (Array.isArray(data.ofertasOrden)) setOfertasOrden(data.ofertasOrden.map(String));
         setEstado('listo');
       })
       .catch((err) => {
@@ -459,10 +466,27 @@ export default function Catalog() {
   // fondo del carrusel aunque fuera el más nuevo de todos. Aquí sí se
   // reordena por fecha de creación, de más nuevo a más viejo, sin importar
   // la categoría de cada uno.
+  //
+  // Orden a mano (2026-10-01, P11): si en "Orden del catálogo" se acomodó
+  // el carrusel de Ofertas, se respeta ESE orden; las ofertas nuevas que
+  // todavía no se han acomodado van al principio (la más nueva primero),
+  // para que una oferta recién puesta nunca quede escondida al fondo. La
+  // MISMA regla se usa en el Dashboard ("ordenarOfertas").
+  const posicionOferta = (p) => {
+    const i = ofertasOrden.indexOf(String(p.ID));
+    return i === -1 ? -1 : i;
+  };
   const productosEnOferta = productos
     .filter((p) => obtenerInfoOferta(p).enOferta)
     .slice()
-    .sort((a, b) => new Date(b.FechaCreacion) - new Date(a.FechaCreacion));
+    .sort((a, b) => {
+      const pa = posicionOferta(a);
+      const pb = posicionOferta(b);
+      if (pa === -1 && pb === -1) return new Date(b.FechaCreacion) - new Date(a.FechaCreacion);
+      if (pa === -1) return -1;
+      if (pb === -1) return 1;
+      return pa - pb;
+    });
   const grupoAbierto = vista.tipo === 'categoria' ? grupos.find((g) => g.nombre === vista.nombre) : null;
 
   // ---- Buscador y filtros (P9) ----
@@ -699,7 +723,7 @@ export default function Catalog() {
             </button>
           </div>
 
-          {productosEnOferta.length > 0 && (
+          {productosEnOferta.length > 0 && !ofertasOculta && (
             <section className="categoria-seccion categoria-seccion-ofertas">
               <h2 className="categoria-titulo categoria-titulo-ofertas">🔥 Ofertas</h2>
               <CategoriaCarrusel>{tarjetas(productosEnOferta)}</CategoriaCarrusel>
