@@ -2250,6 +2250,13 @@ export default function Dashboard() {
                   <th>Mínimo</th>
                   <th>Actualizar stock</th>
                   <th>Acciones</th>
+                  {/* Columna vacía de relleno (2026-10-01, Claudia: en pantalla
+                      ancha las columnas se estiraban de más). Todas las
+                      columnas de verdad miden solo lo que ocupa su contenido
+                      (con su tope y sus "…"), y lo que sobre de pantalla se
+                      queda aquí, en blanco, al final. En pantallas angostas
+                      esta columna mide 0 y no se nota. */}
+                  <th className="stock-col-relleno" aria-hidden="true" />
                 </tr>
               </thead>
               <tbody>
@@ -4736,6 +4743,7 @@ function StockRow({
           </button>
         </div>
       </td>
+      <td className="stock-col-relleno" aria-hidden="true" />
     </tr>
   );
 }
