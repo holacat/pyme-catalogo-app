@@ -2986,3 +2986,50 @@ select:disabled {
   }
   .ranking-carrusel .analitica-barra-valor { text-align: left; }
 }
+
+/* ==== Acomodar pestañas del panel (2026-10-01, pendiente P13) ==== */
+.tabs { flex-wrap: wrap; align-items: center; }
+.tabs .tabs-ordenar-btn {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.82rem;
+  background: white;
+  border: 1px dashed var(--border);
+  color: var(--muted);
+}
+.tabs .tabs-ordenar-abrir { padding: 0.35rem 0.7rem; }
+.tabs .tabs-ordenar-btn:hover:not(:disabled) { color: var(--brand-dark); border-color: var(--brand); }
+.tabs .tabs-ordenar-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.tabs .tabs-ordenar-listo {
+  background: var(--brand);
+  color: white;
+  border-style: solid;
+  border-color: var(--brand);
+}
+.tabs .tabs-ordenar-listo:hover { color: white !important; }
+.tabs-ordenar-acciones { display: inline-flex; gap: 0.4rem; margin-left: 0.3rem; }
+.tab-ordenable {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.3rem;
+  border: 1px dashed var(--brand);
+  border-radius: 999px;
+  background: #f0fdf4;
+  cursor: grab;
+  user-select: none;
+  font-weight: 500;
+  font-size: 0.85rem;
+}
+.tab-ordenable.arrastrando { opacity: 0.4; }
+.tab-ordenable-texto { padding: 0 0.2rem; white-space: nowrap; }
+.tabs .tab-mover {
+  padding: 0.1rem 0.4rem;
+  border: none;
+  background: white;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  line-height: 1.2;
+  color: var(--brand-dark);
+}
+.tabs .tab-mover:disabled { opacity: 0.3; cursor: not-allowed; }
+.tabs-ordenar-ayuda { margin: -0.4rem 0 1rem; }
