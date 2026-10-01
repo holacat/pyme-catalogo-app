@@ -2883,3 +2883,13 @@ select:disabled {
 }
 .stock-precio-oferta s { color: #9ca3af; font-size: 0.9em; }
 .stock-precio-oferta strong { color: #b91c1c; }
+
+/* Botones +/− que se pueden mantener presionados (catálogo y carrito,
+   2026-10-01): que al dejar el dedo presionado en el celular NO se abra el
+   menú de copiar/seleccionar ni se haga zoom, para que solo cuente. */
+.boton-mantener {
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
