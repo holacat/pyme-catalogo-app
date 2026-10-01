@@ -705,7 +705,38 @@ export default function Dashboard() {
   // nombre puede caber completo en una pantalla y recortarse en otra.
   const tablaStockRef = useRef(null);
   const [hayNombresDuenoRecortados, setHayNombresDuenoRecortados] = useState(false);
+  // Ancho REAL (en pixeles) del nombre de dueño más largo y de la cantidad
+  // más larga que se están viendo en la tabla (2026-10-01, Claudia con
+  // captura: "hay mucho espacio en la columna de Dueño entre el nombre y
+  // los números"). Antes las dos columnitas tenían un ancho fijo generoso
+  // y sobraba aire; ahora miden justo lo que ocupa el texto más largo, así
+  // el número queda pegado al nombre y el botón pegado al número, sin
+  // perder la alineación entre renglones. Se mide el texto con un lienzo
+  // invisible (no cambia nada en pantalla). 0 = todavía no se ha medido.
+  const [anchosDuenos, setAnchosDuenos] = useState({ nombre: 0, cantidad: 0 });
+  const lienzoMedirRef = useRef(null);
   useEffect(() => {
+    function anchoMasLargo(elementos) {
+      if (elementos.length === 0) return 0;
+      try {
+        if (!lienzoMedirRef.current) lienzoMedirRef.current = document.createElement('canvas').getContext('2d');
+        const lienzo = lienzoMedirRef.current;
+        if (!lienzo) return 0;
+        const estilo = window.getComputedStyle(elementos[0]);
+        lienzo.font = `${estilo.fontStyle} ${estilo.fontWeight} ${estilo.fontSize} ${estilo.fontFamily}`;
+        const vistos = new Set();
+        let maximo = 0;
+        for (let i = 0; i < elementos.length; i += 1) {
+          const texto = elementos[i].textContent || '';
+          if (vistos.has(texto)) continue;
+          vistos.add(texto);
+          maximo = Math.max(maximo, lienzo.measureText(texto).width);
+        }
+        return Math.ceil(maximo) + 2;
+      } catch {
+        return 0;
+      }
+    }
     function medir() {
       const tabla = tablaStockRef.current;
       if (!tabla) return;
@@ -718,6 +749,9 @@ export default function Dashboard() {
         }
       }
       setHayNombresDuenoRecortados((antes) => (antes === recortado ? antes : recortado));
+      const nombre = anchoMasLargo(nombres);
+      const cantidad = anchoMasLargo(tabla.querySelectorAll('.stock-dueno-cantidad'));
+      setAnchosDuenos((antes) => (antes.nombre === nombre && antes.cantidad === cantidad ? antes : { nombre, cantidad }));
     }
     medir();
     window.addEventListener('resize', medir);
@@ -2228,7 +2262,20 @@ export default function Dashboard() {
             <table
               ref={tablaStockRef}
               className={`data-table stock-table${duenosExpandidos ? ' duenos-expandidos' : ''}`}
-              style={duenosExpandidos ? { '--ancho-nombre-dueno': anchoNombresDuenosExpandidos } : undefined}
+              style={{
+                // Anchos medidos (ver "anchosDuenos"). Si aún no se miden, el
+                // CSS usa sus anchos de respaldo.
+                ...(anchosDuenos.nombre > 0 ? { '--ancho-nombre-natural': `${anchosDuenos.nombre}px` } : {}),
+                ...(anchosDuenos.cantidad > 0 ? { '--ancho-cantidad-dueno': `${anchosDuenos.cantidad}px` } : {}),
+                // Nombres agrandados (lupa): el ancho del nombre más largo,
+                // completo, sin el tope normal.
+                ...(duenosExpandidos
+                  ? {
+                      '--ancho-nombre-dueno':
+                        anchosDuenos.nombre > 0 ? `${Math.min(anchosDuenos.nombre, 460)}px` : anchoNombresDuenosExpandidos,
+                    }
+                  : {}),
+              }}
             >
               <thead>
                 <tr>
