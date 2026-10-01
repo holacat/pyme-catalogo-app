@@ -1653,6 +1653,40 @@ main { flex: 1; padding: 1.5rem; max-width: 1800px; margin: 0 auto; width: 100%;
   margin-bottom: 0.9rem;
 }
 
+/* Carrito (2026-10-01, pedido por Claudia): subtotal por producto que
+   cambia al darle + / −, total de piezas, y precio de oferta con el
+   normal tachado. */
+.carrito-item-subtotal {
+  min-width: 4.5rem;
+  text-align: right;
+  font-weight: 700;
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+}
+.carrito-precio-antes { color: #9ca3af; margin-right: 0.15rem; }
+.carrito-etiqueta-oferta {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  background: #fee2e2;
+  color: #b91c1c;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+.carrito-resumen { border-top: 1px solid var(--border); padding-top: 0.6rem; }
+.carrito-total-piezas {
+  text-align: right;
+  font-size: 0.9rem;
+  margin: 0 0 0.25rem;
+}
+.carrito-resumen .carrito-total { margin-top: 0; }
+@media (max-width: 480px) {
+  .carrito-item { flex-wrap: wrap; }
+  .carrito-item-info { flex-basis: 100%; }
+  .carrito-item-subtotal { margin-left: auto; }
+}
+
 /* ---- Catálogo dividido por categorías: cada categoría tiene su propia
    cajita con su propio carrusel horizontal, para que no se encimen. ---- */
 .catalogo-barra-superior {
@@ -2736,9 +2770,21 @@ select:disabled {
    ("Asignar a…" / "Solicitar") queden en línea en TODAS las filas. El
    nombre largo se recorta con "…"; con el botón ↔ del encabezado (o clic
    en un nombre) se agranda el ancho de los nombres para todos por igual. */
+/* Ajuste (2026-10-01, Claudia con capturas: "la columna de Mínimo tiene
+   mucho espacio para lo que es"). La tabla mide el 100% del ancho y el
+   espacio sobrante se le estaba dando a Dueño (se veía un hueco enorme
+   entre los botones y "Mínimo"). Con "width: 1%" estas dos columnas se
+   quedan del ancho justo de su contenido y el sobrante se reparte en las
+   demás. */
 .stock-table th:nth-child(8),
 .stock-table td:nth-child(8) {
   max-width: none;
+  width: 1%;
+}
+.stock-table th:nth-child(9),
+.stock-table td:nth-child(9) {
+  width: 1%;
+  text-align: center;
 }
 .stock-duenos-lista { min-width: 0; }
 .stock-duenos-lista li.stock-dueno-linea {
@@ -2750,7 +2796,19 @@ select:disabled {
 }
 .stock-dueno-linea > :not(.stock-dueno-nombre):not(.stock-dueno-cantidad):not(.stock-dueno-accion) {
   grid-column: 1 / -1;
+  /* Arreglo (2026-10-01, Claudia: "al darle a Asignar se expande muchísimo
+     y deja espacio que ni se usa"). La cajita de Asignar/Solicitar (menú +
+     cantidad + Cancelar + Enviar) se medía en UNA sola línea y obligaba a
+     toda la columna (en todas las filas) a ensancharse para que cupiera.
+     Con "width: 0; min-width: 100%" la cajita ya no empuja el ancho de la
+     columna: toma el ancho que ya tiene el renglón y sus partes se
+     acomodan en 2 líneas si no caben en una. */
+  width: 0;
+  min-width: 100%;
+  white-space: normal;
 }
+.stock-dueno-linea .stock-solicitar-caja select { max-width: 100%; }
+.stock-dueno-linea .stock-solicitar-caja input { width: 76px; }
 .stock-dueno-nombre {
   background: none;
   border: none;
@@ -2777,13 +2835,51 @@ select:disabled {
   white-space: nowrap;
 }
 .btn-expandir-duenos {
+  display: block;
+  margin-top: 2px;
   background: none;
   border: 1px solid var(--border);
   border-radius: 5px;
   padding: 0 5px;
-  font-size: 0.8rem;
+  font-size: 0.68rem;
+  font-weight: 500;
+  white-space: nowrap;
   line-height: 1.3;
   cursor: pointer;
   color: inherit;
 }
 .btn-expandir-duenos:hover { background: #fff; }
+
+/* ---- Lote 1 de pendientes de Claudia (2026-10-01) ---- */
+/* P2: ojito para ver/ocultar contraseña (login y modales de Usuarios). */
+.campo-contrasena {
+  position: relative;
+  display: flex;
+}
+.campo-contrasena input {
+  flex: 1;
+  width: 100%;
+  padding-right: 2.6rem;
+}
+.campo-contrasena-ojo {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+/* P6: aviso de "la sesión cambió en otra pestaña" — por encima de todo. */
+.sesion-cambiada-overlay { z-index: 5000; }
+/* P10: precio de oferta en la tabla de Stock. */
+.stock-precio-oferta {
+  display: inline-flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+.stock-precio-oferta s { color: #9ca3af; font-size: 0.9em; }
+.stock-precio-oferta strong { color: #b91c1c; }
