@@ -841,6 +841,89 @@ main { flex: 1; padding: 1.5rem; max-width: 1800px; margin: 0 auto; width: 100%;
   color: #92400e;
   font-weight: 600;
 }
+
+/* ---- Avisos flotantes "tipo comentario de Word" (2026-09-30, pedido por
+   Claudia con capturas) ----
+   Reemplazan a los avisos fijos que antes vivían dentro de la columna
+   Estado de Pedidos y hacían cada fila mucho más alta. Ver
+   "AvisoFlotante" (clase distinta de la ".aviso-flotante" de "cambios sin guardar", más abajo) en Dashboard.jsx: la burbuja flota al lado del campo con
+   posición fija (encima de todo, sin mover ni ensanchar la tabla), con una
+   barrita de color a la izquierda y una flechita apuntando al campo, como
+   un comentario en el margen de Word. */
+.pedido-estado-linea {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: nowrap;
+}
+.btn-icono-aviso {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 2px 4px;
+  font-size: 0.95rem;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.btn-icono-aviso:hover,
+.btn-icono-aviso:focus-visible {
+  background: #fffbe6;
+  border-color: #f0d77a;
+}
+.btn-icono-aviso-abierto {
+  background: #fef3c7;
+  border-color: #f0d77a;
+}
+.comentario-flotante {
+  position: fixed;
+  z-index: 3000;
+  width: max-content;
+  max-width: 260px;
+  background: #fffbe6;
+  border: 1px solid #f0d77a;
+  border-left: 4px solid #e0a800;
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.16);
+  padding: 8px 26px 8px 10px;
+  font-size: 0.8rem;
+  font-weight: 400;
+  line-height: 1.35;
+  color: #3f3a1e;
+  white-space: normal;
+  text-align: left;
+}
+.comentario-flotante::before {
+  content: '';
+  position: absolute;
+  top: calc(var(--flecha-top, 16px) - 7px);
+  width: 0;
+  height: 0;
+  border-top: 7px solid transparent;
+  border-bottom: 7px solid transparent;
+}
+.comentario-flotante.lado-derecha::before {
+  left: -12px;
+  border-right: 8px solid #e0a800;
+}
+.comentario-flotante.lado-izquierda::before {
+  right: -9px;
+  border-left: 8px solid #f0d77a;
+}
+.comentario-flotante-cerrar {
+  position: absolute;
+  top: 3px;
+  right: 5px;
+  background: none;
+  border: none;
+  padding: 0 2px;
+  font-size: 0.8rem;
+  line-height: 1;
+  color: #6b5e1e;
+  cursor: pointer;
+}
+.comentario-flotante-cerrar:hover { color: #000; }
+.comentario-flotante-acciones { margin-top: 6px; }
 /* Fila con un cambio sin guardar: fondo tenue + una barra de color a la
    izquierda, para verla de un vistazo en toda la tabla. */
 .fila-sin-guardar td {
