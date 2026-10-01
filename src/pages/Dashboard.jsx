@@ -415,6 +415,9 @@ const USUARIO_ID_KEY = 'pyme_sesion_usuario_id';
 // (calculado por el backend a partir de su Rol + cualquier excepción
 // individual). Se guarda como texto JSON, ej. '{"stock":true,"usuarios":false,...}'.
 const PERMISOS_KEY = 'pyme_sesion_permisos';
+// Qué recuadros de avisos de arriba están minimizados (como puntito de
+// color) en este navegador — ver "avisosMinimizados" en Dashboard.
+const AVISOS_MINIMIZADOS_KEY = 'pyme_avisos_minimizados';
 
 // Etapa 4, rediseño del candado de Pedidos (2026-09-28): llave del permiso
 // especial "¿puede saltarse el candado de un pedido ajeno?" dentro de ese
@@ -629,6 +632,53 @@ export default function Dashboard() {
   const [solicitudesReembolsoPendientes, setSolicitudesReembolsoPendientes] = useState([]);
   const [solicitudesReembolsoResueltas, setSolicitudesReembolsoResueltas] = useState([]);
   const [solicitudesReembolsoEnAccion, setSolicitudesReembolsoEnAccion] = useState(new Set());
+
+  // ---- Avisos de arriba minimizables (2026-10-01, pedido por Claudia) ----
+  // Los recuadros de avisos de arriba (bajo inventario, solicitudes de
+  // stock, solicitudes de reembolso) se pueden minimizar: se quedan como un
+  // puntito de color (🔴 bajo inventario, 🟡 solicitudes de stock, 🔵
+  // reembolsos) con cuántos hay, y al darle clic al punto se vuelven a
+  // abrir. Se guarda, por tipo, CUÁNTOS había al minimizarlo — si después
+  // llegan más, el punto parpadea para avisar que hay algo nuevo. Se
+  // recuerda en este navegador (localStorage), para que no se vuelvan a
+  // abrir solos cada vez que se recarga la página.
+  const [avisosMinimizados, setAvisosMinimizados] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem(AVISOS_MINIMIZADOS_KEY) || '{}') || {};
+    } catch {
+      return {};
+    }
+  });
+  function guardarAvisosMinimizados(siguiente) {
+    try {
+      localStorage.setItem(AVISOS_MINIMIZADOS_KEY, JSON.stringify(siguiente));
+    } catch {
+      // Sin almacenamiento disponible: solo se pierde el "recordar"; minimizar sigue funcionando.
+    }
+    return siguiente;
+  }
+  function minimizarAviso(tipo, conteo) {
+    setAvisosMinimizados((prev) => guardarAvisosMinimizados({ ...prev, [tipo]: conteo }));
+  }
+  function abrirAviso(tipo) {
+    setAvisosMinimizados((prev) => {
+      const siguiente = { ...prev };
+      delete siguiente[tipo];
+      return guardarAvisosMinimizados(siguiente);
+    });
+  }
+
+  // ---- Nombres de dueños en Stock (2026-10-01, pedido por Claudia) ----
+  // Los nombres largos se recortan con "…" para que todas las filas de la
+  // columna Dueño queden alineadas (nombre | cantidad | botón). Con el
+  // botón ↔ del encabezado (o dándole clic a un nombre) se ven completos, y
+  // se regresan solos a su tamaño después de 5 minutos (o antes, a mano).
+  const [duenosExpandidos, setDuenosExpandidos] = useState(false);
+  useEffect(() => {
+    if (!duenosExpandidos) return undefined;
+    const temporizador = setTimeout(() => setDuenosExpandidos(false), 5 * 60 * 1000);
+    return () => clearTimeout(temporizador);
+  }, [duenosExpandidos]);
   // Igual que "productoResaltadoId" de arriba, pero para saltar a la
   // pestaña Pedidos y resaltar la fila de un pedido en concreto (se usa
   // desde el aviso de una solicitud de reembolso en Alertas).
@@ -1531,6 +1581,258 @@ export default function Dashboard() {
     setFiltroPedidoHasta('');
   }
 
+  // Ancho de la columna de nombres de dueño cuando se "agrandan" (botón ↔
+  // de Stock): lo justo para el nombre más largo de los productos que se
+  // están viendo (con un tope), igual para todas las filas, para que sigan
+  // quedando alineadas.
+  const largoNombreDuenoMasLargo = productosFiltrados.reduce((max, p) => {
+    const largos = (p.Duenos || []).map((d) => String(String(d.usuarioId) === String(usuarioId) ? 'Yo' : d.nombre || '').length);
+    return Math.max(max, ...largos, 0);
+  }, 0);
+  const anchoNombresDuenosExpandidos = `${(Math.min(Math.max(largoNombreDuenoMasLargo, 6), 40) * 0.72).toFixed(2)}em`;
+
+  // ---- Avisos (2026-10-01, pedido por Claudia con capturas) ----
+  // Piezas reutilizables: la misma lista se muestra en Alertas Y arriba de
+  // la pestaña donde se atiende (solicitudes de stock arriba de Stock,
+  // reembolsos arriba de Pedidos), sin duplicar el código.
+  const listaSolicitudesStock = (
+    <ul className="transferencias-pendientes-lista">
+                             {transferenciasPendientes.map((t) => (
+                  <li key={t.ID} className="transferencias-pendientes-item">
+                    <span>
+                      {t.Tipo === 'Oferta' ? (
+                        <><strong>{t.DuenoNombre}</strong> te asignó <strong>{t.Cantidad}</strong> de{' '}
+                        <button type="button" className="link-button" onClick={() => irAStockYResaltar(t.ProductoID)}>
+                          "{t.Producto}"{codigoPorProductoId[t.ProductoID] ? ` (${codigoPorProductoId[t.ProductoID]})` : ''}
+                        </button></>
+                      ) : (
+                        <><strong>{t.SolicitanteNombre}</strong> te solicita <strong>{t.Cantidad}</strong> de{' '}
+                        <button type="button" className="link-button" onClick={() => irAStockYResaltar(t.ProductoID)}>
+                          "{t.Producto}"{codigoPorProductoId[t.ProductoID] ? ` (${codigoPorProductoId[t.ProductoID]})` : ''}
+                        </button></>
+                      )}
+                    </span>
+                    <div className="transferencias-pendientes-botones">
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-small"
+                        disabled={transferenciasEnAccion.has(t.ID)}
+                        onClick={() => handleResponderTransferencia(t.ID, true)}
+                      >
+                        Aceptar
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-small"
+                        disabled={transferenciasEnAccion.has(t.ID)}
+                        onClick={() => handleResponderTransferencia(t.ID, false)}
+                      >
+                        Rechazar
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+  );
+  const bloqueReembolsos = (
+    <>
+                  {/* Solicitudes de reembolso (2026-09-30, pedido por Claudia).
+              Corrección del mismo día (reportado por Claudia con capturas):
+              esta lista ahora también incluye las solicitudes que hizo la
+              PROPIA cuenta (para que su pantalla sepa que ya se mandaron —
+              ver "haySolicitudPendienteReembolso" en PedidoRow), así que ya
+              no se puede asumir que todo el que aparece aquí se puede
+              aprobar: se branchea por elemento con "puedeResponderReembolso"
+              — quien puede aprobar ve Confirmar/Cancelar; el que solo hizo
+              la solicitud ve nomás un aviso de que sigue en camino (mismo
+              patrón que "transferenciasEnProceso" de arriba). */}
+          {solicitudesReembolsoPendientes.length > 0 && (
+            <ul className="transferencias-en-proceso-lista solicitudes-reembolso-lista">
+              {solicitudesReembolsoPendientes.map((s) => (
+                <li key={s.ID} className="solicitud-reembolso-pendiente">
+                  <span>
+                    {puedeResponderReembolso ? (
+                      <>
+                        🔒 <strong>{s.SolicitanteNombre}</strong> pide permiso para reembolsar{' '}
+                        <strong>{formatearMoneda(Number(s.MontoSolicitado) || 0)}</strong> de{' '}
+                        <button type="button" className="link-button" onClick={() => irAPedidoYResaltar(s.PedidoID)}>
+                          "{s.Producto}"{codigoPorProductoId[s.ProductoID] ? ` (${codigoPorProductoId[s.ProductoID]})` : ''}
+                        </button>
+                        {' '}— {s.Cliente || 'cliente sin nombre'}, cantidad {s.Cantidad}, el{' '}
+                        {formatearFechaSolo(s.Fecha)} a las {formatearHoraSolo(s.Fecha)}
+                      </>
+                    ) : (
+                      <>
+                        ⏳ Tu solicitud para reembolsar{' '}
+                        <strong>{formatearMoneda(Number(s.MontoSolicitado) || 0)}</strong> de{' '}
+                        <button type="button" className="link-button" onClick={() => irAPedidoYResaltar(s.PedidoID)}>
+                          "{s.Producto}"{codigoPorProductoId[s.ProductoID] ? ` (${codigoPorProductoId[s.ProductoID]})` : ''}
+                        </button>
+                        {' '}sigue en camino — el Administrador todavía no la confirma ni la cancela.
+                      </>
+                    )}
+                  </span>
+                  {puedeResponderReembolso && (
+                    <span className="solicitud-reembolso-botones">
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-small"
+                        disabled={solicitudesReembolsoEnAccion.has(s.ID)}
+                        onClick={() => handleResponderSolicitudReembolso(s.ID, true)}
+                      >
+                        Confirmar
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-small"
+                        disabled={solicitudesReembolsoEnAccion.has(s.ID)}
+                        onClick={() => handleResponderSolicitudReembolso(s.ID, false)}
+                      >
+                        Cancelar
+                      </button>
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+          {solicitudesReembolsoResueltas.length > 0 && (
+            <ul className="transferencias-resueltas-lista solicitudes-reembolso-lista">
+              {solicitudesReembolsoResueltas.map((s) => (
+                <li
+                  key={s.ID}
+                  className={s.Estado === 'Aprobada' ? 'transferencia-aceptada' : 'transferencia-rechazada'}
+                >
+                  <span>
+                    {s.Estado === 'Aprobada' ? '✅' : '🚫'} Tu solicitud de reembolso de{' '}
+                    <strong>{formatearMoneda(Number(s.MontoSolicitado) || 0)}</strong> de{' '}
+                    <button type="button" className="link-button" onClick={() => irAPedidoYResaltar(s.PedidoID)}>
+                      "{s.Producto}"{codigoPorProductoId[s.ProductoID] ? ` (${codigoPorProductoId[s.ProductoID]})` : ''}
+                    </button>
+                    {' '}fue {s.Estado === 'Aprobada' ? 'aprobada' : 'rechazada'}
+                    {s.RespondidoPor ? <> por <strong>{s.RespondidoPor}</strong></> : null}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-small"
+                    disabled={solicitudesReembolsoEnAccion.has(s.ID)}
+                    onClick={() => handleMarcarSolicitudReembolsoVista(s.ID)}
+                  >
+                    Entendido
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+    </>
+  );
+  const idsReembolsos = solicitudesReembolsoPendientes.map((r) => r.ID).concat(solicitudesReembolsoResueltas.map((r) => r.ID));
+
+  // Arreglo (2026-10-01, reportado por Claudia): el número de la pestaña
+  // Alertas solo contaba los productos con bajo inventario (por eso "siempre
+  // decía 1"). Ahora cuenta TODO lo que se ve dentro de esa pestaña.
+  const conteoAlertasPestana =
+    alertas.length +
+    transferenciasPendientes.length +
+    transferenciasEnProceso.length +
+    transferenciasResueltas.length +
+    transferenciasAplicadas.length +
+    idsReembolsos.length;
+
+  // Recuadros de avisos de arriba (2026-10-01): bajo inventario (🔴, en
+  // todas las pestañas, como antes), solicitudes de stock (🟡, arriba de
+  // Stock) y reembolsos (🔵, arriba de Pedidos). Cada uno se puede
+  // minimizar a un puntito de color; si llega algo NUEVO mientras está
+  // minimizado (un ID que no estaba cuando se minimizó), el punto parpadea.
+  const avisosDeArriba = [
+    {
+      tipo: 'bajoStock',
+      color: 'rojo',
+      nombre: 'Bajo inventario',
+      ids: alertas.map((a) => a.ID),
+      visibleAqui: true,
+      titulo: (
+        <>
+          ⚠️ {alertas.length} producto(s) con bajo inventario:{' '}
+          {alertas.map((a, i) => (
+            <span key={a.ID}>
+              <button type="button" className="link-button" onClick={() => irAStockYResaltar(a.ID)}>
+                {a.Nombre}{a.CodigoPropio ? ` (${a.CodigoPropio})` : ''}
+              </button>
+              {i < alertas.length - 1 ? ', ' : ''}
+            </span>
+          ))}
+        </>
+      ),
+      contenido: null,
+    },
+    {
+      tipo: 'solicitudesStock',
+      color: 'amarillo',
+      nombre: 'Solicitudes de stock',
+      ids: transferenciasPendientes.map((t) => t.ID),
+      visibleAqui: tab === 'stock' && puedeVer('stock'),
+      titulo: (
+        <>
+          📥 Tienes {transferenciasPendientes.length} solicitud{transferenciasPendientes.length === 1 ? '' : 'es'} de stock pendiente{transferenciasPendientes.length === 1 ? '' : 's'}:
+        </>
+      ),
+      contenido: listaSolicitudesStock,
+    },
+    {
+      tipo: 'reembolsos',
+      color: 'azul',
+      nombre: 'Solicitudes de reembolso',
+      ids: idsReembolsos,
+      visibleAqui: tab === 'pedidos' && puedeVer('pedidos'),
+      titulo: <>💸 Solicitudes de reembolso ({idsReembolsos.length}):</>,
+      contenido: bloqueReembolsos,
+    },
+  ].filter((a) => a.ids.length > 0 && a.visibleAqui);
+  const estaMinimizado = (tipo) => Object.prototype.hasOwnProperty.call(avisosMinimizados, tipo);
+  const avisosEnPunto = avisosDeArriba.filter((a) => estaMinimizado(a.tipo));
+  const avisosAbiertos = avisosDeArriba.filter((a) => !estaMinimizado(a.tipo));
+  function hayNuevoEnAviso(a) {
+    const vistos = Array.isArray(avisosMinimizados[a.tipo]) ? avisosMinimizados[a.tipo].map(String) : [];
+    return a.ids.some((id) => !vistos.includes(String(id)));
+  }
+  const zonaAvisos = avisosDeArriba.length === 0 ? null : (
+    <div className="zona-avisos">
+      {avisosEnPunto.length > 0 && (
+        <div className="avisos-puntos">
+          {avisosEnPunto.map((a) => (
+            <button
+              key={a.tipo}
+              type="button"
+              className={`aviso-punto aviso-punto-${a.color}${hayNuevoEnAviso(a) ? ' aviso-punto-nuevo' : ''}`}
+              onClick={() => abrirAviso(a.tipo)}
+              title={`${a.nombre} (${a.ids.length}) — clic para abrir`}
+              aria-label={`${a.nombre}: ${a.ids.length}. Clic para abrir`}
+            >
+              {a.ids.length}
+            </button>
+          ))}
+        </div>
+      )}
+      {avisosAbiertos.map((a) => (
+        <div key={a.tipo} className={`aviso-panel aviso-panel-${a.color}`}>
+          <div className="aviso-panel-encabezado">
+            <div className="aviso-panel-titulo">{a.titulo}</div>
+            <button
+              type="button"
+              className="aviso-panel-minimizar"
+              onClick={() => minimizarAviso(a.tipo, a.ids)}
+              title="Minimizar — se queda como un puntito de color; dale clic al punto para volver a abrirlo"
+            >
+              — Minimizar
+            </button>
+          </div>
+          {a.contenido}
+        </div>
+      ))}
+    </div>
+  );
+
   return (
     <div className="dashboard">
       <IndicadorCarga activo={mostrarIndicadorCarga} progreso={progresoCarga} />
@@ -1559,19 +1861,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {alertas.length > 0 && (
-        <div className="alert-banner">
-          ⚠️ {alertas.length} producto(s) con bajo inventario:{' '}
-          {alertas.map((a, i) => (
-            <span key={a.ID}>
-              <button type="button" className="link-button" onClick={() => irAStockYResaltar(a.ID)}>
-                {a.Nombre}{a.CodigoPropio ? ` (${a.CodigoPropio})` : ''}
-              </button>
-              {i < alertas.length - 1 ? ', ' : ''}
-            </span>
-          ))}
-        </div>
-      )}
+      {zonaAvisos}
 
       {/* Arreglo (2026-09-25, pedido por Claudia: un aviso de "sigue
           cargando" (no un error de verdad) se veía en rojo fuerte y
@@ -1617,7 +1907,7 @@ export default function Dashboard() {
         )}
         {puedeVer('alertas') && (
           <button className={tab === 'alertas' ? 'active' : ''} onClick={() => cambiarTab('alertas')}>
-            Alertas ({alertas.length})
+            Alertas ({conteoAlertasPestana})
           </button>
         )}
         {puedeVer('cuenta') && (
@@ -1665,50 +1955,6 @@ export default function Dashboard() {
 
            {tab === 'stock' && puedeVer('stock') && (
         <>
-          {transferenciasPendientes.length > 0 && (
-            <div className="transferencias-pendientes-panel">
-              <p className="transferencias-pendientes-titulo">
-                📥 Tienes {transferenciasPendientes.length} solicitud{transferenciasPendientes.length === 1 ? '' : 'es'} de stock pendiente{transferenciasPendientes.length === 1 ? '' : 's'}:
-              </p>
-                           <ul className="transferencias-pendientes-lista">
-                             {transferenciasPendientes.map((t) => (
-                  <li key={t.ID} className="transferencias-pendientes-item">
-                    <span>
-                      {t.Tipo === 'Oferta' ? (
-                        <><strong>{t.DuenoNombre}</strong> te asignó <strong>{t.Cantidad}</strong> de{' '}
-                        <button type="button" className="link-button" onClick={() => irAStockYResaltar(t.ProductoID)}>
-                          "{t.Producto}"{codigoPorProductoId[t.ProductoID] ? ` (${codigoPorProductoId[t.ProductoID]})` : ''}
-                        </button></>
-                      ) : (
-                        <><strong>{t.SolicitanteNombre}</strong> te solicita <strong>{t.Cantidad}</strong> de{' '}
-                        <button type="button" className="link-button" onClick={() => irAStockYResaltar(t.ProductoID)}>
-                          "{t.Producto}"{codigoPorProductoId[t.ProductoID] ? ` (${codigoPorProductoId[t.ProductoID]})` : ''}
-                        </button></>
-                      )}
-                    </span>
-                    <div className="transferencias-pendientes-botones">
-                      <button
-                        type="button"
-                        className="btn btn-primary btn-small"
-                        disabled={transferenciasEnAccion.has(t.ID)}
-                        onClick={() => handleResponderTransferencia(t.ID, true)}
-                      >
-                        Aceptar
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-small"
-                        disabled={transferenciasEnAccion.has(t.ID)}
-                        onClick={() => handleResponderTransferencia(t.ID, false)}
-                      >
-                        Rechazar
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
 
           <div className="stock-personal-toggle">
             <button
@@ -1796,7 +2042,10 @@ export default function Dashboard() {
               a necesitar su propio scroll). Solo se activa aquí y en
               Pedidos — el resto de las tablas de la app se quedan igual. */}
           <div className="table-scroll table-scroll-fijo">
-            <table className="data-table stock-table">
+            <table
+              className={`data-table stock-table${duenosExpandidos ? ' duenos-expandidos' : ''}`}
+              style={duenosExpandidos ? { '--ancho-nombre-dueno': anchoNombresDuenosExpandidos } : undefined}
+            >
               <thead>
                 <tr>
                   <th>
@@ -1830,7 +2079,21 @@ export default function Dashboard() {
                       Stock <span className="orden-header-flecha">{indicadorOrdenStock(ordenStock, 'stock')}</span>
                     </button>
                   </th>
-                  <th>Dueño</th>
+                  <th>
+                    Dueño{' '}
+                    <button
+                      type="button"
+                      className="btn-expandir-duenos"
+                      onClick={() => setDuenosExpandidos((v) => !v)}
+                      title={
+                        duenosExpandidos
+                          ? 'Achicar los nombres otra vez (se achican solos después de 5 minutos)'
+                          : 'Ver los nombres completos de los dueños'
+                      }
+                    >
+                      {duenosExpandidos ? '⇤' : '↔'}
+                    </button>
+                  </th>
                   <th>Mínimo</th>
                   <th>Actualizar stock</th>
                   <th>Acciones</th>
@@ -1856,6 +2119,7 @@ export default function Dashboard() {
                                       onSolicitar={handleSolicitarTransferencia}
                     onOfrecer={handleOfrecerTransferencia}
                     onAsignarDueno={handleAsignarStockDueno}
+                    onAlternarNombresDuenos={() => setDuenosExpandidos((v) => !v)}
                   />
                 ))}
               </tbody>
@@ -2004,6 +2268,17 @@ export default function Dashboard() {
 
                       {tab === 'alertas' && puedeVer('alertas') && (
         <>
+          {/* 2026-10-01: las solicitudes de stock que te hicieron también se
+              ven aquí (antes solo arriba de Stock), para que Alertas
+              muestre TODO lo que cuenta su número. */}
+          {transferenciasPendientes.length > 0 && (
+            <div className="transferencias-pendientes-panel">
+              <p className="transferencias-pendientes-titulo">
+                📥 Tienes {transferenciasPendientes.length} solicitud{transferenciasPendientes.length === 1 ? '' : 'es'} de stock pendiente{transferenciasPendientes.length === 1 ? '' : 's'}:
+              </p>
+              {listaSolicitudesStock}
+            </div>
+          )}
                    {transferenciasEnProceso.length > 0 && (
             <ul className="transferencias-en-proceso-lista">
               {transferenciasEnProceso.map((t) => (
@@ -2068,94 +2343,7 @@ export default function Dashboard() {
               ))}
             </ul>
           )}
-                  {/* Solicitudes de reembolso (2026-09-30, pedido por Claudia).
-              Corrección del mismo día (reportado por Claudia con capturas):
-              esta lista ahora también incluye las solicitudes que hizo la
-              PROPIA cuenta (para que su pantalla sepa que ya se mandaron —
-              ver "haySolicitudPendienteReembolso" en PedidoRow), así que ya
-              no se puede asumir que todo el que aparece aquí se puede
-              aprobar: se branchea por elemento con "puedeResponderReembolso"
-              — quien puede aprobar ve Confirmar/Cancelar; el que solo hizo
-              la solicitud ve nomás un aviso de que sigue en camino (mismo
-              patrón que "transferenciasEnProceso" de arriba). */}
-          {solicitudesReembolsoPendientes.length > 0 && (
-            <ul className="transferencias-en-proceso-lista solicitudes-reembolso-lista">
-              {solicitudesReembolsoPendientes.map((s) => (
-                <li key={s.ID} className="solicitud-reembolso-pendiente">
-                  <span>
-                    {puedeResponderReembolso ? (
-                      <>
-                        🔒 <strong>{s.SolicitanteNombre}</strong> pide permiso para reembolsar{' '}
-                        <strong>{formatearMoneda(Number(s.MontoSolicitado) || 0)}</strong> de{' '}
-                        <button type="button" className="link-button" onClick={() => irAPedidoYResaltar(s.PedidoID)}>
-                          "{s.Producto}"{codigoPorProductoId[s.ProductoID] ? ` (${codigoPorProductoId[s.ProductoID]})` : ''}
-                        </button>
-                        {' '}— {s.Cliente || 'cliente sin nombre'}, cantidad {s.Cantidad}, el{' '}
-                        {formatearFechaSolo(s.Fecha)} a las {formatearHoraSolo(s.Fecha)}
-                      </>
-                    ) : (
-                      <>
-                        ⏳ Tu solicitud para reembolsar{' '}
-                        <strong>{formatearMoneda(Number(s.MontoSolicitado) || 0)}</strong> de{' '}
-                        <button type="button" className="link-button" onClick={() => irAPedidoYResaltar(s.PedidoID)}>
-                          "{s.Producto}"{codigoPorProductoId[s.ProductoID] ? ` (${codigoPorProductoId[s.ProductoID]})` : ''}
-                        </button>
-                        {' '}sigue en camino — el Administrador todavía no la confirma ni la cancela.
-                      </>
-                    )}
-                  </span>
-                  {puedeResponderReembolso && (
-                    <span className="solicitud-reembolso-botones">
-                      <button
-                        type="button"
-                        className="btn btn-primary btn-small"
-                        disabled={solicitudesReembolsoEnAccion.has(s.ID)}
-                        onClick={() => handleResponderSolicitudReembolso(s.ID, true)}
-                      >
-                        Confirmar
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-small"
-                        disabled={solicitudesReembolsoEnAccion.has(s.ID)}
-                        onClick={() => handleResponderSolicitudReembolso(s.ID, false)}
-                      >
-                        Cancelar
-                      </button>
-                    </span>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-          {solicitudesReembolsoResueltas.length > 0 && (
-            <ul className="transferencias-resueltas-lista solicitudes-reembolso-lista">
-              {solicitudesReembolsoResueltas.map((s) => (
-                <li
-                  key={s.ID}
-                  className={s.Estado === 'Aprobada' ? 'transferencia-aceptada' : 'transferencia-rechazada'}
-                >
-                  <span>
-                    {s.Estado === 'Aprobada' ? '✅' : '🚫'} Tu solicitud de reembolso de{' '}
-                    <strong>{formatearMoneda(Number(s.MontoSolicitado) || 0)}</strong> de{' '}
-                    <button type="button" className="link-button" onClick={() => irAPedidoYResaltar(s.PedidoID)}>
-                      "{s.Producto}"{codigoPorProductoId[s.ProductoID] ? ` (${codigoPorProductoId[s.ProductoID]})` : ''}
-                    </button>
-                    {' '}fue {s.Estado === 'Aprobada' ? 'aprobada' : 'rechazada'}
-                    {s.RespondidoPor ? <> por <strong>{s.RespondidoPor}</strong></> : null}
-                  </span>
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-small"
-                    disabled={solicitudesReembolsoEnAccion.has(s.ID)}
-                    onClick={() => handleMarcarSolicitudReembolsoVista(s.ID)}
-                  >
-                    Entendido
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
+          {bloqueReembolsos}
                    <ul className="alert-list">
             {alertas.length === 0 && <li>Sin alertas de bajo inventario 🎉</li>}
             {alertas.map((a) => (
@@ -3659,6 +3847,7 @@ function StockRow({
   onSolicitar,
   onOfrecer,
   onAsignarDueno,
+  onAlternarNombresDuenos = () => {},
 }) {
   const [valor, setValor] = useState(producto.Stock);
   // Arreglo (2026-09-23): antes el botón "Guardar" no avisaba nada mientras
@@ -3836,18 +4025,39 @@ function StockRow({
               // desplegar Code.gs), se usa d.cantidad de respaldo.
               const disponibleD = d.disponible !== undefined ? d.disponible : d.cantidad;
               return (
-                <li key={d.usuarioId} className={esMio ? 'stock-dueno-mio' : ''}>
-                  <span>
-                    {esMio ? 'Yo' : d.nombre}: <strong>{disponibleD}</strong>
+                <li key={d.usuarioId} className={`stock-dueno-linea${esMio ? ' stock-dueno-mio' : ''}`}>
+                  {/* Rediseño (2026-10-01, pedido por Claudia con capturas):
+                      cada renglón es una mini-cuadrícula de 3 columnas de
+                      ancho FIJO (nombre | cantidad | botón), así los
+                      nombres, los números y los botones "Asignar a…" /
+                      "Solicitar" quedan alineados en todos los renglones y
+                      todas las filas. El nombre largo se recorta con "…";
+                      clic en el nombre (o en ↔ del encabezado) lo muestra
+                      completo, y se regresa solo después de 5 minutos. */}
+                  <button
+                    type="button"
+                    className="stock-dueno-nombre"
+                    onClick={onAlternarNombresDuenos}
+                    title={`${esMio ? `Yo (${d.nombre})` : d.nombre} — clic para ver/achicar los nombres completos`}
+                  >
+                    {esMio ? 'Yo' : d.nombre}
+                  </button>
+                  <strong className="stock-dueno-cantidad">{disponibleD}</strong>
+                  <span className="stock-dueno-accion">
+                    {!controlTotal && !esMio && !solicitudEnProceso && (
+                      <button type="button" className="btn btn-secondary btn-chip" onClick={() => abrirSolicitar(d)}>
+                        Solicitar
+                      </button>
+                    )}
+                    {!controlTotal && !esMio && solicitudEnProceso && (
+                      <span className="muted campo-nota" title="Ya le enviaste una solicitud, esperando respuesta">⏳ Enviada</span>
+                    )}
+                    {(esMio || controlTotal) && (
+                      <button type="button" className="btn btn-secondary btn-chip" onClick={() => abrirOfrecer(d)}>
+                        Asignar a…
+                      </button>
+                    )}
                   </span>
-                  {!controlTotal && !esMio && !solicitudEnProceso && (
-                    <button type="button" className="btn btn-secondary btn-chip" onClick={() => abrirSolicitar(d)}>
-                      Solicitar
-                    </button>
-                  )}
-                  {!controlTotal && !esMio && solicitudEnProceso && (
-                    <span className="muted campo-nota">⏳ Enviada, esperando respuesta</span>
-                  )}
                                 {solicitandoA && solicitandoA.usuarioId === d.usuarioId && (
                     <div className="stock-solicitar-caja">
                                            <input
@@ -3872,11 +4082,6 @@ function StockRow({
                         <span className="muted campo-nota">Máximo disponible: {disponibleD}</span>
                       )}
                     </div>
-                  )}
-                  {(esMio || controlTotal) && (
-                    <button type="button" className="btn btn-secondary btn-chip" onClick={() => abrirOfrecer(d)}>
-                      Asignar a…
-                    </button>
                   )}
                                    {ofreciendoDe && ofreciendoDe.usuarioId === d.usuarioId && (
                     <div className="stock-solicitar-caja">
