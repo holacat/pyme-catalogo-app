@@ -1770,9 +1770,12 @@ export default function Dashboard() {
     transferenciasAplicadas.length +
     idsReembolsos.length;
 
-  // Recuadros de avisos de arriba (2026-10-01): bajo inventario (🔴, en
-  // todas las pestañas, como antes), solicitudes de stock (🟡, arriba de
-  // Stock) y reembolsos (🔵, arriba de Pedidos). Cada uno se puede
+  // Recuadros de avisos de arriba (2026-10-01): bajo inventario (🔴),
+  // solicitudes de stock (🟡) y reembolsos (🔵). Ajuste del mismo día
+  // (Claudia: "las alertas de círculos desaparecen si cambias de pestaña,
+  // eso no me gusta"): antes el amarillo solo salía en Stock y el azul solo
+  // en Pedidos — ahora los TRES salen igual en TODAS las pestañas (abiertos
+  // o como puntito, según como los dejaste), así nunca desaparecen. Cada uno se puede
   // minimizar a un puntito de color; si llega algo NUEVO mientras está
   // minimizado (un ID que no estaba cuando se minimizó), el punto parpadea.
   const avisosDeArriba = [
@@ -1802,7 +1805,7 @@ export default function Dashboard() {
       color: 'amarillo',
       nombre: 'Solicitudes de stock',
       ids: transferenciasPendientes.map((t) => t.ID),
-      visibleAqui: tab === 'stock' && puedeVer('stock'),
+      visibleAqui: true,
       titulo: (
         <>
           📥 Tienes {transferenciasPendientes.length} solicitud{transferenciasPendientes.length === 1 ? '' : 'es'} de stock pendiente{transferenciasPendientes.length === 1 ? '' : 's'}:
@@ -1815,7 +1818,7 @@ export default function Dashboard() {
       color: 'azul',
       nombre: 'Solicitudes de reembolso',
       ids: idsReembolsos,
-      visibleAqui: tab === 'pedidos' && puedeVer('pedidos'),
+      visibleAqui: true,
       titulo: <>💸 Solicitudes de reembolso ({idsReembolsos.length}):</>,
       contenido: bloqueReembolsos,
     },
@@ -1847,16 +1850,21 @@ export default function Dashboard() {
       )}
       {avisosAbiertos.map((a) => (
         <div key={a.tipo} className={`aviso-panel aviso-panel-${a.color}`}>
+          {/* Ajuste (2026-10-01, Claudia: "el botón de minimizar está muy
+              cerca del de Rechazar"): "Minimizar" pasa al lado IZQUIERDO,
+              antes del título — lejos de los botones de Aceptar/Rechazar/
+              Confirmar/Cancelar, que siempre van a la derecha. */}
           <div className="aviso-panel-encabezado">
-            <div className="aviso-panel-titulo">{a.titulo}</div>
             <button
               type="button"
               className="aviso-panel-minimizar"
               onClick={() => minimizarAviso(a.tipo, a.ids)}
               title="Minimizar — se queda como un puntito de color; dale clic al punto para volver a abrirlo"
+              aria-label="Minimizar este aviso"
             >
-              — Minimizar
+              ▾ Minimizar
             </button>
+            <div className="aviso-panel-titulo">{a.titulo}</div>
           </div>
           {a.contenido}
         </div>
@@ -4481,18 +4489,64 @@ function EstadoCuentaTab({ movimientos, pedidos, productos }) {
 // un producto, mueve el stock, actualiza un pedido, o reordena/renombra/
 // elimina una categoría. Esta pestaña solo muestra esa lista, más reciente
 // primero, filtrable por fecha (igual que Estado de cuenta).
+// Texto normalizado para comparar nombres de usuario/acción sin que
+// importen mayúsculas, acentos ni espacios de sobra ("Claudia" = "CLAUDIA").
+function normalizarParaFiltro(texto) {
+  return String(texto || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toUpperCase();
+}
+
 function BitacoraTab({ bitacora }) {
   const [desde, setDesde] = useState('');
   const [hasta, setHasta] = useState('');
+  // Filtros nuevos (2026-10-01, pendiente P7 de Claudia: "que la bitácora
+  // haya un filtro para filtrar por usuarios u acciones"). Las listas de
+  // opciones se arman solas con lo que de verdad existe en la Bitácora, así
+  // que nunca hay que darlas de alta a mano.
+  const [filtroUsuario, setFiltroUsuario] = useState('');
+  const [filtroAccion, setFiltroAccion] = useState('');
+  const [buscarDetalle, setBuscarDetalle] = useState('');
 
   const bitacoraOrdenada = bitacora.slice().reverse();
-  const bitacoraFiltrada = bitacoraOrdenada.filter((b) => movimientoEnRangoDeFecha(b, desde, hasta));
 
-  const hayFiltro = !!(desde || hasta);
+  function opcionesUnicas(campo) {
+    const vistos = new Map(); // clave normalizada -> texto tal como aparece la primera vez
+    bitacoraOrdenada.forEach((b) => {
+      const texto = String(b[campo] || '').trim();
+      if (!texto) return;
+      const clave = normalizarParaFiltro(texto);
+      if (!vistos.has(clave)) vistos.set(clave, texto);
+    });
+    return Array.from(vistos.entries())
+      .map(([clave, texto]) => ({ clave, texto }))
+      .sort((a, b) => a.texto.localeCompare(b.texto, 'es'));
+  }
+  const opcionesUsuario = opcionesUnicas('Usuario');
+  const opcionesAccion = opcionesUnicas('Accion');
+
+  const textoBuscado = normalizarParaFiltro(buscarDetalle);
+  const bitacoraFiltrada = bitacoraOrdenada.filter((b) => (
+    movimientoEnRangoDeFecha(b, desde, hasta) &&
+    (!filtroUsuario || normalizarParaFiltro(b.Usuario) === filtroUsuario) &&
+    (!filtroAccion || normalizarParaFiltro(b.Accion) === filtroAccion) &&
+    (!textoBuscado || normalizarParaFiltro(b.Detalle).includes(textoBuscado))
+  ));
+
+  const hayFiltroFechas = !!(desde || hasta);
+  const hayOtrosFiltros = !!(filtroUsuario || filtroAccion || buscarDetalle);
 
   function limpiarFiltro() {
     setDesde('');
     setHasta('');
+  }
+  function limpiarTodo() {
+    limpiarFiltro();
+    setFiltroUsuario('');
+    setFiltroAccion('');
+    setBuscarDetalle('');
   }
 
   return (
@@ -4506,14 +4560,49 @@ function BitacoraTab({ bitacora }) {
           Hasta
           <input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} />
         </label>
-        {hayFiltro && (
+        <label>
+          Usuario
+          <select value={filtroUsuario} onChange={(e) => setFiltroUsuario(e.target.value)}>
+            <option value="">Todos</option>
+            {opcionesUsuario.map((o) => (
+              <option key={o.clave} value={o.clave}>{o.texto}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Acción
+          <select value={filtroAccion} onChange={(e) => setFiltroAccion(e.target.value)}>
+            <option value="">Todas</option>
+            {opcionesAccion.map((o) => (
+              <option key={o.clave} value={o.clave}>{o.texto}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Buscar en el detalle
+          <input
+            type="text"
+            value={buscarDetalle}
+            onChange={(e) => setBuscarDetalle(e.target.value)}
+            placeholder="Ej. nombre de producto o cliente"
+          />
+        </label>
+        {hayFiltroFechas && !hayOtrosFiltros && (
           <button type="button" className="btn btn-secondary btn-small" onClick={limpiarFiltro}>
             Quitar filtro de fechas
           </button>
         )}
+        {hayOtrosFiltros && (
+          <button type="button" className="btn btn-secondary btn-small" onClick={limpiarTodo}>
+            Quitar todos los filtros
+          </button>
+        )}
       </div>
 
-      <p className="muted">{textoRangoFechas(desde, hasta)}</p>
+      <p className="muted">
+        {textoRangoFechas(desde, hasta)} · {bitacoraFiltrada.length} cambio{bitacoraFiltrada.length === 1 ? '' : 's'}
+        {hayOtrosFiltros ? ' con los filtros de arriba' : ''}
+      </p>
 
       <div className="table-scroll">
         <table className="data-table bitacora-table">
@@ -4549,7 +4638,7 @@ function BitacoraTab({ bitacora }) {
           </tbody>
         </table>
         {bitacoraFiltrada.length === 0 && (
-          <p className="info-msg">No hay cambios registrados en el rango de fechas de arriba.</p>
+          <p className="info-msg">No hay cambios registrados con los filtros de arriba.</p>
         )}
       </div>
     </div>
@@ -4581,6 +4670,13 @@ function noPuedeTocarAdminDe(u, soyAdminCentral) {
   return u.Rol === 'Administrador' && !soyAdminCentral;
 }
 
+// Mismas reglas que revisa el servidor (Code.gs, "usuarioValidoParaLogin_"):
+// de 3 a 40 caracteres, sin espacios.
+function usuarioValidoParaLogin(texto) {
+  const t = String(texto || '').trim();
+  return t.length >= 3 && t.length <= 40 && !/\s/.test(t);
+}
+
 function UsuariosTab({ usuarios, sesionToken, soyAdminCentral, onCambio, iniciarCarga, terminarCarga }) {
   const [mensaje, setMensaje] = useState('');
 
@@ -4599,6 +4695,9 @@ function UsuariosTab({ usuarios, sesionToken, soyAdminCentral, onCambio, iniciar
 
   const [editando, setEditando] = useState(null); // usuario completo, o null
   const [editNombre, setEditNombre] = useState('');
+  // Pendiente P17 de Claudia (2026-10-01): el Admin Central ya puede
+  // cambiar también el "usuario" con el que una cuenta inicia sesión.
+  const [editUsuario, setEditUsuario] = useState('');
   const [editRol, setEditRol] = useState('Vendedor');
   const [editTelefonoPedidos, setEditTelefonoPedidos] = useState('');
   const [guardandoEdit, setGuardandoEdit] = useState(false);
@@ -4650,6 +4749,7 @@ function UsuariosTab({ usuarios, sesionToken, soyAdminCentral, onCambio, iniciar
   function abrirEditar(u) {
     setEditando(u);
     setEditNombre(u.Nombre || '');
+    setEditUsuario(u.Usuario || '');
     setEditRol(u.Rol || 'Vendedor');
     setEditTelefonoPedidos(u.TelefonoPedidos || '');
     setMensaje('');
@@ -4658,6 +4758,12 @@ function UsuariosTab({ usuarios, sesionToken, soyAdminCentral, onCambio, iniciar
   function confirmarEditar(e) {
     e.preventDefault();
     if (!editando || !editNombre.trim()) return;
+    const usuarioLimpio = editUsuario.trim();
+    const cambiaUsuario = soyAdminCentral && usuarioLimpio !== String(editando.Usuario || '').trim();
+    if (cambiaUsuario && !usuarioValidoParaLogin(usuarioLimpio)) {
+      setMensaje('El usuario debe tener de 3 a 40 caracteres y sin espacios.');
+      return;
+    }
     setGuardandoEdit(true);
     setMensaje('');
     iniciarCarga?.();
@@ -4667,6 +4773,8 @@ function UsuariosTab({ usuarios, sesionToken, soyAdminCentral, onCambio, iniciar
       nombre: editNombre.trim(),
       rol: editRol,
       telefonoPedidos: editTelefonoPedidos.trim(),
+      // Solo se manda si de verdad cambió (y solo el Admin Central puede).
+      ...(cambiaUsuario ? { usuario: usuarioLimpio } : {}),
     })
       .then(() => {
         setEditando(null);
@@ -4877,6 +4985,30 @@ function UsuariosTab({ usuarios, sesionToken, soyAdminCentral, onCambio, iniciar
               Nombre
               <input value={editNombre} onChange={(e) => setEditNombre(e.target.value)} autoFocus required />
             </label>
+            {/* Pendiente P17 (2026-10-01): el "usuario" es con lo que esta
+                persona inicia sesión (no su nombre). Solo el Admin Central
+                lo puede cambiar; el servidor revisa que no esté repetido. */}
+            {soyAdminCentral ? (
+              <label className="modal-field">
+                Usuario (para iniciar sesión)
+                <input
+                  value={editUsuario}
+                  onChange={(e) => setEditUsuario(e.target.value.replace(/\s/g, ''))}
+                  autoComplete="off"
+                  minLength={3}
+                  maxLength={40}
+                  required
+                />
+                {editUsuario.trim() !== String(editando.Usuario || '').trim() && (
+                  <span className="muted campo-nota">
+                    ⚠️ Desde que guardes, esta persona tendrá que entrar con "{editUsuario.trim()}" en vez de
+                    "{editando.Usuario}". Su contraseña no cambia. Avísale.
+                  </span>
+                )}
+              </label>
+            ) : (
+              <p className="muted campo-nota">Usuario para iniciar sesión: <strong>{editando.Usuario}</strong> (solo el Admin Central lo puede cambiar).</p>
+            )}
             <label className="modal-field">
               Rol
               <select
