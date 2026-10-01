@@ -83,6 +83,35 @@ function buildWhatsAppLinkCarrito(items, nombre, telefonoDinamico) {
 // "Orden" desde el backend) en bloques por categoría, conservando el orden
 // en que vienen. Los productos sin categoría se juntan bajo "Otros", para
 // que ninguno se quede sin mostrarse.
+// ---- Buscador y filtros del catálogo (2026-10-01, pendiente P9 de
+// Claudia: "añadir un buscador de productos o categorías y filtro por
+// precio o marca o color para el catálogo público") ----
+// Texto sin acentos ni mayúsculas, para que "camisa" encuentre "CAMISÁ".
+function normalizarBusqueda(texto) {
+  return String(texto || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+// Lista de valores distintos de un campo (ej. todas las marcas), sin
+// repetir por mayúsculas/acentos, ordenada alfabéticamente.
+function valoresDistintos(productos, campo) {
+  const vistos = new Map();
+  productos.forEach((p) => {
+    const texto = String(p[campo] || '').trim();
+    if (!texto) return;
+    const clave = normalizarBusqueda(texto);
+    if (!vistos.has(clave)) vistos.set(clave, texto);
+  });
+  return Array.from(vistos.entries())
+    .map(([clave, texto]) => ({ clave, texto }))
+    .sort((a, b) => a.texto.localeCompare(b.texto, 'es'));
+}
+
+const FILTROS_VACIOS = { categoria: '', marca: '', color: '', precioMin: '', precioMax: '', soloOfertas: false };
+
 function agruparPorCategoria(productos) {
   const grupos = [];
   const indicePorCategoria = {};
@@ -196,6 +225,13 @@ export default function Catalog() {
   // normal), una sola categoría abierta completa ("Ver más de esta
   // categoría"), o el catálogo entero mezclado ("Ver catálogo completo").
   const [vista, setVista] = useState({ tipo: 'categorias' });
+  // Buscador y filtros (2026-10-01, pendiente P9). Mientras haya algo
+  // escrito o algún filtro puesto, se enseña la lista de resultados (de
+  // todas las categorías juntas) en vez de la vista normal.
+  const [busqueda, setBusqueda] = useState('');
+  const [filtros, setFiltros] = useState(FILTROS_VACIOS);
+  const [ordenResultados, setOrdenResultados] = useState('relevancia');
+  const [filtrosAbiertos, setFiltrosAbiertos] = useState(false);
 
   // Carrito con VARIOS productos: lista de { producto, cantidad }.
   const [carrito, setCarrito] = useState([]);
@@ -429,6 +465,63 @@ export default function Catalog() {
     .sort((a, b) => new Date(b.FechaCreacion) - new Date(a.FechaCreacion));
   const grupoAbierto = vista.tipo === 'categoria' ? grupos.find((g) => g.nombre === vista.nombre) : null;
 
+  // ---- Buscador y filtros (P9) ----
+  const opcionesCategoria = grupos.map((g) => g.nombre);
+  const opcionesMarca = valoresDistintos(productos, 'Marca');
+  const opcionesColor = valoresDistintos(productos, 'Color');
+  const textoBuscado = normalizarBusqueda(busqueda);
+  const precioMinimo = filtros.precioMin === '' ? null : Number(filtros.precioMin);
+  const precioMaximo = filtros.precioMax === '' ? null : Number(filtros.precioMax);
+  const cantidadFiltrosActivos =
+    (filtros.categoria ? 1 : 0) +
+    (filtros.marca ? 1 : 0) +
+    (filtros.color ? 1 : 0) +
+    (precioMinimo !== null || precioMaximo !== null ? 1 : 0) +
+    (filtros.soloOfertas ? 1 : 0);
+  const buscando = textoBuscado !== '' || cantidadFiltrosActivos > 0;
+
+  function puntajeBusqueda(p) {
+    if (!textoBuscado) return 0;
+    const nombre = normalizarBusqueda(p.Nombre);
+    if (nombre.startsWith(textoBuscado)) return 3;
+    if (nombre.includes(textoBuscado)) return 2;
+    return 1; // coincidió en otro campo (categoría, marca, color, descripción…)
+  }
+  const resultados = buscando
+    ? productos
+        .filter((p) => {
+          if (textoBuscado) {
+            const donde = normalizarBusqueda(
+              [p.Nombre, p.Categoria, p.Marca, p.Color, p.Talla, p.Descripcion, p.CodigoPropio].join(' ')
+            );
+            if (!textoBuscado.split(/\s+/).every((palabra) => donde.includes(palabra))) return false;
+          }
+          if (filtros.categoria && (String(p.Categoria || '').trim() || 'Otros') !== filtros.categoria) return false;
+          if (filtros.marca && normalizarBusqueda(p.Marca) !== filtros.marca) return false;
+          if (filtros.color && normalizarBusqueda(p.Color) !== filtros.color) return false;
+          const precio = precioQueSeCobra(p);
+          if (precioMinimo !== null && precio < precioMinimo) return false;
+          if (precioMaximo !== null && precio > precioMaximo) return false;
+          if (filtros.soloOfertas && !obtenerInfoOferta(p).enOferta) return false;
+          return true;
+        })
+        .sort((a, b) => {
+          if (ordenResultados === 'precioMenor') return precioQueSeCobra(a) - precioQueSeCobra(b);
+          if (ordenResultados === 'precioMayor') return precioQueSeCobra(b) - precioQueSeCobra(a);
+          if (ordenResultados === 'nuevos') return new Date(b.FechaCreacion) - new Date(a.FechaCreacion);
+          return puntajeBusqueda(b) - puntajeBusqueda(a);
+        })
+    : [];
+
+  function cambiarFiltro(campo, valor) {
+    setFiltros((prev) => ({ ...prev, [campo]: valor }));
+  }
+  function limpiarBusqueda() {
+    setBusqueda('');
+    setFiltros(FILTROS_VACIOS);
+    setOrdenResultados('relevancia');
+  }
+
   // Chiquita función de ayuda para no repetir el mismo bloque de
   // ProductCard en las tres vistas (categorías, una categoría, todo).
   function tarjetas(listaProductos) {
@@ -470,9 +563,131 @@ export default function Catalog() {
         </div>
       )}
 
+      {/* ---- Buscador y filtros (2026-10-01, pendiente P9) — arriba de
+          todas las vistas. ---- */}
+      <div className="catalogo-buscador">
+        <div className="catalogo-buscador-fila">
+          <div className="catalogo-buscador-campo">
+            <span className="catalogo-buscador-icono" aria-hidden="true">🔍</span>
+            <input
+              type="search"
+              value={busqueda}
+              onChange={(e) => setBusqueda(e.target.value)}
+              placeholder="Buscar producto, categoría, marca, color…"
+              aria-label="Buscar en el catálogo"
+            />
+            {busqueda && (
+              <button type="button" className="catalogo-buscador-borrar" onClick={() => setBusqueda('')} aria-label="Borrar búsqueda">
+                ✕
+              </button>
+            )}
+          </div>
+          <button
+            type="button"
+            className={`btn btn-secondary catalogo-filtros-btn${cantidadFiltrosActivos > 0 ? ' activo' : ''}`}
+            onClick={() => setFiltrosAbiertos((v) => !v)}
+            aria-expanded={filtrosAbiertos}
+          >
+            ⚙️ Filtros{cantidadFiltrosActivos > 0 ? ` (${cantidadFiltrosActivos})` : ''}
+          </button>
+        </div>
+        {filtrosAbiertos && (
+          <div className="catalogo-filtros-panel">
+            <label>
+              Categoría
+              <select value={filtros.categoria} onChange={(e) => cambiarFiltro('categoria', e.target.value)}>
+                <option value="">Todas</option>
+                {opcionesCategoria.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </label>
+            {opcionesMarca.length > 0 && (
+              <label>
+                Marca
+                <select value={filtros.marca} onChange={(e) => cambiarFiltro('marca', e.target.value)}>
+                  <option value="">Todas</option>
+                  {opcionesMarca.map((m) => <option key={m.clave} value={m.clave}>{m.texto}</option>)}
+                </select>
+              </label>
+            )}
+            {opcionesColor.length > 0 && (
+              <label>
+                Color
+                <select value={filtros.color} onChange={(e) => cambiarFiltro('color', e.target.value)}>
+                  <option value="">Todos</option>
+                  {opcionesColor.map((c) => <option key={c.clave} value={c.clave}>{c.texto}</option>)}
+                </select>
+              </label>
+            )}
+            <label>
+              Precio desde
+              <input
+                type="number"
+                inputMode="numeric"
+                min="0"
+                value={filtros.precioMin}
+                onChange={(e) => cambiarFiltro('precioMin', e.target.value)}
+                placeholder="$ mín."
+              />
+            </label>
+            <label>
+              hasta
+              <input
+                type="number"
+                inputMode="numeric"
+                min="0"
+                value={filtros.precioMax}
+                onChange={(e) => cambiarFiltro('precioMax', e.target.value)}
+                placeholder="$ máx."
+              />
+            </label>
+            {productosEnOferta.length > 0 && (
+              <label className="catalogo-filtro-check">
+                <input
+                  type="checkbox"
+                  checked={filtros.soloOfertas}
+                  onChange={(e) => cambiarFiltro('soloOfertas', e.target.checked)}
+                />
+                Solo ofertas 🔥
+              </label>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* ---- Resultados de búsqueda/filtros: reemplazan a la vista normal
+          mientras haya algo escrito o algún filtro puesto. ---- */}
+      {buscando && (
+        <>
+          <div className="catalogo-resultados-encabezado">
+            <h2 className="categoria-titulo-completo">
+              {resultados.length} resultado{resultados.length === 1 ? '' : 's'}
+            </h2>
+            <label className="catalogo-orden">
+              Ordenar:
+              <select value={ordenResultados} onChange={(e) => setOrdenResultados(e.target.value)}>
+                <option value="relevancia">Más parecidos</option>
+                <option value="precioMenor">Precio: menor a mayor</option>
+                <option value="precioMayor">Precio: mayor a menor</option>
+                <option value="nuevos">Más nuevos</option>
+              </select>
+            </label>
+            <button type="button" className="btn btn-secondary" onClick={limpiarBusqueda}>
+              ✕ Quitar búsqueda y filtros
+            </button>
+          </div>
+          {resultados.length > 0 ? (
+            <div className="catalog-grid">{tarjetas(resultados)}</div>
+          ) : (
+            <p className="info-msg">
+              No encontramos productos con eso. Prueba con otra palabra o quita algún filtro.
+            </p>
+          )}
+        </>
+      )}
+
       {/* ---- Vista normal: categorías, cada una en su propia cajita con
           su propio carrusel horizontal ---- */}
-      {vista.tipo === 'categorias' && (
+      {!buscando && vista.tipo === 'categorias' && (
         <>
           <div className="catalogo-barra-superior">
             <button
@@ -510,7 +725,7 @@ export default function Catalog() {
       )}
 
       {/* ---- Vista de UNA categoría abierta completa, en cuadrícula ---- */}
-      {vista.tipo === 'categoria' && (
+      {!buscando && vista.tipo === 'categoria' && (
         <>
           <button
             type="button"
@@ -529,7 +744,7 @@ export default function Catalog() {
       )}
 
       {/* ---- Vista del catálogo completo, todas las categorías mezcladas ---- */}
-      {vista.tipo === 'todo' && (
+      {!buscando && vista.tipo === 'todo' && (
         <>
           <button
             type="button"
