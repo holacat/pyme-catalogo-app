@@ -3553,20 +3553,24 @@ body.orden-arrastrando-tactil {
   .orden-nombre { overflow-wrap: break-word; word-break: normal; }
 }
 
-/* ==== Stock y Pedidos: solo rayitas VERTICALES (2026-10-01, Claudia: "solo
-   era marcar las columnas, no las filas, excepto el del encabezado").
-   Se quita la raya horizontal entre renglones de estas dos tablas; se
-   conserva la de debajo de los títulos. */
+/* ==== Stock y Pedidos: rayas de los renglones MÁS TENUES ====
+   (2026-10-01, Claudia. Primero pidió quitar las rayas horizontales y
+   dejar solo las verticales; al verlo: "mejor sí regresa las líneas de las
+   filas pero un poco más tenues".) Quedan así:
+   - entre columnas: rayita vertical del gris normal (var(--border));
+   - entre renglones: raya horizontal más clarita que la vertical;
+   - debajo de los títulos: la raya un poco más marcada.
+   Para hacerlas más o menos visibles basta cambiar "--raya-renglon". */
+.stock-table,
+.pedidos-table {
+  --raya-renglon: #eef0f3;
+}
 .stock-table td,
 .pedidos-table td {
-  border-bottom: none;
+  border-bottom: 1px solid var(--raya-renglon);
 }
 .stock-table th,
 .pedidos-table th {
   border-bottom: 1px solid #d9dde3;
 }
-/* Cierre de la tabla: una sola raya al final, para que no quede "abierta". */
-.stock-table,
-.pedidos-table {
-  border-bottom: 1px solid var(--border);
-}
+  
