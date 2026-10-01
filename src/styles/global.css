@@ -2786,6 +2786,30 @@ select:disabled {
   width: 1%;
   text-align: center;
 }
+/* Ajuste (2026-10-01, Claudia con captura: "las columnas de Fecha agregado
+   y Hora agregado son demasiado anchas para lo que tienen"). Mismo motivo
+   que arriba: en una pantalla ancha la tabla repartía el espacio sobrante
+   entre TODAS las columnas, también las que solo traen una fecha o un
+   número. Ahora Fecha, Hora, Precio, Stock, Actualizar stock y Acciones
+   también se quedan del ancho justo de su contenido, y todo el espacio
+   que sobra se va a Producto, Categoría y Código — que son las que sí lo
+   aprovechan (nombres largos que antes se recortaban con "…"). */
+.stock-table th:nth-child(1), .stock-table td:nth-child(1),
+.stock-table th:nth-child(2), .stock-table td:nth-child(2),
+.stock-table th:nth-child(6), .stock-table td:nth-child(6),
+.stock-table th:nth-child(7), .stock-table td:nth-child(7),
+.stock-table th:nth-child(10), .stock-table td:nth-child(10),
+.stock-table th:nth-child(11), .stock-table td:nth-child(11) {
+  width: 1%;
+}
+.stock-table th:nth-child(3),
+.stock-table td:nth-child(3) {
+  width: 46%;
+}
+.stock-table th:nth-child(4), .stock-table td:nth-child(4),
+.stock-table th:nth-child(5), .stock-table td:nth-child(5) {
+  width: 27%;
+}
 .stock-duenos-lista { min-width: 0; }
 .stock-duenos-lista li.stock-dueno-linea {
   display: grid;
@@ -2866,13 +2890,19 @@ select:disabled {
   right: 6px;
   top: 50%;
   transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: none;
   border: none;
-  padding: 2px 4px;
-  font-size: 1rem;
-  line-height: 1;
+  border-radius: 6px;
+  padding: 4px;
+  line-height: 0;
+  color: var(--muted);
   cursor: pointer;
 }
+.campo-contrasena-ojo:hover,
+.campo-contrasena-ojo:focus-visible { color: var(--brand-dark); background: rgba(0, 0, 0, 0.05); }
 /* P6: aviso de "la sesión cambió en otra pestaña" — por encima de todo. */
 .sesion-cambiada-overlay { z-index: 5000; }
 /* P10: precio de oferta en la tabla de Stock. */
@@ -3146,4 +3176,131 @@ select:disabled {
   .catalogo-filtros-panel label { flex: 1 1 45%; }
   .catalogo-filtros-panel select,
   .catalogo-filtros-panel input[type="number"] { width: 100%; min-width: 0; }
+}
+
+
+/* ==== Orden del catálogo, rediseño (2026-10-01, pendientes P8 y P11) ==== */
+.orden-barra-superior { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+.orden-barra-superior .btn { width: auto; }
+.orden-buscador {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 1 1 240px;
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.35rem 0.8rem;
+}
+.orden-buscador input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: none;
+  font-size: 0.95rem;
+}
+.orden-buscador:focus-within { border-color: var(--brand); }
+.orden-barra-guardar {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  background: #fff7e0;
+  border: 1px solid #f0c14b;
+  border-radius: 10px;
+  padding: 0.6rem 0.9rem;
+  margin-bottom: 0.9rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  font-size: 0.9rem;
+}
+.orden-barra-guardar-botones { display: flex; gap: 0.5rem; }
+.orden-guardando-toast {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 4000;
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  background: var(--brand-dark);
+  color: white;
+  font-weight: 700;
+  font-size: 1.05rem;
+  padding: 1rem 1.5rem;
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+}
+.orden-guardando-giro {
+  width: 18px;
+  height: 18px;
+  border: 3px solid rgba(255, 255, 255, 0.35);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: ordenGiro 0.8s linear infinite;
+}
+@keyframes ordenGiro { to { transform: rotate(360deg); } }
+.orden-posicion {
+  width: 2.6rem;
+  padding: 0.2rem 0.2rem;
+  text-align: center;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  background: white;
+  flex-shrink: 0;
+}
+.orden-posicion:focus { outline: 2px solid var(--brand); outline-offset: 1px; }
+.orden-agarradera {
+  cursor: grab;
+  color: var(--muted);
+  font-size: 1rem;
+  user-select: none;
+  flex-shrink: 0;
+}
+.orden-fila[draggable="true"] { cursor: grab; }
+.orden-fila-arrastrando { opacity: 0.35; }
+.orden-fila-destino-arriba { box-shadow: 0 -3px 0 0 var(--brand); }
+.orden-fila-destino-abajo { box-shadow: 0 3px 0 0 var(--brand); }
+.orden-fila-movida { animation: ordenMovida 2.5s ease-out; }
+@keyframes ordenMovida {
+  0%, 35% { background-color: #fff59d; box-shadow: 0 0 0 2px #f0c14b; }
+  100% { background-color: transparent; box-shadow: 0 0 0 0 transparent; }
+}
+.orden-al-inicio {
+  flex-shrink: 0;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.15rem 0.45rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.orden-al-inicio:hover:not(:disabled) { color: var(--brand-dark); border-color: var(--brand); }
+.orden-al-inicio:disabled { opacity: 0.35; cursor: not-allowed; }
+.orden-contraer-btn {
+  background: none;
+  border: none;
+  font-size: 1rem;
+  cursor: pointer;
+  padding: 0 0.2rem;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.orden-conteo { color: var(--muted); font-weight: 400; font-size: 0.85em; }
+.orden-ofertas-box { border-color: #fca5a5; background: #fff7f5; }
+.orden-ofertas-nota { margin: 0 0 0.6rem; font-size: 0.8rem; }
+.orden-barra-guardar .btn-secondary {
+  background: white;
+  color: inherit;
+  border: 1px solid var(--border);
 }
