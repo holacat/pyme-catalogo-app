@@ -246,6 +246,12 @@ export function actualizarOrdenCategorias({ sesionToken, categorias, resumen }) 
   return post({ action: 'actualizarOrdenCategorias', sesionToken, categorias, resumen });
 }
 
+// Guarda el orden del carrusel de la zona "🔥 Ofertas" del catálogo
+// (2026-10-01): lista completa de IDs de producto, ya en el orden nuevo.
+export function actualizarOrdenOfertas({ sesionToken, productoIds, resumen }) {
+  return post({ action: 'actualizarOrdenOfertas', sesionToken, productoIds, resumen });
+}
+
 // Cambia el nombre de una categoría en TODOS los productos que la tengan,
 // de un jalón (por ejemplo, "Bolsas" -> "Bolsos").
 export function renombrarCategoria({ sesionToken, categoriaAnterior, categoriaNueva }) {
