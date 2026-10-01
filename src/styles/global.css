@@ -2831,11 +2831,19 @@ select:disabled {
 .stock-duenos-lista { min-width: 0; }
 .stock-duenos-lista li.stock-dueno-linea {
   display: grid;
-  /* El ancho de los nombres crece un poco en pantallas anchas (parte del
-     "reparte el espacio al que le haga falta" de Claudia): así se recortan
-     menos nombres. Sigue siendo el MISMO ancho en todas las filas, que es
-     lo que mantiene alineados nombres, números y botones. */
-  grid-template-columns: var(--ancho-nombre-dueno, clamp(8.6em, calc(8.6em + (100vw - 1400px) * 0.12), 13.5em)) 2.8em auto;
+  /* Anchos justos (2026-10-01, Claudia: "hay mucho espacio entre el nombre
+     del dueño y los números"). Las tres columnitas son nombre | cantidad |
+     botón, del MISMO ancho en todas las filas (eso las mantiene alineadas):
+     - nombre: lo que mide el nombre más largo que se ve en la tabla
+       ("--ancho-nombre-natural", lo calcula Dashboard.jsx), con un tope de
+       8.6em; lo que pase del tope se recorta con "…" y se abre con la lupa.
+     - cantidad: lo que mide el número más largo ("--ancho-cantidad-dueno").
+     (Se quitó el ancho que crecía en pantallas anchas: dejaba un hueco
+     grande entre los nombres cortos y sus números.) */
+  grid-template-columns:
+    var(--ancho-nombre-dueno, min(var(--ancho-nombre-natural, 8.6em), 8.6em))
+    var(--ancho-cantidad-dueno, 2.8em)
+    auto;
   column-gap: 6px;
   row-gap: 2px;
   align-items: center;
@@ -3543,4 +3551,22 @@ body.orden-arrastrando-tactil {
   .orden-al-inicio { font-size: 0; padding: 0.3rem 0.5rem; }
   .orden-al-inicio::before { content: '⤒'; font-size: 0.95rem; }
   .orden-nombre { overflow-wrap: break-word; word-break: normal; }
+}
+
+/* ==== Stock y Pedidos: solo rayitas VERTICALES (2026-10-01, Claudia: "solo
+   era marcar las columnas, no las filas, excepto el del encabezado").
+   Se quita la raya horizontal entre renglones de estas dos tablas; se
+   conserva la de debajo de los títulos. */
+.stock-table td,
+.pedidos-table td {
+  border-bottom: none;
+}
+.stock-table th,
+.pedidos-table th {
+  border-bottom: 1px solid #d9dde3;
+}
+/* Cierre de la tabla: una sola raya al final, para que no quede "abierta". */
+.stock-table,
+.pedidos-table {
+  border-bottom: 1px solid var(--border);
 }
