@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import ImageLightbox from './ImageLightbox.jsx';
+import BotonMantener from './BotonMantener.jsx';
 
 // Un producto puede tener varias fotos guardadas en una sola celda de
 // Sheets, separadas por "|". Aquí las separamos para armar el carrusel.
@@ -266,13 +267,15 @@ export default function ProductCard({ producto, onAgregarCarrito }) {
         {!sinStock && (
           <div className="cantidad-selector">
             <span className="cantidad-selector-label">Cantidad:</span>
-            <button type="button" onClick={bajarCantidad} disabled={cantidad <= 1} aria-label="Quitar uno">
+            {/* 2026-10-01: se pueden mantener presionados para avanzar
+                rápido (ver BotonMantener.jsx). */}
+            <BotonMantener onPaso={bajarCantidad} disabled={cantidad <= 1} aria-label="Quitar uno">
               −
-            </button>
+            </BotonMantener>
             <span className="cantidad-selector-valor">{cantidad}</span>
-            <button type="button" onClick={subirCantidad} disabled={cantidad >= stockDisponible} aria-label="Agregar uno">
+            <BotonMantener onPaso={subirCantidad} disabled={cantidad >= stockDisponible} aria-label="Agregar uno">
               +
-            </button>
+            </BotonMantener>
           </div>
         )}
 
