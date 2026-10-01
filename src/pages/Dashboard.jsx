@@ -5553,6 +5553,144 @@ function GraficaLineaTendencia({ serie }) {
   );
 }
 
+// ---- Carrusel de ranking para Analítica (2026-10-01, pendiente P12) ----
+// Dos vistas del mismo dato: "🔝 Más vendidos" y "🔻 Menos vendidos". Se
+// cambia con las flechas ‹ ›, con los botones de arriba, o deslizando el
+// dedo en el celular. Cada vista enseña 5 renglones y "Ver todos (N)" abre
+// el resto (y "Ver menos" lo vuelve a cortar).
+//   items: lista completa (cada uno con su valor numérico)
+//   valorOrden(item): número con el que se ordena y se dibuja la barra
+//   desempate(item): (opcional) segundo criterio si valorOrden empata
+//   textoValor(item, porcentaje): lo que se escribe a la derecha de la barra
+//   excluirDeMenos(item): (opcional) true = no tiene sentido en "menos
+//     vendidos" (ej. "Sin registrar" o "Producto eliminado")
+const RANKING_VISIBLES_POR_DEFECTO = 5;
+
+function RankingCarrusel({
+  titulo,
+  items,
+  clave,
+  etiqueta,
+  valorOrden,
+  desempate = () => 0,
+  textoValor,
+  excluirDeMenos = () => false,
+  claseRelleno = '',
+  nota = null,
+}) {
+  const [vista, setVista] = useState(0); // 0 = más vendidos, 1 = menos vendidos
+  const [verTodos, setVerTodos] = useState(false);
+  const inicioToqueRef = useRef(null);
+
+  const masVendidos = items
+    .slice()
+    .sort((a, b) => valorOrden(b) - valorOrden(a) || desempate(b) - desempate(a));
+  const menosVendidos = items
+    .filter((it) => !excluirDeMenos(it))
+    .sort((a, b) => valorOrden(a) - valorOrden(b) || desempate(a) - desempate(b));
+  const vistas = [
+    { nombre: '🔝 Más vendidos', lista: masVendidos },
+    { nombre: '🔻 Menos vendidos', lista: menosVendidos },
+  ];
+  const actual = vistas[vista];
+  const visibles = verTodos ? actual.lista : actual.lista.slice(0, RANKING_VISIBLES_POR_DEFECTO);
+  const sobran = actual.lista.length - RANKING_VISIBLES_POR_DEFECTO;
+
+  // Barra y porcentaje se calculan contra TODA la lista (no solo lo que se
+  // ve), así una barra mide lo mismo en "más" y en "menos" vendidos.
+  const maximo = Math.max(0, ...items.map(valorOrden));
+  const suma = items.reduce((acc, it) => acc + Math.max(0, valorOrden(it)), 0);
+  function porcentajeBarra(valor) {
+    if (!maximo || maximo <= 0) return '0%';
+    return `${Math.max((valor / maximo) * 100, valor > 0 ? 2 : 0)}%`;
+  }
+  function porcentaje(valor) {
+    if (!suma || suma <= 0) return null;
+    return (Math.max(0, valor) / suma) * 100;
+  }
+
+  function irA(indice) {
+    setVista((indice + vistas.length) % vistas.length);
+  }
+  function alSoltarToque(e) {
+    if (inicioToqueRef.current === null) return;
+    const dx = e.changedTouches[0].clientX - inicioToqueRef.current;
+    inicioToqueRef.current = null;
+    if (Math.abs(dx) > 45) irA(vista + (dx < 0 ? 1 : -1));
+  }
+
+  return (
+    <section className="analitica-seccion ranking-carrusel">
+      <div className="ranking-carrusel-encabezado">
+        <h3>{titulo}</h3>
+        <div className="ranking-carrusel-controles">
+          <button type="button" className="ranking-carrusel-flecha" onClick={() => irA(vista - 1)} aria-label="Vista anterior">
+            ‹
+          </button>
+          {vistas.map((v, i) => (
+            <button
+              key={v.nombre}
+              type="button"
+              className={`ranking-carrusel-pestana ${i === vista ? 'activo' : ''}`}
+              onClick={() => setVista(i)}
+              aria-pressed={i === vista}
+            >
+              {v.nombre}
+            </button>
+          ))}
+          <button type="button" className="ranking-carrusel-flecha" onClick={() => irA(vista + 1)} aria-label="Vista siguiente">
+            ›
+          </button>
+        </div>
+      </div>
+
+      <div
+        key={vista}
+        className="ranking-carrusel-vista"
+        onTouchStart={(e) => { inicioToqueRef.current = e.touches[0].clientX; }}
+        onTouchEnd={alSoltarToque}
+      >
+        {actual.lista.length === 0 ? (
+          <p className="info-msg">No hay datos en este rango de fechas.</p>
+        ) : (
+          <div className="analitica-barras">
+            {visibles.map((it, i) => {
+              const valor = valorOrden(it);
+              return (
+                <div className="analitica-barra-fila" key={clave(it)}>
+                  <span className="analitica-barra-etiqueta" title={etiqueta(it)}>
+                    <span className="ranking-posicion">{i + 1}.</span> {etiqueta(it)}
+                  </span>
+                  <div className="analitica-barra-pista">
+                    <div
+                      className={`analitica-barra-relleno ${claseRelleno} ${vista === 1 ? 'ranking-relleno-menos' : ''}`}
+                      style={{ width: porcentajeBarra(valor) }}
+                    />
+                  </div>
+                  <span className="analitica-barra-valor">{textoValor(it, porcentaje(valor))}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {sobran > 0 && (
+          <button type="button" className="ranking-ver-todos" onClick={() => setVerTodos((v) => !v)}>
+            {verTodos ? '▴ Ver menos' : `▾ Ver todos (${actual.lista.length})`}
+          </button>
+        )}
+      </div>
+
+      <div className="ranking-carrusel-puntos" aria-hidden="true">
+        {vistas.map((v, i) => (
+          <span key={v.nombre} className={`ranking-carrusel-punto ${i === vista ? 'activo' : ''}`} />
+        ))}
+      </div>
+      {vista === 1 && <p className="muted">Incluye también lo que no tuvo ninguna venta en este período (en $0).</p>}
+      {nota && <p className="muted">{nota}</p>}
+    </section>
+  );
+}
+
 function AnaliticaTab({ sesionToken }) {
   const [rangoRapido, setRangoRapido] = useState('Este mes');
   const [desde, setDesde] = useState(() => fechaISOLocal(inicioDeMes(new Date())));
@@ -5596,33 +5734,8 @@ function AnaliticaTab({ sesionToken }) {
   const cambio = datos && typeof datos.cambioPorcentaje === 'number' ? datos.cambioPorcentaje : null;
   const subio = cambio !== null && cambio >= 0;
 
-  const maxProducto = datos && datos.porProducto.length > 0 ? Math.max(...datos.porProducto.map((p) => p.total)) : 0;
-  const maxCategoria = datos && datos.porCategoria.length > 0 ? Math.max(...datos.porCategoria.map((c) => c.total)) : 0;
-  const maxVendedor = datos && datos.porVendedor.length > 0 ? Math.max(...datos.porVendedor.map((v) => v.cantidadVentas)) : 0;
-
-  // Convierte un valor a un porcentaje de ancho/alto de barra entre 0% y
-  // 100%. Si el valor es negativo (por ejemplo, un producto con más
-  // reembolsos que ventas en el rango) se deja una barra mínima de 2% en
-  // vez de un ancho negativo, que rompería el layout.
-  function porcentajeBarra(valor, maximo) {
-    if (!maximo || maximo <= 0) return '0%';
-    const pct = (valor / maximo) * 100;
-    return `${Math.max(pct, 2)}%`;
-  }
-
-  // Qué porcentaje representa `valor` dentro de la suma de TODO lo que se
-  // está mostrando en esa misma lista (no del total general del período).
-  // Por ejemplo, en "Productos más vendidos" (que solo enseña el top 10),
-  // el 100% es la suma de esos 10 productos, no de todas las ventas del
-  // período. Devuelve null si no hay nada que repartir (evita "NaN%").
-  function porcentajeDeLista(valor, sumaTotal) {
-    if (!sumaTotal || sumaTotal <= 0) return null;
-    return (valor / sumaTotal) * 100;
-  }
-
-  const sumaProductoVisible = datos ? datos.porProducto.reduce((s, p) => s + p.total, 0) : 0;
-  const sumaCategoriaVisible = datos ? datos.porCategoria.reduce((s, c) => s + c.total, 0) : 0;
-  const sumaVentasVendedor = datos ? datos.porVendedor.reduce((s, v) => s + v.cantidadVentas, 0) : 0;
+  // (Las barras y porcentajes de los rankings ahora los calcula
+  // RankingCarrusel, contra la lista completa — 2026-10-01.)
 
   return (
     <div className="analitica-tab">
@@ -5665,96 +5778,66 @@ function AnaliticaTab({ sesionToken }) {
             )}
           </div>
 
-          <section className="analitica-seccion">
-            <h3>📦 Productos más vendidos</h3>
-            {datos.porProducto.length === 0 ? (
-              <p className="info-msg">No hay ventas en este rango de fechas.</p>
-            ) : (
-              <div className="analitica-barras">
-                {datos.porProducto.map((p) => (
-                  <div className="analitica-barra-fila" key={p.producto}>
-                    <span className="analitica-barra-etiqueta" title={p.producto}>{p.producto}</span>
-                    <div className="analitica-barra-pista">
-                      <div className="analitica-barra-relleno" style={{ width: porcentajeBarra(p.total, maxProducto) }} />
-                    </div>
-                    <span className="analitica-barra-valor">
-                      {formatearMoneda(p.total)} ({p.cantidadVentas} venta{p.cantidadVentas === 1 ? '' : 's'})
-                      {porcentajeDeLista(p.total, sumaProductoVisible) !== null && (
-                        <span className="analitica-barra-porcentaje">
-                          {' '}
-                          · {porcentajeDeLista(p.total, sumaProductoVisible).toFixed(1)}%
-                        </span>
-                      )}
-                    </span>
-                  </div>
-                ))}
-              </div>
+          {/* Rediseño (2026-10-01, pendiente P12 de Claudia): cada ranking
+              es un CARRUSEL con dos vistas — "🔝 Más vendidos" y su
+              contraparte "🔻 Menos vendidos" — para ahorrar espacio y pasar
+              de una a otra fácil (flechas, puntitos, o deslizando el dedo).
+              Cada vista enseña 5 y tiene "Ver todos" para abrir el resto.
+              "Menos vendidos" incluye también lo que no vendió nada en el
+              período (en $0). Ver RankingCarrusel más abajo. */}
+          <RankingCarrusel
+            titulo="📦 Productos"
+            items={datos.porProducto}
+            clave={(p) => p.producto}
+            etiqueta={(p) => p.producto}
+            valorOrden={(p) => p.total}
+            textoValor={(p, pct) => (
+              <>
+                {formatearMoneda(p.total)} ({p.cantidadVentas} venta{p.cantidadVentas === 1 ? '' : 's'})
+                {pct !== null && <span className="analitica-barra-porcentaje"> · {pct.toFixed(1)}%</span>}
+              </>
             )}
-          </section>
+            excluirDeMenos={(p) => p.producto === 'Producto eliminado'}
+          />
 
-          <section className="analitica-seccion">
-            <h3>🗂️ Ventas por categoría</h3>
-            {datos.porCategoria.length === 0 ? (
-              <p className="info-msg">No hay ventas en este rango de fechas.</p>
-            ) : (
-              <div className="analitica-barras">
-                {datos.porCategoria.map((c) => (
-                  <div className="analitica-barra-fila" key={c.categoria}>
-                    <span className="analitica-barra-etiqueta" title={c.categoria}>{c.categoria}</span>
-                    <div className="analitica-barra-pista">
-                      <div
-                        className="analitica-barra-relleno analitica-barra-relleno-categoria"
-                        style={{ width: porcentajeBarra(c.total, maxCategoria) }}
-                      />
-                    </div>
-                    <span className="analitica-barra-valor">
-                      {formatearMoneda(c.total)}
-                      {porcentajeDeLista(c.total, sumaCategoriaVisible) !== null && (
-                        <span className="analitica-barra-porcentaje">
-                          {' '}
-                          · {porcentajeDeLista(c.total, sumaCategoriaVisible).toFixed(1)}%
-                        </span>
-                      )}
-                    </span>
-                  </div>
-                ))}
-              </div>
+          <RankingCarrusel
+            titulo="🗂️ Categorías"
+            items={datos.porCategoria}
+            clave={(c) => c.categoria}
+            etiqueta={(c) => c.categoria}
+            valorOrden={(c) => c.total}
+            claseRelleno="analitica-barra-relleno-categoria"
+            textoValor={(c, pct) => (
+              <>
+                {formatearMoneda(c.total)}
+                {pct !== null && <span className="analitica-barra-porcentaje"> · {pct.toFixed(1)}%</span>}
+              </>
             )}
-          </section>
+          />
 
-          <section className="analitica-seccion">
-            <h3>🧑‍💼 Ventas por vendedor</h3>
-            {datos.porVendedor.length === 0 ? (
-              <p className="info-msg">No hay ventas en este rango de fechas.</p>
-            ) : (
-              <div className="analitica-barras">
-                {datos.porVendedor.map((v) => (
-                  <div className="analitica-barra-fila" key={v.usuario}>
-                    <span className="analitica-barra-etiqueta" title={v.usuario}>{v.usuario}</span>
-                    <div className="analitica-barra-pista">
-                      <div
-                        className="analitica-barra-relleno analitica-barra-relleno-vendedor"
-                        style={{ width: porcentajeBarra(v.cantidadVentas, maxVendedor) }}
-                      />
-                    </div>
-                    <span className="analitica-barra-valor">
-                      {v.cantidadVentas} venta{v.cantidadVentas === 1 ? '' : 's'} · {formatearMoneda(v.total)}
-                      {porcentajeDeLista(v.cantidadVentas, sumaVentasVendedor) !== null && (
-                        <span className="analitica-barra-porcentaje">
-                          {' '}
-                          · {porcentajeDeLista(v.cantidadVentas, sumaVentasVendedor).toFixed(1)}%
-                        </span>
-                      )}
-                    </span>
-                  </div>
-                ))}
-              </div>
+          <RankingCarrusel
+            titulo="🧑‍💼 Vendedores"
+            items={datos.porVendedor}
+            clave={(v) => v.usuario}
+            etiqueta={(v) => v.usuario}
+            valorOrden={(v) => v.cantidadVentas}
+            desempate={(v) => v.total}
+            claseRelleno="analitica-barra-relleno-vendedor"
+            textoValor={(v, pct) => (
+              <>
+                {v.cantidadVentas} venta{v.cantidadVentas === 1 ? '' : 's'} · {formatearMoneda(v.total)}
+                {pct !== null && <span className="analitica-barra-porcentaje"> · {pct.toFixed(1)}%</span>}
+              </>
             )}
-            <p className="muted">
-              "Vendedor" es quién marcó cada pedido como Pagado/Reembolsado desde el Dashboard. Los
-              movimientos guardados antes de esta función aparecen como "Sin registrar".
-            </p>
-          </section>
+            excluirDeMenos={(v) => v.usuario === 'Sin registrar'}
+            nota={
+              <>
+                "Vendedor" es quién marcó cada pedido como Pagado/Reembolsado desde el Dashboard. Las ventas
+                de antes de que existiera esta función se reconocen con la Bitácora cuando se puede; si no,
+                salen como "Sin registrar".
+              </>
+            }
+          />
 
           <section className="analitica-seccion">
             <h3>📈 Tendencia de ventas por día</h3>
