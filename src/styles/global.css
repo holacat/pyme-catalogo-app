@@ -2770,68 +2770,72 @@ select:disabled {
    ("Asignar a…" / "Solicitar") queden en línea en TODAS las filas. El
    nombre largo se recorta con "…"; con el botón ↔ del encabezado (o clic
    en un nombre) se agranda el ancho de los nombres para todos por igual. */
-/* Ajuste (2026-10-01, Claudia con capturas: "la columna de Mínimo tiene
-   mucho espacio para lo que es"). La tabla mide el 100% del ancho y el
-   espacio sobrante se le estaba dando a Dueño (se veía un hueco enorme
-   entre los botones y "Mínimo"). Con "width: 1%" estas dos columnas se
-   quedan del ancho justo de su contenido y el sobrante se reparte en las
-   demás. */
+/* Anchos de la tabla de Stock — REPARTO FINAL (2026-10-01, última ronda de
+   Claudia con capturas). Historia corta de por qué quedó así:
+   1) "Mínimo / Fecha / Hora son demasiado anchas para lo que tienen".
+   2) Al mandar el sobrante a Producto/Categoría/Código "se estiran de más".
+   3) Con una columna vacía de relleno al final: "no me gusta el espacio
+      que deja a lado de Acciones, y Acciones ya está más estrecha —
+      reparte ese espacio entre Acciones y al que le haga falta; Producto
+      sigue un poco largo y Código también (leve)".
+   Cómo funciona ahora (la tabla mide el 100% y YA NO hay columna vacía):
+   - Fecha, Hora, Precio, Stock, Dueño y Mínimo miden solo lo que ocupa su
+     contenido ("width: 1%").
+   - El espacio que sobra se reparte SIEMPRE en la misma proporción entre
+     Producto, Categoría, Código, Actualizar stock y Acciones (los
+     porcentajes de abajo son esa proporción, no anchos exactos).
+   - Producto/Categoría/Código siguen recortando con "…" lo que no quepa
+     (el "max-width" de más arriba solo le dice al navegador "no te estires
+     por culpa de un texto largo"). */
+.stock-table th:nth-child(1), .stock-table td:nth-child(1),
+.stock-table th:nth-child(2), .stock-table td:nth-child(2),
+.stock-table th:nth-child(6), .stock-table td:nth-child(6),
+.stock-table th:nth-child(7), .stock-table td:nth-child(7),
+.stock-table th:nth-child(8), .stock-table td:nth-child(8),
+.stock-table th:nth-child(9), .stock-table td:nth-child(9) {
+  width: 1%;
+}
 .stock-table th:nth-child(8),
 .stock-table td:nth-child(8) {
   max-width: none;
-  width: 1%;
 }
-.stock-table th:nth-child(9),
-.stock-table td:nth-child(9) {
-  width: 1%;
-  text-align: center;
-}
-/* Anchos de la tabla de Stock (2026-10-01, dos ajustes de Claudia con
-   capturas en pantalla ancha):
-   1) "Fecha agregado y Hora agregado son demasiado anchas para lo que
-      tienen" — la tabla mide 100% y repartía el espacio sobrante entre las
-      columnas.
-   2) Al mandar ese sobrante a Producto/Categoría/Código, esas tres "se
-      estiran de más" (un nombre larguísimo llenaba media pantalla).
-   Solución: TODAS las columnas de verdad miden solo lo que ocupa su
-   contenido ("width: 1%"); Producto, Categoría y Código además tienen un
-   tope de ancho — lo que pase del tope se recorta con "…" y se abre con un
-   clic, como siempre. El espacio que sobre en una pantalla ancha se queda
-   en una columna vacía de relleno al final (".stock-col-relleno", ver
-   Dashboard.jsx), que en pantallas angostas mide 0. */
-.stock-table th:nth-child(1), .stock-table td:nth-child(1),
-.stock-table th:nth-child(2), .stock-table td:nth-child(2),
-.stock-table th:nth-child(3), .stock-table td:nth-child(3),
-.stock-table th:nth-child(4), .stock-table td:nth-child(4),
-.stock-table th:nth-child(5), .stock-table td:nth-child(5),
-.stock-table th:nth-child(6), .stock-table td:nth-child(6),
-.stock-table th:nth-child(7), .stock-table td:nth-child(7),
-.stock-table th:nth-child(10), .stock-table td:nth-child(10),
-.stock-table th:nth-child(11), .stock-table td:nth-child(11) {
-  width: 1%;
-}
-.stock-table .stock-col-relleno {
-  width: auto;
-  padding: 0;
-}
-/* Los topes crecen poquito a poco con el ancho de la pantalla (más ancho =
-   un tope algo más generoso), pero siempre son topes: Producto nunca pasa
-   de 300px, Categoría de 160px y Código de 190px. */
-.stock-table th:nth-child(3), .stock-table td:nth-child(3) { max-width: clamp(140px, calc(13vw + (100vw - 1300px) * 0.08), 300px); }
-.stock-table th:nth-child(4), .stock-table td:nth-child(4) { max-width: clamp(110px, 8.5vw, 160px); }
-.stock-table th:nth-child(5), .stock-table td:nth-child(5) { max-width: clamp(90px, calc(8.5vw + (100vw - 1300px) * 0.04), 190px); }
+.stock-table th:nth-child(3),  .stock-table td:nth-child(3)  { width: 25%; max-width: 140px; }
+.stock-table th:nth-child(4),  .stock-table td:nth-child(4)  { width: 14%; max-width: 105px; }
+.stock-table th:nth-child(5),  .stock-table td:nth-child(5)  { width: 15%; max-width: 90px; }
+.stock-table th:nth-child(10), .stock-table td:nth-child(10) { width: 19%; }
+.stock-table th:nth-child(11), .stock-table td:nth-child(11) { width: 23%; }
+
+/* Títulos centrados en su columna (Claudia, 2026-10-01: "los títulos de la
+   tabla deben de estar centrados en el centro de su columna"). El contenido
+   de las columnas también va centrado para que quede debajo de su título;
+   la única excepción es Producto (foto + nombre), que se lee mejor
+   empezando desde la izquierda. */
+.stock-table th { text-align: center; }
+.stock-table td { text-align: center; }
+.stock-table td:nth-child(3) { text-align: left; }
+.stock-table td:nth-child(8) { text-align: left; }
+.stock-table td:nth-child(8) > .muted { display: block; text-align: center; }
+.stock-table .stock-editor { justify-content: center; }
+/* Acciones: la columna ahora es más ancha; los botones crecen con ella pero
+   con un tope (para que no queden como barras larguísimas) y centrados. */
+.stock-table .acciones-producto { max-width: 150px; margin: 0 auto; }
+
 /* En pantallas bien anchas, parte del espacio sobrante se usa para darle un
    poco más de aire a TODAS las columnas por igual (separación entre
-   columnas), en vez de dejarlo todo en blanco al final. */
-.stock-table th:not(.stock-col-relleno),
-.stock-table td:not(.stock-col-relleno) {
-  padding-left: clamp(0.35rem, calc(0.35rem + (100vw - 1400px) * 0.02), 0.9rem);
-  padding-right: clamp(0.35rem, calc(0.35rem + (100vw - 1400px) * 0.02), 0.9rem);
+   columnas). */
+.stock-table th,
+.stock-table td {
+  padding-left: clamp(0.35rem, calc(0.35rem + (100vw - 1400px) * 0.022), 1.5rem);
+  padding-right: clamp(0.35rem, calc(0.35rem + (100vw - 1400px) * 0.022), 1.5rem);
 }
 .stock-duenos-lista { min-width: 0; }
 .stock-duenos-lista li.stock-dueno-linea {
   display: grid;
-  grid-template-columns: var(--ancho-nombre-dueno, 8.6em) 2.8em auto;
+  /* El ancho de los nombres crece un poco en pantallas anchas (parte del
+     "reparte el espacio al que le haga falta" de Claudia): así se recortan
+     menos nombres. Sigue siendo el MISMO ancho en todas las filas, que es
+     lo que mantiene alineados nombres, números y botones. */
+  grid-template-columns: var(--ancho-nombre-dueno, clamp(8.6em, calc(8.6em + (100vw - 1400px) * 0.12), 13.5em)) 2.8em auto;
   column-gap: 6px;
   row-gap: 2px;
   align-items: center;
@@ -2876,21 +2880,35 @@ select:disabled {
   align-items: center;
   white-space: nowrap;
 }
-.btn-expandir-duenos {
-  display: block;
-  margin-top: 2px;
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  padding: 0 5px;
-  font-size: 0.68rem;
-  font-weight: 500;
-  white-space: nowrap;
-  line-height: 1.3;
-  cursor: pointer;
-  color: inherit;
+/* Lupa junto a la palabra "Dueño" (2026-10-01, Claudia: el botón "Ver
+   nombres completos" debajo del título lo dejaba más arriba que los demás
+   encabezados). Ahora es solo un iconito en la MISMA línea; su explicación
+   sale como comentario flotante al pasarle el mouse o darle clic. */
+.stock-th-dueno {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
 }
-.btn-expandir-duenos:hover { background: #fff; }
+.btn-lupa-duenos {
+  background: none;
+  border: none;
+  padding: 0;
+  /* margen negativo: la lupa no hace más alto el renglón de títulos */
+  margin: -3px 0;
+  font-size: 0.8rem;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 50%;
+  width: 1.4em;
+  height: 1.4em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.9;
+}
+.btn-lupa-duenos:hover,
+.btn-lupa-duenos:focus-visible { opacity: 1; background: #fff; }
+.btn-lupa-duenos.activa { opacity: 1; background: #fff; box-shadow: 0 0 0 1px var(--brand); }
 
 /* ---- Lote 1 de pendientes de Claudia (2026-10-01) ---- */
 /* P2: ojito para ver/ocultar contraseña (login y modales de Usuarios). */
@@ -3287,6 +3305,13 @@ select:disabled {
 .orden-fila-arrastrando { opacity: 0.35; }
 .orden-fila-destino-arriba { box-shadow: 0 -3px 0 0 var(--brand); }
 .orden-fila-destino-abajo { box-shadow: 0 3px 0 0 var(--brand); }
+/* Arrastrar CATEGORÍAS (2026-10-01, pedido por Claudia): igual que los
+   productos. Se agarra del encabezado; la raya verde gruesa marca dónde va
+   a quedar al soltarla (arriba o abajo de la categoría sobre la que estás). */
+.orden-categoria-header[draggable="true"] { cursor: grab; }
+.orden-categoria-header .orden-agarradera { font-size: 1.15rem; }
+.orden-categoria-box.orden-categoria-destino-arriba { box-shadow: 0 -5px 0 0 var(--brand); }
+.orden-categoria-box.orden-categoria-destino-abajo { box-shadow: 0 5px 0 0 var(--brand); }
 .orden-fila-movida { animation: ordenMovida 2.5s ease-out; }
 @keyframes ordenMovida {
   0%, 35% { background-color: #fff59d; box-shadow: 0 0 0 2px #f0c14b; }
