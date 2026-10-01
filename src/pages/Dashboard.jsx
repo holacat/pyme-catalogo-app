@@ -194,6 +194,14 @@ function valorOrdenableStock(producto, campo) {
   switch (campo) {
     case 'fecha':
       return new Date(producto.FechaCreacion || 0).getTime();
+    case 'hora': {
+      // Hora del día en que se agregó (sin importar qué día fue): sirve
+      // para ordenar la columna "Hora agregado" de más temprano a más
+      // tarde o al revés. Los que no tienen fecha se van al principio.
+      const fecha = new Date(producto.FechaCreacion || '');
+      if (Number.isNaN(fecha.getTime())) return -1;
+      return fecha.getHours() * 3600 + fecha.getMinutes() * 60 + fecha.getSeconds();
+    }
     case 'nombre':
       return String(producto.Nombre || '').toLowerCase();
     case 'categoria':
@@ -685,6 +693,36 @@ export default function Dashboard() {
     const temporizador = setTimeout(() => setDuenosExpandidos(false), 5 * 60 * 1000);
     return () => clearTimeout(temporizador);
   }, [duenosExpandidos]);
+  // Lupa del encabezado "Dueño" (2026-10-01): su explicación sale como
+  // comentario flotante. null = cerrado; 'hover' = abierto por pasarle el
+  // mouse (se cierra al quitarlo); 'clic' = abierto por un clic (se cierra
+  // solo a los pocos segundos, con la ✕ o tocando en otro lado).
+  const lupaDuenosRef = useRef(null);
+  const [avisoLupaDuenos, setAvisoLupaDuenos] = useState(null);
+  // ¿Hay algún nombre de dueño recortado con "…" AHORITA en la tabla? Se
+  // mide directo en pantalla (antes se adivinaba contando letras), porque
+  // el ancho de los nombres ahora crece en pantallas anchas y un mismo
+  // nombre puede caber completo en una pantalla y recortarse en otra.
+  const tablaStockRef = useRef(null);
+  const [hayNombresDuenoRecortados, setHayNombresDuenoRecortados] = useState(false);
+  useEffect(() => {
+    function medir() {
+      const tabla = tablaStockRef.current;
+      if (!tabla) return;
+      let recortado = false;
+      const nombres = tabla.querySelectorAll('.stock-dueno-nombre');
+      for (let i = 0; i < nombres.length; i += 1) {
+        if (nombres[i].scrollWidth > nombres[i].clientWidth + 1) {
+          recortado = true;
+          break;
+        }
+      }
+      setHayNombresDuenoRecortados((antes) => (antes === recortado ? antes : recortado));
+    }
+    medir();
+    window.addEventListener('resize', medir);
+    return () => window.removeEventListener('resize', medir);
+  });
 
   // ---- Orden de las pestañas a gusto de cada quien (2026-10-01, pendiente
   // P13 de Claudia: "poder alterar el orden de las pestañas del panel de
@@ -1656,9 +1694,6 @@ export default function Dashboard() {
     const largos = (p.Duenos || []).map((d) => String(String(d.usuarioId) === String(usuarioId) ? 'Yo' : d.nombre || '').length);
     return Math.max(max, ...largos, 0);
   }, 0);
-  // Con el ancho normal de la columna caben ~12 letras en mayúsculas (lo
-  // justo para "TRABAJADOR 1"); más largo que eso se recorta con "…".
-  const hayNombresDuenoRecortados = largoNombreDuenoMasLargo > 12;
   const anchoNombresDuenosExpandidos = `${(Math.min(Math.max(largoNombreDuenoMasLargo, 6), 40) * 0.72).toFixed(2)}em`;
 
   // ---- Avisos (2026-10-01, pedido por Claudia con capturas) ----
@@ -2191,6 +2226,7 @@ export default function Dashboard() {
               Pedidos — el resto de las tablas de la app se quedan igual. */}
           <div className="table-scroll table-scroll-fijo">
             <table
+              ref={tablaStockRef}
               className={`data-table stock-table${duenosExpandidos ? ' duenos-expandidos' : ''}`}
               style={duenosExpandidos ? { '--ancho-nombre-dueno': anchoNombresDuenosExpandidos } : undefined}
             >
@@ -2201,7 +2237,14 @@ export default function Dashboard() {
                       Fecha agregado <span className="orden-header-flecha">{indicadorOrdenStock(ordenStock, 'fecha')}</span>
                     </button>
                   </th>
-                  <th>Hora agregado</th>
+                  <th>
+                    {/* 2026-10-01 (Claudia): "la columna de Hora igual debe
+                        dejarnos alterar el orden, con su punto verde y sus
+                        flechas como las demás". Ordena por la hora del día. */}
+                    <button type="button" className="orden-header-btn" onClick={() => cambiarOrdenStock('hora')}>
+                      Hora agregado <span className="orden-header-flecha">{indicadorOrdenStock(ordenStock, 'hora')}</span>
+                    </button>
+                  </th>
                   <th>
                     <button type="button" className="orden-header-btn" onClick={() => cambiarOrdenStock('nombre')}>
                       Producto <span className="orden-header-flecha">{indicadorOrdenStock(ordenStock, 'nombre')}</span>
@@ -2228,37 +2271,59 @@ export default function Dashboard() {
                     </button>
                   </th>
                   <th>
-                    Dueño
-                    {/* Aclarado (2026-10-01, Claudia: "no entiendo cuál es la
-                        función de la flecha"): antes era un ↔ sin texto, que
-                        además salía aunque ningún nombre estuviera recortado.
-                        Ahora dice qué hace, y solo aparece cuando de verdad
-                        hay algún nombre recortado con "…" en la tabla. */}
-                    {(hayNombresDuenoRecortados || duenosExpandidos) && (
-                      <button
-                        type="button"
-                        className="btn-expandir-duenos"
-                        onClick={() => setDuenosExpandidos((v) => !v)}
-                        title={
-                          duenosExpandidos
-                            ? 'Vuelve a recortar los nombres largos (se recortan solos después de 5 minutos)'
-                            : 'Algunos nombres están recortados con "…" — clic para verlos completos'
-                        }
-                      >
-                        {duenosExpandidos ? '↩ Recortar nombres' : '🔍 Ver nombres completos'}
-                      </button>
-                    )}
+                    {/* Rediseñado (2026-10-01, Claudia con captura): el botón
+                        "🔍 Ver nombres completos" iba DEBAJO de la palabra
+                        Dueño y dejaba este encabezado más arriba que los
+                        demás. Ahora es solo una lupita en la misma línea, a
+                        la derecha de "Dueño"; su explicación sale como
+                        comentario flotante (tipo Word) al pasarle el mouse
+                        o darle clic, sin mover ni ensanchar la columna. El
+                        clic además agranda/recorta los nombres. Solo
+                        aparece cuando de verdad hay algún nombre recortado
+                        con "…" (o cuando están agrandados, para regresar). */}
+                    <span className="stock-th-dueno">
+                      Dueño
+                      {(hayNombresDuenoRecortados || duenosExpandidos) && (
+                        <>
+                          <button
+                            type="button"
+                            ref={lupaDuenosRef}
+                            className={`btn-lupa-duenos${duenosExpandidos ? ' activa' : ''}`}
+                            aria-label={duenosExpandidos ? 'Volver a recortar los nombres largos' : 'Ver los nombres completos'}
+                            onMouseEnter={() => setAvisoLupaDuenos((v) => v || 'hover')}
+                            onMouseLeave={() => setAvisoLupaDuenos((v) => (v === 'hover' ? null : v))}
+                            onClick={() => {
+                              setDuenosExpandidos((v) => !v);
+                              setAvisoLupaDuenos('clic');
+                            }}
+                          >
+                            🔍
+                          </button>
+                          <AvisoFlotante
+                            anclaRef={lupaDuenosRef}
+                            abierto={avisoLupaDuenos !== null}
+                            onCerrar={() => setAvisoLupaDuenos(null)}
+                            autoCerrarMs={avisoLupaDuenos === 'clic' ? 6000 : 0}
+                          >
+                            {duenosExpandidos ? (
+                              <>
+                                <strong>Nombres completos.</strong> Se vuelven a recortar solos en 5 minutos, o dale
+                                clic otra vez a la lupa para recortarlos ahora.
+                              </>
+                            ) : (
+                              <>
+                                <strong>Ver nombres completos.</strong> Algunos nombres están recortados con "…" —
+                                dale clic a la lupa para verlos completos.
+                              </>
+                            )}
+                          </AvisoFlotante>
+                        </>
+                      )}
+                    </span>
                   </th>
                   <th>Mínimo</th>
                   <th>Actualizar stock</th>
                   <th>Acciones</th>
-                  {/* Columna vacía de relleno (2026-10-01, Claudia: en pantalla
-                      ancha las columnas se estiraban de más). Todas las
-                      columnas de verdad miden solo lo que ocupa su contenido
-                      (con su tope y sus "…"), y lo que sobre de pantalla se
-                      queda aquí, en blanco, al final. En pantallas angostas
-                      esta columna mide 0 y no se nota. */}
-                  <th className="stock-col-relleno" aria-hidden="true" />
                 </tr>
               </thead>
               <tbody>
@@ -4202,13 +4267,42 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
 
       {gruposVisibles.map(({ grupo, indiceCategoria, filas }) => {
         const contraida = !textoBuscadoOrden && contraidas.has(grupo.nombre);
+        // Arrastrar CATEGORÍAS (2026-10-01, pedido por Claudia: "el mismo
+        // sistema de arrastre que tienen los productos debería poder hacer
+        // lo mismo entre categorías"). Se agarra del ENCABEZADO de la
+        // categoría (el ⠿ o cualquier parte libre del encabezado) y se
+        // suelta encima de otra categoría — en cualquier parte de su caja,
+        // esté abierta o contraída. Se usa la misma pieza que los productos
+        // ("propsArrastre"), repartida en dos: el encabezado es lo que se
+        // agarra, y la caja completa es donde se puede soltar. Como los
+        // productos usan otra "lista" ("cat:NOMBRE"), arrastrar un producto
+        // nunca mueve una categoría ni al revés.
+        const arrastreCategoria = propsArrastre('categorias', indiceCategoria, moverCategoriaA);
+        const arrastrandoCategorias = !!arrastre && arrastre.lista === 'categorias';
+        const clasesCategoria = [
+          'orden-categoria-box',
+          grupo.oculta && 'categoria-oculta',
+          resaltado === `c:${grupo.nombre}` && 'orden-fila-movida',
+          arrastrandoCategorias && arrastre.indice === indiceCategoria && 'orden-fila-arrastrando',
+          arrastrandoCategorias && sobre && sobre.lista === 'categorias' && sobre.indice === indiceCategoria &&
+            arrastre.indice !== indiceCategoria &&
+            (arrastre.indice < indiceCategoria ? 'orden-categoria-destino-abajo' : 'orden-categoria-destino-arriba'),
+        ].filter(Boolean).join(' ');
         return (
           <section
             key={grupo.nombre}
             id={`orden-c:${grupo.nombre}`}
-            className={`orden-categoria-box ${grupo.oculta ? 'categoria-oculta' : ''} ${resaltado === `c:${grupo.nombre}` ? 'orden-fila-movida' : ''}`}
+            className={clasesCategoria}
+            onDragOver={arrastreCategoria.onDragOver}
+            onDrop={arrastreCategoria.onDrop}
           >
-            <div className="orden-categoria-header">
+            <div
+              className="orden-categoria-header"
+              draggable={arrastreCategoria.draggable}
+              onDragStart={arrastreCategoria.onDragStart}
+              onDragEnd={arrastreCategoria.onDragEnd}
+            >
+              <span className="orden-agarradera" aria-hidden="true" title="Arrastra para mover la categoría">⠿</span>
               <CampoPosicion
                 posicion={indiceCategoria + 1}
                 total={gruposLocal.length}
@@ -4904,7 +4998,6 @@ function StockRow({
           </button>
         </div>
       </td>
-      <td className="stock-col-relleno" aria-hidden="true" />
     </tr>
   );
 }
