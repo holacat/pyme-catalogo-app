@@ -2423,7 +2423,7 @@ export default function Dashboard() {
                   <th>Acciones</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody onClickCapture={marcarFilaActiva} onFocusCapture={marcarFilaActiva}>
                 {productosVisibles.map((p) => (
                                                                     <StockRow
                     key={`${p.ID}-${resetToken}`}
@@ -2572,7 +2572,7 @@ export default function Dashboard() {
                   <th>Cant.</th><th>Precio</th><th>Total</th><th>Notas</th><th>Estado</th><th>Dueño(s)</th><th>Guardar</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody onClickCapture={marcarFilaActiva} onFocusCapture={marcarFilaActiva}>
                 {pedidosVisibles.map((ped) => (
                   <PedidoRow
                     key={`${ped.ID}-${resetToken}`}
@@ -5135,6 +5135,25 @@ function BarraFilas({ total, visibles, limite, onCambiar, nombre }) {
       </span>
     </div>
   );
+}
+
+// ---- Renglón "en uso" de Stock y Pedidos ----
+// Pedido de Claudia (2026-10-01): "en Stock y Pedidos, cuando toque una fila
+// —su fondo o sus funciones— que se ponga en un azul leve, para así ubicar
+// la fila que estamos editando". Al dar clic (o tocar, o llegar con Tab) en
+// cualquier parte de un renglón, ese renglón queda marcado en azul claro
+// hasta que se toque otro. Se marca directo en la página con un atributo
+// ("data-fila-activa"; el color está en global.css), sin volver a dibujar
+// la tabla — por eso no estorba ni vuelve lento escribir en los campos.
+function marcarFilaActiva(e) {
+  const cuerpo = e.currentTarget;
+  const fila = e.target && e.target.closest ? e.target.closest('tr') : null;
+  // Un clic dentro de un comentario flotante o una ventana no es "tocar la fila".
+  if (!fila || fila.parentElement !== cuerpo || fila.dataset.filaActiva) return;
+  cuerpo.querySelectorAll('tr[data-fila-activa]').forEach((otra) => {
+    delete otra.dataset.filaActiva;
+  });
+  fila.dataset.filaActiva = '1';
 }
 
 // ---- 2. Listas de avisos largas ----
