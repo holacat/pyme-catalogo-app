@@ -2893,3 +2893,96 @@ select:disabled {
   -webkit-user-select: none;
   -webkit-touch-callout: none;
 }
+
+/* ==== Analítica: rankings en carrusel (2026-10-01, pendiente P12) ====
+   Cada ranking tiene dos vistas ("🔝 Más vendidos" / "🔻 Menos vendidos")
+   que se cambian con ‹ ›, con los botones, o deslizando el dedo. */
+.ranking-carrusel-encabezado {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  margin-bottom: 0.8rem;
+}
+.ranking-carrusel-encabezado h3 { margin: 0; }
+.ranking-carrusel-controles {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px;
+}
+.ranking-carrusel-pestana,
+.ranking-carrusel-flecha {
+  border: none;
+  background: none;
+  border-radius: 999px;
+  padding: 0.3rem 0.75rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ranking-carrusel-flecha { padding: 0.3rem 0.55rem; font-size: 1rem; line-height: 1; }
+.ranking-carrusel-pestana.activo {
+  background: var(--brand);
+  color: #fff;
+}
+.ranking-carrusel-flecha:hover,
+.ranking-carrusel-pestana:not(.activo):hover { background: rgba(0, 0, 0, 0.06); color: inherit; }
+.ranking-carrusel-vista {
+  animation: rankingEntrar 0.22s ease-out;
+  touch-action: pan-y;
+}
+@keyframes rankingEntrar {
+  from { opacity: 0; transform: translateX(12px); }
+  to { opacity: 1; transform: none; }
+}
+/* Columnas fijas para que las barras de todos los renglones empiecen y
+   terminen en el mismo lugar, sin importar lo largo del monto. */
+.ranking-carrusel .analitica-barra-fila {
+  grid-template-columns: minmax(90px, 180px) 1fr 15rem;
+}
+.ranking-posicion {
+  display: inline-block;
+  min-width: 1.6em;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.ranking-relleno-menos { background: #f59e0b !important; }
+.ranking-ver-todos {
+  margin-top: 0.7rem;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.25rem 0.7rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--brand-dark);
+  cursor: pointer;
+}
+.ranking-ver-todos:hover { background: var(--bg); }
+.ranking-carrusel-puntos {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 0.7rem;
+}
+.ranking-carrusel-punto {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--border);
+}
+.ranking-carrusel-punto.activo { background: var(--brand); }
+@media (max-width: 640px) {
+  .ranking-carrusel .analitica-barra-fila {
+    grid-template-columns: 1fr;
+    gap: 0.2rem;
+  }
+  .ranking-carrusel .analitica-barra-valor { text-align: left; }
+}
