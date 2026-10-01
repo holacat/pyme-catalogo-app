@@ -3937,11 +3937,160 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
     });
   }
 
+  // ---- Arrastrar con el DEDO (celular / tablet) ----
+  // Pedido de Claudia (2026-10-01): "en celular sí debería poder arrastrar,
+  // ya que de hecho ahí es más fácil". El arrastre de computadora (el de
+  // abajo) no funciona con el dedo en la mayoría de los celulares, así que
+  // el ⠿ tiene su propio arrastre táctil:
+  //   - Se pone el dedo en el ⠿ y se arrastra (empieza de inmediato, sin
+  //     tener que dejarlo presionado). El ⠿ es lo único que "agarra": en
+  //     el resto del renglón el dedo sigue desplazando la página normal.
+  //   - Una etiqueta con el nombre sigue al dedo, el renglón original se
+  //     atenúa y la raya verde marca dónde va a quedar (lo mismo que con
+  //     el mouse: se reutilizan "arrastre" y "sobre").
+  //   - Si el dedo se acerca al borde de arriba o de abajo de la pantalla,
+  //     la página se desplaza sola para alcanzar lugares lejanos.
+  //   - Al soltar se mueve; funciona igual para productos, Ofertas y
+  //     categorías, y cada cosa solo se mueve dentro de su propia lista.
+  const raizOrdenRef = useRef(null);
+  const fantasmaRef = useRef(null);
+  const tactilRef = useRef(null);
+  // Siempre apunta a las funciones de mover de ESTE render (las del momento
+  // de soltar), no a las del momento en que se puso el dedo.
+  const moverPorListaRef = useRef(null);
+  moverPorListaRef.current = (lista, desde, hasta) => {
+    if (lista === 'categorias') moverCategoriaA(desde, hasta);
+    else if (lista === 'ofertas') moverOfertaA(desde, hasta);
+    else if (lista.startsWith('cat:')) moverProductoA(lista.slice(4), desde, hasta);
+  };
+
+  // ¿Sobre cuál renglón (de la misma lista) está el dedo? Se calcula por la
+  // altura del dedo: el renglón que lo contiene o, si está en un hueco o se
+  // pasó del principio/final, el más cercano.
+  function destinoTactil(lista, y) {
+    const raiz = raizOrdenRef.current;
+    if (!raiz) return null;
+    let mejor = null;
+    let mejorDistancia = Infinity;
+    raiz.querySelectorAll('[data-orden-lista]').forEach((el) => {
+      if (el.dataset.ordenLista !== lista) return;
+      const r = el.getBoundingClientRect();
+      const distancia = y < r.top ? r.top - y : y > r.bottom ? y - r.bottom : 0;
+      if (distancia < mejorDistancia) {
+        mejorDistancia = distancia;
+        mejor = Number(el.dataset.ordenIndice);
+      }
+    });
+    return mejor;
+  }
+
+  function terminarTactil(soltar) {
+    const t = tactilRef.current;
+    if (!t) return;
+    tactilRef.current = null;
+    window.removeEventListener('pointermove', t.alMover);
+    window.removeEventListener('pointerup', t.alSoltar);
+    window.removeEventListener('pointercancel', t.alCancelar);
+    if (t.raf) cancelAnimationFrame(t.raf);
+    if (fantasmaRef.current) fantasmaRef.current.style.display = 'none';
+    document.body.classList.remove('orden-arrastrando-tactil');
+    setArrastre(null);
+    setSobre(null);
+    if (soltar && t.destino !== null && t.destino !== t.indice) moverPorListaRef.current(t.lista, t.indice, t.destino);
+  }
+
+  function iniciarTactil(e, lista, indice, texto) {
+    // Con mouse se usa el arrastre normal de computadora (el de abajo).
+    if (e.pointerType === 'mouse' || guardando || tactilRef.current) return;
+    e.preventDefault();
+    const t = { lista, indice, destino: indice, x: e.clientX, y: e.clientY, pointerId: e.pointerId, raf: 0 };
+    const actualizar = () => {
+      const destino = destinoTactil(lista, t.y);
+      if (destino !== null && destino !== t.destino) {
+        t.destino = destino;
+        setSobre({ lista, indice: destino });
+      }
+      const fantasma = fantasmaRef.current;
+      if (fantasma) {
+        const x = Math.min(t.x + 16, window.innerWidth - fantasma.offsetWidth - 8);
+        fantasma.style.transform = `translate(${Math.max(8, x)}px, ${Math.max(8, t.y - 46)}px)`;
+      }
+    };
+    // Desplazamiento automático cerca de los bordes de la pantalla.
+    const ciclo = () => {
+      if (tactilRef.current !== t) return;
+      const BORDE = 80;
+      let paso = 0;
+      if (t.y < BORDE) paso = -Math.ceil((BORDE - t.y) / 5);
+      else if (t.y > window.innerHeight - BORDE) paso = Math.ceil((t.y - (window.innerHeight - BORDE)) / 5);
+      if (paso) {
+        window.scrollBy(0, paso);
+        actualizar();
+      }
+      t.raf = requestAnimationFrame(ciclo);
+    };
+    t.alMover = (ev) => {
+      if (ev.pointerId !== t.pointerId) return;
+      t.x = ev.clientX;
+      t.y = ev.clientY;
+      actualizar();
+    };
+    t.alSoltar = (ev) => {
+      if (ev.pointerId === t.pointerId) terminarTactil(true);
+    };
+    t.alCancelar = (ev) => {
+      if (ev.pointerId === t.pointerId) terminarTactil(false);
+    };
+    tactilRef.current = t;
+    window.addEventListener('pointermove', t.alMover);
+    window.addEventListener('pointerup', t.alSoltar);
+    window.addEventListener('pointercancel', t.alCancelar);
+    document.body.classList.add('orden-arrastrando-tactil');
+    setArrastre({ lista, indice });
+    setSobre(null);
+    if (fantasmaRef.current) {
+      fantasmaRef.current.textContent = `⠿ ${texto}`;
+      fantasmaRef.current.style.display = 'block';
+    }
+    actualizar();
+    t.raf = requestAnimationFrame(ciclo);
+    try { navigator.vibrate?.(12); } catch { /* no todos los celulares vibran */ }
+  }
+
+  // Lo que lleva cada ⠿ para poder arrastrarse con el dedo.
+  function propsAgarradera(lista, indice, texto) {
+    return {
+      onPointerDown: (e) => iniciarTactil(e, lista, indice, texto),
+      onContextMenu: (e) => e.preventDefault(),
+    };
+  }
+
+  // Si se cambia de pestaña a medio arrastre, que no quede nada colgado.
+  useEffect(
+    () => () => {
+      const t = tactilRef.current;
+      if (!t) return;
+      tactilRef.current = null;
+      window.removeEventListener('pointermove', t.alMover);
+      window.removeEventListener('pointerup', t.alSoltar);
+      window.removeEventListener('pointercancel', t.alCancelar);
+      if (t.raf) cancelAnimationFrame(t.raf);
+      document.body.classList.remove('orden-arrastrando-tactil');
+    },
+    []
+  );
+
   // ---- Arrastrar y soltar (en computadora) ----
   function propsArrastre(lista, indice, alSoltar) {
     return {
       draggable: !guardando,
       onDragStart: (e) => {
+        // Si ya se está arrastrando con el dedo, que el celular no arranque
+        // además su propio arrastre (algunos lo hacen al dejar presionado).
+        if (tactilRef.current) {
+          e.preventDefault();
+          return;
+        }
         setArrastre({ lista, indice });
         e.dataTransfer.effectAllowed = 'move';
         try { e.dataTransfer.setData('text/plain', String(indice)); } catch { /* algunos navegadores */ }
@@ -3984,8 +4133,15 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
   // Un renglón de producto (se usa igual en una categoría y en Ofertas).
   function filaProducto({ p, i, total, lista, clave, onMover }) {
     return (
-      <li key={p.ID} id={`orden-${clave}`} className={clasesFila(lista, i, clave)} {...propsArrastre(lista, i, (desde, hasta) => onMover(desde, hasta))}>
-        <span className="orden-agarradera" aria-hidden="true" title="Arrastra para mover">⠿</span>
+      <li
+        key={p.ID}
+        id={`orden-${clave}`}
+        className={clasesFila(lista, i, clave)}
+        data-orden-lista={lista}
+        data-orden-indice={i}
+        {...propsArrastre(lista, i, (desde, hasta) => onMover(desde, hasta))}
+      >
+        <span className="orden-agarradera" aria-hidden="true" title="Arrastra para mover" {...propsAgarradera(lista, i, p.Nombre || 'Producto')}>⠿</span>
         <CampoPosicion posicion={i + 1} total={total} onMover={(destino) => onMover(i, destino)} etiqueta={p.Nombre} />
         <div className="orden-botones-mover">
           <button type="button" className="orden-mover-btn" onClick={() => onMover(i, i - 1)} disabled={i === 0 || guardando} title="Subir un lugar" aria-label="Subir un lugar">
@@ -4132,11 +4288,13 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
   const ofertasContraida = !textoBuscadoOrden && contraidas.has(CLAVE_OFERTAS);
 
   return (
-    <div className="orden-catalogo">
+    <div className="orden-catalogo" ref={raizOrdenRef}>
+      {/* Etiqueta que sigue al dedo mientras se arrastra en celular. */}
+      <div ref={fantasmaRef} className="orden-fantasma" aria-hidden="true" style={{ display: 'none' }} />
       <p className="muted">
         Acomoda todo lo que quieras y al final dale <strong>💾 Guardar orden</strong> (un solo guardado). Para mover
         algo: escribe el número de lugar en su cajita y da Enter (por ejemplo, del 10 al 2 de un jalón), usa ▲ ▼ para
-        moverlo de uno en uno, o arrástralo desde ⠿. Lo que muevas se queda resaltado en su lugar nuevo.
+        moverlo de uno en uno, o arrástralo desde ⠿ (con el mouse o con el dedo en el celular). Lo que muevas se queda resaltado en su lugar nuevo.
       </p>
 
       <div className="orden-barra-superior">
@@ -4293,6 +4451,8 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
             key={grupo.nombre}
             id={`orden-c:${grupo.nombre}`}
             className={clasesCategoria}
+            data-orden-lista="categorias"
+            data-orden-indice={indiceCategoria}
             onDragOver={arrastreCategoria.onDragOver}
             onDrop={arrastreCategoria.onDrop}
           >
@@ -4302,7 +4462,14 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
               onDragStart={arrastreCategoria.onDragStart}
               onDragEnd={arrastreCategoria.onDragEnd}
             >
-              <span className="orden-agarradera" aria-hidden="true" title="Arrastra para mover la categoría">⠿</span>
+              <span
+                className="orden-agarradera"
+                aria-hidden="true"
+                title="Arrastra para mover la categoría"
+                {...propsAgarradera('categorias', indiceCategoria, grupo.nombre)}
+              >
+                ⠿
+              </span>
               <CampoPosicion
                 posicion={indiceCategoria + 1}
                 total={gruposLocal.length}
