@@ -354,6 +354,23 @@ function conLimiteDeTiempo(promesa, etiqueta, opciones = {}) {
 
 const ESTADOS_PEDIDO = ['Sin solicitud', 'En proceso', 'Pagado', 'Reembolsado', 'Cancelado'];
 
+// Nombre que SE VE en pantalla de cada Estado (2026-10-01, Claudia: "en
+// lugar de que diga Sin solicitud que diga Pendiente"). Solo cambia el
+// letrero: por dentro (en la hoja de Google y en "Code.gs") el estado se
+// sigue llamando "Sin solicitud", así no hay que tocar los 90 pedidos que
+// ya lo tienen guardado ni las reglas del servidor. Si algún día se quiere
+// otro nombre, basta cambiarlo aquí.
+const ETIQUETA_ESTADO_PEDIDO = { 'Sin solicitud': 'Pendiente' };
+function etiquetaEstadoPedido(estado) {
+  return ETIQUETA_ESTADO_PEDIDO[estado] || estado;
+}
+// Lo mismo para textos que llegan ya escritos desde el servidor (el detalle
+// de la Bitácora, un mensaje de error): donde digan "Sin solicitud" se
+// muestra "Pendiente".
+function conEtiquetasDeEstado(texto) {
+  return String(texto ?? '').replace(/Sin solicitud/g, 'Pendiente');
+}
+
 // Flujo de Estados de Pedido (2026-09-29, diseño explícito de Claudia):
 // desde cada Estado solo se puede avanzar a los que se listan aquí — nunca
 // saltarse pasos ni regresar a mano. Mismo mapa que ya se validaba en
@@ -1332,7 +1349,7 @@ export default function Dashboard() {
           setMensaje('Tu solicitud de reembolso se envió al Administrador — en cuanto la confirme o la cancele, este pedido pasará a "Reembolsado" (o se quedará como está).');
         }
       })
-      .catch((err) => setMensaje(`Error al actualizar pedido: ${err.message}`))
+      .catch((err) => setMensaje(`Error al actualizar pedido: ${conEtiquetasDeEstado(err.message)}`))
       .finally(terminarCarga);
   }
 
@@ -2498,7 +2515,7 @@ export default function Dashboard() {
                 className={`resumen-btn ${filtroEstado === estadoOpcion ? 'activo' : ''}`}
                 onClick={() => setFiltroEstado(estadoOpcion)}
               >
-                <span>{estadoOpcion}</span>
+                <span>{etiquetaEstadoPedido(estadoOpcion)}</span>
                 <strong>{conteoPorEstado[estadoOpcion] || 0}</strong>
               </button>
             ))}
@@ -5642,7 +5659,7 @@ function BitacoraTab({ bitacora }) {
     movimientoEnRangoDeFecha(b, desde, hasta) &&
     (!filtroUsuario || normalizarParaFiltro(b.Usuario) === filtroUsuario) &&
     (!filtroAccion || normalizarParaFiltro(b.Accion) === filtroAccion) &&
-    (!textoBuscado || normalizarParaFiltro(b.Detalle).includes(textoBuscado))
+    (!textoBuscado || normalizarParaFiltro(conEtiquetasDeEstado(b.Detalle)).includes(textoBuscado))
   ));
 
   const hayFiltroFechas = !!(desde || hasta);
@@ -5742,7 +5759,7 @@ function BitacoraTab({ bitacora }) {
                     línea se vea compacta por default y, con un clic, se
                     pueda leer el detalle completo envuelto en varias líneas
                     dentro de la misma celda. */}
-                <td><CeldaTruncada texto={b.Detalle || '—'} /></td>
+                <td><CeldaTruncada texto={b.Detalle ? conEtiquetasDeEstado(b.Detalle) : '—'} /></td>
               </tr>
             ))}
           </tbody>
@@ -7292,7 +7309,7 @@ function PedidoRow({
     if (cambioCantidad) cambios.push(`Cantidad: ${pedido.Cantidad} → ${cantidad || 0}`);
     if (cambioTelefono) cambios.push(`Teléfono: "${telefonoOriginal || 'vacío'}" → "${telefono || 'vacío'}"`);
     if (cambioNotas) cambios.push(`Notas: "${notasOriginal || 'sin nota'}" → "${notas || 'sin nota'}"`);
-    if (cambioEstado) cambios.push(`Estado: ${pedido.Estado} → ${estado}`);
+    if (cambioEstado) cambios.push(`Estado: ${etiquetaEstadoPedido(pedido.Estado)} → ${etiquetaEstadoPedido(estado)}`);
     const descripcion = cambios.length > 0 ? `Pedido de ${pedido.Cliente} — ${cambios.join(' · ')}` : '';
     onDirtyChange(llave, sinGuardar, descripcion);
     return () => onDirtyChange(llave, false, '');
@@ -7404,7 +7421,7 @@ function PedidoRow({
                 ofrece aunque no se tenga el permiso directo: guardarlo manda
                 una SOLICITUD al Administrador. */}
             {opcionesEstadoPedido(pedido.Estado).map((opcion) => (
-              <option key={opcion}>{opcion}</option>
+              <option key={opcion} value={opcion}>{etiquetaEstadoPedido(opcion)}</option>
             ))}
           </select>
           {!puedoEditarPedido && (
