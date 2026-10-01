@@ -2786,29 +2786,47 @@ select:disabled {
   width: 1%;
   text-align: center;
 }
-/* Ajuste (2026-10-01, Claudia con captura: "las columnas de Fecha agregado
-   y Hora agregado son demasiado anchas para lo que tienen"). Mismo motivo
-   que arriba: en una pantalla ancha la tabla repartía el espacio sobrante
-   entre TODAS las columnas, también las que solo traen una fecha o un
-   número. Ahora Fecha, Hora, Precio, Stock, Actualizar stock y Acciones
-   también se quedan del ancho justo de su contenido, y todo el espacio
-   que sobra se va a Producto, Categoría y Código — que son las que sí lo
-   aprovechan (nombres largos que antes se recortaban con "…"). */
+/* Anchos de la tabla de Stock (2026-10-01, dos ajustes de Claudia con
+   capturas en pantalla ancha):
+   1) "Fecha agregado y Hora agregado son demasiado anchas para lo que
+      tienen" — la tabla mide 100% y repartía el espacio sobrante entre las
+      columnas.
+   2) Al mandar ese sobrante a Producto/Categoría/Código, esas tres "se
+      estiran de más" (un nombre larguísimo llenaba media pantalla).
+   Solución: TODAS las columnas de verdad miden solo lo que ocupa su
+   contenido ("width: 1%"); Producto, Categoría y Código además tienen un
+   tope de ancho — lo que pase del tope se recorta con "…" y se abre con un
+   clic, como siempre. El espacio que sobre en una pantalla ancha se queda
+   en una columna vacía de relleno al final (".stock-col-relleno", ver
+   Dashboard.jsx), que en pantallas angostas mide 0. */
 .stock-table th:nth-child(1), .stock-table td:nth-child(1),
 .stock-table th:nth-child(2), .stock-table td:nth-child(2),
+.stock-table th:nth-child(3), .stock-table td:nth-child(3),
+.stock-table th:nth-child(4), .stock-table td:nth-child(4),
+.stock-table th:nth-child(5), .stock-table td:nth-child(5),
 .stock-table th:nth-child(6), .stock-table td:nth-child(6),
 .stock-table th:nth-child(7), .stock-table td:nth-child(7),
 .stock-table th:nth-child(10), .stock-table td:nth-child(10),
 .stock-table th:nth-child(11), .stock-table td:nth-child(11) {
   width: 1%;
 }
-.stock-table th:nth-child(3),
-.stock-table td:nth-child(3) {
-  width: 46%;
+.stock-table .stock-col-relleno {
+  width: auto;
+  padding: 0;
 }
-.stock-table th:nth-child(4), .stock-table td:nth-child(4),
-.stock-table th:nth-child(5), .stock-table td:nth-child(5) {
-  width: 27%;
+/* Los topes crecen poquito a poco con el ancho de la pantalla (más ancho =
+   un tope algo más generoso), pero siempre son topes: Producto nunca pasa
+   de 300px, Categoría de 160px y Código de 190px. */
+.stock-table th:nth-child(3), .stock-table td:nth-child(3) { max-width: clamp(140px, calc(13vw + (100vw - 1300px) * 0.08), 300px); }
+.stock-table th:nth-child(4), .stock-table td:nth-child(4) { max-width: clamp(110px, 8.5vw, 160px); }
+.stock-table th:nth-child(5), .stock-table td:nth-child(5) { max-width: clamp(90px, calc(8.5vw + (100vw - 1300px) * 0.04), 190px); }
+/* En pantallas bien anchas, parte del espacio sobrante se usa para darle un
+   poco más de aire a TODAS las columnas por igual (separación entre
+   columnas), en vez de dejarlo todo en blanco al final. */
+.stock-table th:not(.stock-col-relleno),
+.stock-table td:not(.stock-col-relleno) {
+  padding-left: clamp(0.35rem, calc(0.35rem + (100vw - 1400px) * 0.02), 0.9rem);
+  padding-right: clamp(0.35rem, calc(0.35rem + (100vw - 1400px) * 0.02), 0.9rem);
 }
 .stock-duenos-lista { min-width: 0; }
 .stock-duenos-lista li.stock-dueno-linea {
