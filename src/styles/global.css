@@ -3308,6 +3308,50 @@ select:disabled {
 /* Arrastrar CATEGORÍAS (2026-10-01, pedido por Claudia): igual que los
    productos. Se agarra del encabezado; la raya verde gruesa marca dónde va
    a quedar al soltarla (arriba o abajo de la categoría sobre la que estás). */
+/* Arrastrar con el DEDO (2026-10-01, Claudia: "en celular sí debería poder
+   arrastrar"). "touch-action: none" en el ⠿ es lo que permite agarrarlo con
+   el dedo sin que la página se desplace; en el resto del renglón el dedo
+   sigue desplazando la página como siempre. */
+.orden-agarradera {
+  touch-action: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+/* En pantallas táctiles el ⠿ es más grande, para atinarle fácil. */
+@media (pointer: coarse) {
+  .orden-agarradera {
+    font-size: 1.35rem;
+    padding: 0.55rem 0.5rem;
+    margin: -0.4rem 0 -0.4rem -0.35rem;
+    border-radius: 8px;
+    background: #eef1f4;
+    color: #4b5563;
+  }
+  .orden-categoria-header .orden-agarradera { font-size: 1.45rem; }
+}
+/* Etiqueta con el nombre que sigue al dedo mientras se arrastra. */
+.orden-fantasma {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 60;
+  pointer-events: none;
+  max-width: min(70vw, 320px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: var(--brand);
+  color: white;
+  font-weight: 700;
+  font-size: 0.9rem;
+  padding: 0.4rem 0.7rem;
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+}
+body.orden-arrastrando-tactil {
+  user-select: none;
+  -webkit-user-select: none;
+}
 .orden-categoria-header[draggable="true"] { cursor: grab; }
 .orden-categoria-header .orden-agarradera { font-size: 1.15rem; }
 .orden-categoria-box.orden-categoria-destino-arriba { box-shadow: 0 -5px 0 0 var(--brand); }
