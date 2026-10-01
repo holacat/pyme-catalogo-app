@@ -19,6 +19,7 @@ import {
   eliminarProducto,
     actualizarOrdenMultiple,
   actualizarOrdenCategorias,
+  actualizarOrdenOfertas,
   renombrarCategoria,
   eliminarCategoria,
   crearUsuario,
@@ -2530,6 +2531,8 @@ export default function Dashboard() {
 
       {tab === 'orden' && puedeVer('orden') && (
         <OrdenTab
+          key={`orden-${resetToken}`}
+          onDirtyChange={marcarSucio}
           productos={productos}
           opciones={opciones}
           sesionToken={sesionToken}
@@ -3461,22 +3464,134 @@ function agruparParaOrden(productos, categoriasPredeterminadas, categoriasOculta
   return conExplicito.concat(sinExplicitoConProductos, categoriasVacias);
 }
 
-// Pestaña para acomodar en qué orden se ven los productos en el catálogo
-// público, dentro de su propia categoría (con botones ▲ / ▼, más sencillos
-// de usar con precisión que arrastrar); para renombrar una categoría
-// completa de un jalón; para ocultarla/mostrarla del catálogo sin tocar sus
-// productos; para agregar una categoría nueva vacía; y para quitar o borrar
-// una categoría completa (con o sin sus productos).
-function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, terminarCarga }) {
+// ---- Ayudas de "Orden del catálogo" (rediseño 2026-10-01) ----
+// Misma regla que la tarjeta del catálogo (ProductCard.jsx,
+// "obtenerInfoOferta") para saber si un producto sale en la zona 🔥 Ofertas.
+function productoEnOferta(p) {
+  const precio = Number(p.Precio) || 0;
+  const oferta = Number(p.PrecioOferta) || 0;
+  const marcado = p.EnOferta === true || ['TRUE', 'SI'].includes(String(p.EnOferta).toUpperCase());
+  return (oferta > 0 && oferta < precio) || marcado;
+}
+
+// Orden del carrusel de Ofertas — la MISMA regla que usa Catalog.jsx: lo
+// que ya se acomodó a mano va en ese orden; las ofertas nuevas que todavía
+// no se han acomodado van al principio, la más nueva primero.
+function ordenarOfertas(productos, ofertasOrden) {
+  const orden = (ofertasOrden || []).map(String);
+  const posicion = (p) => orden.indexOf(String(p.ID));
+  return productos
+    .filter(productoEnOferta)
+    .slice()
+    .sort((a, b) => {
+      const pa = posicion(a);
+      const pb = posicion(b);
+      if (pa === -1 && pb === -1) return new Date(b.FechaCreacion) - new Date(a.FechaCreacion);
+      if (pa === -1) return -1;
+      if (pb === -1) return 1;
+      return pa - pb;
+    });
+}
+
+function moverEnLista(lista, desde, hasta) {
+  const copia = lista.slice();
+  const [movido] = copia.splice(desde, 1);
+  copia.splice(hasta, 0, movido);
+  return copia;
+}
+
+// Cajita con el número de lugar (1, 2, 3…): se escribe el lugar a donde se
+// quiere mandar y se da Enter — así algo pasa del lugar 10 al 2 de un jalón,
+// sin darle 8 veces a la flechita.
+function CampoPosicion({ posicion, total, onMover, etiqueta }) {
+  const [texto, setTexto] = useState(String(posicion));
+  useEffect(() => {
+    setTexto(String(posicion));
+  }, [posicion]);
+  function aplicar() {
+    const n = Math.round(Number(texto));
+    if (!texto || Number.isNaN(n)) {
+      setTexto(String(posicion));
+      return;
+    }
+    const destino = Math.max(1, Math.min(total, n));
+    if (destino === posicion) setTexto(String(posicion));
+    else onMover(destino - 1);
+  }
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      className="orden-posicion"
+      value={texto}
+      onChange={(e) => setTexto(e.target.value.replace(/[^0-9]/g, '').slice(0, 4))}
+      onFocus={(e) => e.target.select()}
+      onBlur={aplicar}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          e.target.blur();
+        }
+      }}
+      title={`Lugar ${posicion} de ${total} — escribe otro número y da Enter para mandarlo directo a ese lugar`}
+      aria-label={`${etiqueta}: lugar ${posicion} de ${total}. Escribe otro número y da Enter para moverlo`}
+    />
+  );
+}
+
+// Pestaña "Orden del catálogo" — REDISEÑADA el 2026-10-01 (pendientes P8 y
+// P11 de Claudia). Antes cada clic en una flechita guardaba de inmediato
+// (un guardado + un renglón de Bitácora POR CADA lugar que se movía algo), y
+// como la pantalla se volvía a acomodar con datos del servidor mientras
+// tanto, a veces el producto "subía, bajaba y volvía a subir". Ahora:
+//   1. Se acomoda TODO lo que se quiera primero (nada se guarda todavía) y
+//      al final se da UN solo "💾 Guardar orden" — un solo guardado y un
+//      solo renglón de Bitácora que dice qué pasó de qué lugar a cuál.
+//   2. Para mover: escribir el número de lugar y dar Enter (del 10 al 2 de
+//      un jalón), las flechitas ▲ ▼ de uno en uno, o arrastrar (en compu).
+//   3. Lo que se movió se queda resaltado en su lugar nuevo.
+//   4. Mientras haya cambios sin guardar, la pantalla NO se vuelve a
+//      acomodar sola con datos del servidor (se acabó el sube-baja).
+//   5. Al guardar sale un aviso grande de "Guardando el orden…" al centro,
+//      visible sin importar en qué parte de la página se esté.
+//   6. Zona "🔥 Ofertas": aparece aquí arriba para ocultarla/mostrarla y
+//      para acomodar el orden de su carrusel.
+//   7. Buscador para encontrar rápido un producto o categoría, y botones
+//      para contraer/expandir las categorías.
+// Renombrar, ocultar, agregar y eliminar categoría siguen igual que antes
+// (se guardan al momento), pero se bloquean mientras haya cambios de orden
+// sin guardar, para no mezclar las dos cosas.
+function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, terminarCarga, onDirtyChange }) {
   const categoriasPredeterminadas = opciones.categoria || [];
   const categoriasOcultas = opciones.categoriaOculta || [];
   const categoriaOrdenExplicito = opciones.categoriaOrden || [];
+  const ofertasOrdenGuardado = opciones.ofertasOrden || [];
+  const zonaOfertasOculta = (opciones.ofertasOculta || []).length > 0;
 
   const [gruposLocal, setGruposLocal] = useState(() =>
     agruparParaOrden(productos, categoriasPredeterminadas, categoriasOcultas, categoriaOrdenExplicito)
   );
+  const [ofertasLocal, setOfertasLocal] = useState(() => ordenarOfertas(productos, ofertasOrdenGuardado));
   const [guardando, setGuardando] = useState(false);
   const [mensaje, setMensaje] = useState('');
+
+  // Qué se ha movido y todavía no se guarda.
+  const [categoriasTocadas, setCategoriasTocadas] = useState(() => new Set());
+  const [ordenCategoriasTocado, setOrdenCategoriasTocado] = useState(false);
+  const [ofertasTocadas, setOfertasTocadas] = useState(false);
+  // De dónde salió cada cosa que se movió (para el resumen de la Bitácora):
+  // clave "p:<id>" | "c:<nombre>" | "o:<id>" -> { nombre, categoria, desde }
+  const [movidos, setMovidos] = useState(() => new Map());
+  const hayCambios = categoriasTocadas.size > 0 || ordenCategoriasTocado || ofertasTocadas;
+  const hayCambiosRef = useRef(false);
+  hayCambiosRef.current = hayCambios || guardando;
+
+  const [resaltado, setResaltado] = useState('');
+  const [arrastre, setArrastre] = useState(null); // { lista, indice }
+  const [sobre, setSobre] = useState(null); // { lista, indice }
+  const [busquedaOrden, setBusquedaOrden] = useState('');
+  const [contraidas, setContraidas] = useState(() => new Set());
+  const [cambiandoZonaOfertas, setCambiandoZonaOfertas] = useState(false);
 
   const [renombrando, setRenombrando] = useState(null); // nombre de categoría actual, o null
   const [nombreNuevo, setNombreNuevo] = useState('');
@@ -3496,115 +3611,284 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
   const [confirmoBorrarProductos, setConfirmoBorrarProductos] = useState(false);
   const [guardandoEliminar, setGuardandoEliminar] = useState(false);
 
-  // Si los productos o las opciones (categorías nuevas, renombradas,
-  // ocultas) cambian desde fuera, se vuelve a acomodar la lista con los
-  // datos más recientes.
-    useEffect(() => {
+  function acomodarDesdeServidor() {
     setGruposLocal(agruparParaOrden(productos, categoriasPredeterminadas, categoriasOcultas, categoriaOrdenExplicito));
+    setOfertasLocal(ordenarOfertas(productos, ofertasOrdenGuardado));
+  }
+
+  // Si los productos o las opciones cambian desde fuera, se vuelve a
+  // acomodar la lista con los datos más recientes — PERO solo si no hay
+  // cambios de orden sin guardar (ni un guardado en curso): si no, los datos
+  // del servidor (todavía con el orden viejo) deshacían en pantalla lo que
+  // se acababa de mover.
+  useEffect(() => {
+    if (hayCambiosRef.current) return;
+    acomodarDesdeServidor();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productos, opciones]);
 
-  // Sube (dirección -1) o baja (dirección +1) un producto UN lugar dentro
-  // de su categoría. Mucho más preciso que arrastrar: cada clic mueve
-  // exactamente un lugar, sin riesgo de soltarlo en la fila equivocada.
-   function moverProducto(nombreCategoria, indice, direccion) {
-    setGruposLocal((prev) => {
-      const nuevos = prev.map((g) => ({ ...g, productos: g.productos.slice() }));
-      const grupo = nuevos.find((g) => g.nombre === nombreCategoria);
-      if (!grupo) return prev;
+  // Avisa al Dashboard que hay cambios sin guardar (para el aviso de "no te
+  // salgas sin guardar" y para pausar la actualización automática).
+  useEffect(() => {
+    onDirtyChange?.(
+      'orden-catalogo',
+      hayCambios,
+      hayCambios ? `Orden del catálogo: ${movidos.size} movimiento(s) sin guardar — dale "💾 Guardar orden"` : ''
+    );
+    return () => onDirtyChange?.('orden-catalogo', false, '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hayCambios, movidos.size]);
 
-      const destino = indice + direccion;
-      if (destino < 0 || destino >= grupo.productos.length) return prev;
+  // Lleva la pantalla a donde quedó lo que se acaba de mover.
+  useEffect(() => {
+    if (!resaltado) return undefined;
+    const el = document.getElementById(`orden-${resaltado}`);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    const t = setTimeout(() => setResaltado(''), 2500);
+    return () => clearTimeout(t);
+  }, [resaltado]);
 
-      const [movido] = grupo.productos.splice(indice, 1);
-      grupo.productos.splice(destino, 0, movido);
-
-      // Bug reportado por Claudia (2026-09): antes, la Bitácora solo decía
-      // "N producto(s) reordenado(s)" (el total de la categoría, porque se
-      // renumera toda de un jalón), lo cual era confuso al mover UN solo
-      // producto. Aquí armamos un resumen explícito — qué producto se movió
-      // y respecto a cuál otro quedó — y se lo mandamos al backend para que
-      // lo use en la Bitácora en vez de solo el conteo.
-      const nombreMovido = movido.Nombre || 'Este producto';
-      let resumen;
-      if (direccion > 0) {
-        const vecinoArriba = grupo.productos[destino - 1];
-        resumen = vecinoArriba
-          ? `${nombreMovido}: se movió debajo de "${vecinoArriba.Nombre || 'otro producto'}" (categoría ${nombreCategoria})`
-          : `${nombreMovido}: ahora es el último de la categoría ${nombreCategoria}`;
-      } else {
-        const vecinoAbajo = grupo.productos[destino + 1];
-        resumen = vecinoAbajo
-          ? `${nombreMovido}: se movió arriba de "${vecinoAbajo.Nombre || 'otro producto'}" (categoría ${nombreCategoria})`
-          : `${nombreMovido}: ahora es el primero de la categoría ${nombreCategoria}`;
-      }
-
-      guardarOrdenDeCategoria(grupo, resumen);
-      return nuevos;
-    });
+  // Foto de cómo estaba TODO antes del primer movimiento sin guardar, para
+  // que el resumen de la Bitácora diga el lugar ORIGINAL de cada cosa (y no
+  // el lugar a donde la habían empujado otros movimientos de la misma tanda).
+  const antesDeMoverRef = useRef(null);
+  function lugarOriginal(tipo, id, categoria, respaldo) {
+    const foto = antesDeMoverRef.current;
+    if (!foto) return respaldo;
+    let i = -1;
+    if (tipo === 'p') {
+      const g = foto.grupos.find((x) => x.nombre === categoria);
+      i = g ? g.productos.findIndex((p) => String(p.ID) === String(id)) : -1;
+    } else if (tipo === 'c') {
+      i = foto.grupos.findIndex((g) => g.nombre === id);
+    } else {
+      i = foto.ofertas.findIndex((p) => String(p.ID) === String(id));
+    }
+    return i === -1 ? respaldo : i + 1;
+  }
+  function anotarMovido(clave, info) {
+    if (!hayCambios) antesDeMoverRef.current = { grupos: gruposLocal, ofertas: ofertasLocal };
+    const tipo = clave.slice(0, 1);
+    const desde = lugarOriginal(tipo, clave.slice(2), info.categoria, info.desde);
+    setMovidos((prev) => (prev.has(clave) ? prev : new Map(prev).set(clave, { ...info, desde })));
   }
 
-  // Renumera 1, 2, 3... toda la categoría según cómo haya quedado
-  // acomodada, y manda todos esos números juntos en una sola llamada.
-  // `resumen` (texto legible de qué producto se movió y a dónde) se manda
-  // aparte para que la Bitácora sea explícita en vez de solo un conteo.
-   function guardarOrdenDeCategoria(grupo, resumen) {
-    const cambios = grupo.productos.map((p, i) => ({ productoId: p.ID, orden: i + 1 }));
+  // Mueve un producto DENTRO de su categoría, del lugar "desde" al "hasta"
+  // (los dos contando desde 0). Nada se guarda todavía.
+  function moverProductoA(nombreCategoria, desde, hasta) {
+    const grupo = gruposLocal.find((g) => g.nombre === nombreCategoria);
+    if (!grupo) return;
+    const destino = Math.max(0, Math.min(grupo.productos.length - 1, hasta));
+    if (destino === desde) return;
+    const p = grupo.productos[desde];
+    anotarMovido(`p:${p.ID}`, { nombre: p.Nombre || 'Producto', categoria: nombreCategoria, desde: desde + 1 });
+    setGruposLocal((prev) =>
+      prev.map((g) => (g.nombre === nombreCategoria ? { ...g, productos: moverEnLista(g.productos, desde, destino) } : g))
+    );
+    setCategoriasTocadas((prev) => new Set(prev).add(nombreCategoria));
+    setResaltado(`p:${p.ID}`);
+  }
+
+  // Mueve una CATEGORÍA completa entre las demás.
+  function moverCategoriaA(desde, hasta) {
+    const destino = Math.max(0, Math.min(gruposLocal.length - 1, hasta));
+    if (destino === desde) return;
+    const g = gruposLocal[desde];
+    anotarMovido(`c:${g.nombre}`, { nombre: g.nombre, desde: desde + 1 });
+    setGruposLocal((prev) => moverEnLista(prev, desde, destino));
+    setOrdenCategoriasTocado(true);
+    setResaltado(`c:${g.nombre}`);
+  }
+
+  // Mueve un producto dentro del carrusel de la zona 🔥 Ofertas.
+  function moverOfertaA(desde, hasta) {
+    const destino = Math.max(0, Math.min(ofertasLocal.length - 1, hasta));
+    if (destino === desde) return;
+    const p = ofertasLocal[desde];
+    anotarMovido(`o:${p.ID}`, { nombre: p.Nombre || 'Producto', desde: desde + 1 });
+    setOfertasLocal((prev) => moverEnLista(prev, desde, destino));
+    setOfertasTocadas(true);
+    setResaltado(`o:${p.ID}`);
+  }
+
+  // Texto para la Bitácora: qué pasó de qué lugar a cuál (solo lo que de
+  // verdad terminó en un lugar distinto al que tenía).
+  function resumenDe(tipo) {
+    const partes = [];
+    movidos.forEach((info, clave) => {
+      if (!clave.startsWith(`${tipo}:`)) return;
+      const id = clave.slice(2);
+      let hasta = -1;
+      if (tipo === 'p') {
+        const grupo = gruposLocal.find((g) => g.nombre === info.categoria);
+        hasta = grupo ? grupo.productos.findIndex((p) => String(p.ID) === id) + 1 : -1;
+      } else if (tipo === 'c') {
+        hasta = gruposLocal.findIndex((g) => g.nombre === id) + 1;
+      } else {
+        hasta = ofertasLocal.findIndex((p) => String(p.ID) === id) + 1;
+      }
+      if (hasta <= 0 || hasta === info.desde) return;
+      partes.push(
+        tipo === 'p'
+          ? `"${info.nombre}": lugar ${info.desde} → ${hasta} (${info.categoria})`
+          : `"${info.nombre}": lugar ${info.desde} → ${hasta}`
+      );
+    });
+    if (partes.length === 0) return '';
+    const visibles = partes.slice(0, 8).join('; ');
+    const prefijo = tipo === 'p' ? 'Productos' : tipo === 'c' ? 'Categorías' : 'Zona de Ofertas';
+    return `${prefijo} — ${visibles}${partes.length > 8 ? `; y ${partes.length - 8} más` : ''}`;
+  }
+
+  function limpiarCambios() {
+    setCategoriasTocadas(new Set());
+    setOrdenCategoriasTocado(false);
+    setOfertasTocadas(false);
+    setMovidos(new Map());
+  }
+
+  function descartarCambios() {
+    limpiarCambios();
+    acomodarDesdeServidor();
+  }
+
+  // UN solo guardado para todo lo que se movió (máximo una llamada por tipo:
+  // productos, categorías, ofertas — cada una deja UN renglón de Bitácora).
+  async function guardarTodo() {
+    if (!hayCambios || guardando) return;
     setGuardando(true);
     setMensaje('');
-    // Arreglo (2026-09-28, pedido por Claudia): "Orden del catálogo" nunca
-    // había estado conectado al pacman (indicador de carga global) — todas
-    // sus acciones (mover, renombrar, ocultar, agregar y eliminar
-    // categoría) solo tenían su propio texto/botón local de "Guardando…" o
-    // "Aplicando…", fácil de perder de vista, sobre todo en la acción de
-    // "Eliminar categoría y sus productos" que puede tardar más. Ahora
-    // TODAS avisan también al pacman, igual que Stock/Pedidos.
     iniciarCarga?.();
-    actualizarOrdenMultiple({ sesionToken, cambios, resumen })
+    try {
+      if (categoriasTocadas.size > 0) {
+        const cambios = [];
+        gruposLocal
+          .filter((g) => categoriasTocadas.has(g.nombre))
+          .forEach((g) => g.productos.forEach((p, i) => cambios.push({ productoId: p.ID, orden: i + 1 })));
+        await actualizarOrdenMultiple({ sesionToken, cambios, resumen: resumenDe('p') || undefined });
+      }
+      if (ordenCategoriasTocado) {
+        await actualizarOrdenCategorias({
+          sesionToken,
+          categorias: gruposLocal.map((g) => g.nombre),
+          resumen: resumenDe('c') || undefined,
+        });
+      }
+      if (ofertasTocadas) {
+        await actualizarOrdenOfertas({
+          sesionToken,
+          productoIds: ofertasLocal.map((p) => p.ID),
+          resumen: resumenDe('o') || undefined,
+        });
+      }
+      limpiarCambios();
+      await onCambio();
+    } catch (err) {
+      setMensaje(`Error al guardar el orden: ${err.message} — tus cambios siguen aquí, vuelve a darle "Guardar orden".`);
+    } finally {
+      setGuardando(false);
+      terminarCarga?.();
+    }
+  }
+
+  // Ocultar/mostrar la zona 🔥 Ofertas completa del catálogo (los productos
+  // siguen en su categoría normal y siguen con su precio de oferta; solo se
+  // quita/pone el carrusel de "Ofertas" de arriba).
+  function toggleZonaOfertas() {
+    setCambiandoZonaOfertas(true);
+    setMensaje('');
+    iniciarCarga?.();
+    const promesa = zonaOfertasOculta
+      ? eliminarOpcion({ sesionToken, campo: 'ofertasOculta', valor: 'SI' })
+      : agregarOpcion({ sesionToken, campo: 'ofertasOculta', valor: 'SI' });
+    promesa
       .then(() => onCambio())
-      .catch((err) => setMensaje(`Error al guardar el orden: ${err.message}`))
+      .catch((err) => setMensaje(`Error al ${zonaOfertasOculta ? 'mostrar' : 'ocultar'} la zona de Ofertas: ${err.message}`))
       .finally(() => {
-        setGuardando(false);
+        setCambiandoZonaOfertas(false);
         terminarCarga?.();
       });
   }
 
-  // Sube (dirección -1) o baja (dirección +1) una CATEGORÍA COMPLETA un
-  // lugar entre las demás — no confundir con moverProducto, que mueve un
-  // producto DENTRO de su categoría. Bug reportado por Claudia (2026-09):
-  // no existía ninguna forma directa de decidir en qué orden aparecen las
-  // categorías entre sí en el catálogo público. Como el backend guarda
-  // ese orden como una lista completa (ver actualizarOrdenCategorias en
-  // api.js/Code.gs), aquí se manda SIEMPRE la lista de todas las
-  // categorías ya en su nuevo acomodo, igual que guardarOrdenDeCategoria
-  // manda todos los productos de una categoría de un jalón.
-  function moverCategoria(indice, direccion) {
-    setGruposLocal((prev) => {
-      const destino = indice + direccion;
-      if (destino < 0 || destino >= prev.length) return prev;
-
-      const nuevos = prev.slice();
-      const [movida] = nuevos.splice(indice, 1);
-      nuevos.splice(destino, 0, movida);
-
-      const vecina = direccion > 0 ? nuevos[destino - 1] : nuevos[destino + 1];
-      const resumen = vecina
-        ? `Categoría "${movida.nombre}": se movió ${direccion > 0 ? 'debajo' : 'arriba'} de "${vecina.nombre}"`
-        : `Categoría "${movida.nombre}": ahora es la ${direccion > 0 ? 'última' : 'primera'}`;
-
-      setGuardando(true);
-      setMensaje('');
-      iniciarCarga?.();
-      actualizarOrdenCategorias({ sesionToken, categorias: nuevos.map((g) => g.nombre), resumen })
-        .then(() => onCambio())
-        .catch((err) => setMensaje(`Error al guardar el orden de categorías: ${err.message}`))
-        .finally(() => {
-          setGuardando(false);
-          terminarCarga?.();
-        });
-
-      return nuevos;
+  function alternarContraida(nombre) {
+    setContraidas((prev) => {
+      const siguiente = new Set(prev);
+      if (siguiente.has(nombre)) siguiente.delete(nombre);
+      else siguiente.add(nombre);
+      return siguiente;
     });
+  }
+
+  // ---- Arrastrar y soltar (en computadora) ----
+  function propsArrastre(lista, indice, alSoltar) {
+    return {
+      draggable: !guardando,
+      onDragStart: (e) => {
+        setArrastre({ lista, indice });
+        e.dataTransfer.effectAllowed = 'move';
+        try { e.dataTransfer.setData('text/plain', String(indice)); } catch { /* algunos navegadores */ }
+      },
+      onDragOver: (e) => {
+        if (!arrastre || arrastre.lista !== lista) return;
+        e.preventDefault();
+        if (!sobre || sobre.lista !== lista || sobre.indice !== indice) setSobre({ lista, indice });
+      },
+      onDrop: (e) => {
+        e.preventDefault();
+        if (arrastre && arrastre.lista === lista && arrastre.indice !== indice) alSoltar(arrastre.indice, indice);
+        setArrastre(null);
+        setSobre(null);
+      },
+      onDragEnd: () => {
+        setArrastre(null);
+        setSobre(null);
+      },
+    };
+  }
+  function clasesFila(lista, indice, clave) {
+    return [
+      'orden-fila',
+      resaltado === clave && 'orden-fila-movida',
+      arrastre && arrastre.lista === lista && arrastre.indice === indice && 'orden-fila-arrastrando',
+      sobre && arrastre && sobre.lista === lista && sobre.indice === indice && arrastre.indice !== indice &&
+        (arrastre.indice < indice ? 'orden-fila-destino-abajo' : 'orden-fila-destino-arriba'),
+    ].filter(Boolean).join(' ');
+  }
+
+  // ---- Buscador ----
+  const textoBuscadoOrden = normalizarParaFiltro(busquedaOrden);
+  function coincideProducto(p) {
+    return normalizarParaFiltro([p.Nombre, p.CodigoPropio, p.Marca, p.Color].join(' ')).includes(textoBuscadoOrden);
+  }
+  const bloqueoPorCambios = hayCambios || guardando;
+  const tituloBloqueo = bloqueoPorCambios ? 'Primero guarda o descarta los cambios de orden' : undefined;
+
+  // Un renglón de producto (se usa igual en una categoría y en Ofertas).
+  function filaProducto({ p, i, total, lista, clave, onMover }) {
+    return (
+      <li key={p.ID} id={`orden-${clave}`} className={clasesFila(lista, i, clave)} {...propsArrastre(lista, i, (desde, hasta) => onMover(desde, hasta))}>
+        <span className="orden-agarradera" aria-hidden="true" title="Arrastra para mover">⠿</span>
+        <CampoPosicion posicion={i + 1} total={total} onMover={(destino) => onMover(i, destino)} etiqueta={p.Nombre} />
+        <div className="orden-botones-mover">
+          <button type="button" className="orden-mover-btn" onClick={() => onMover(i, i - 1)} disabled={i === 0 || guardando} title="Subir un lugar" aria-label="Subir un lugar">
+            ▲
+          </button>
+          <button type="button" className="orden-mover-btn" onClick={() => onMover(i, i + 1)} disabled={i === total - 1 || guardando} title="Bajar un lugar" aria-label="Bajar un lugar">
+            ▼
+          </button>
+        </div>
+        {primeraFoto(p.FotoURL) ? (
+          <img src={primeraFoto(p.FotoURL)} alt={p.Nombre} className="orden-thumb" draggable={false} />
+        ) : (
+          <div className="orden-thumb orden-thumb-vacia">Sin foto</div>
+        )}
+        <span className="orden-nombre">{p.Nombre}</span>
+        {!esProductoVisible(p) && <span className="badge badge-oculto">Oculto</span>}
+        <button type="button" className="orden-al-inicio" onClick={() => onMover(i, 0)} disabled={i === 0 || guardando} title="Mandarlo al primer lugar">
+          ↑ Al inicio
+        </button>
+      </li>
+    );
   }
 
   function abrirRenombrar(nombreActual) {
@@ -3707,121 +3991,218 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
       });
   }
 
+  const gruposVisibles = gruposLocal
+    .map((grupo, indiceCategoria) => {
+      const nombreCoincide = textoBuscadoOrden && normalizarParaFiltro(grupo.nombre).includes(textoBuscadoOrden);
+      const filas = grupo.productos
+        .map((p, i) => ({ p, i }))
+        .filter(({ p }) => !textoBuscadoOrden || nombreCoincide || coincideProducto(p));
+      return { grupo, indiceCategoria, filas, nombreCoincide };
+    })
+    .filter(({ filas, nombreCoincide }) => !textoBuscadoOrden || nombreCoincide || filas.length > 0);
+  const ofertasVisibles = ofertasLocal
+    .map((p, i) => ({ p, i }))
+    .filter(({ p }) => !textoBuscadoOrden || coincideProducto(p) || 'ofertas'.includes(textoBuscadoOrden));
+  const todasContraidas = gruposLocal.length > 0 && gruposLocal.every((g) => contraidas.has(g.nombre));
+
   return (
     <div className="orden-catalogo">
-          <p className="muted">
-        Usa las flechitas ▲ y ▼ chiquitas de cada producto para subirlo o bajarlo, un lugar a la
-        vez, dentro de su categoría. Usa las flechitas ▲ y ▼ grandes, junto al nombre de cada
-        categoría, para cambiar en qué orden aparecen las categorías completas entre sí (cuál se
-        ve primero, cuál al final) en el catálogo público. En ambos casos el cambio se guarda
-        solo, no hace falta darle a ningún botón de "Guardar".
+      <p className="muted">
+        Acomoda todo lo que quieras y al final dale <strong>💾 Guardar orden</strong> (un solo guardado). Para mover
+        algo: escribe el número de lugar en su cajita y da Enter (por ejemplo, del 10 al 2 de un jalón), usa ▲ ▼ para
+        moverlo de uno en uno, o arrástralo desde ⠿. Lo que muevas se queda resaltado en su lugar nuevo.
       </p>
 
       <div className="orden-barra-superior">
-        <button type="button" className="btn btn-secondary" onClick={abrirAgregarCategoria}>
+        <div className="orden-buscador">
+          <span aria-hidden="true">🔍</span>
+          <input
+            type="search"
+            value={busquedaOrden}
+            onChange={(e) => setBusquedaOrden(e.target.value)}
+            placeholder="Buscar producto o categoría…"
+            aria-label="Buscar producto o categoría para acomodar"
+          />
+        </div>
+        <button
+          type="button"
+          className="btn btn-secondary"
+          onClick={() => setContraidas(todasContraidas ? new Set() : new Set(gruposLocal.map((g) => g.nombre)))}
+          title="Con las categorías contraídas es más fácil acomodar el orden de las categorías entre sí"
+        >
+          {todasContraidas ? '▾ Expandir todas' : '▸ Contraer todas'}
+        </button>
+        <button type="button" className="btn btn-secondary" onClick={abrirAgregarCategoria} disabled={bloqueoPorCambios} title={tituloBloqueo}>
           + Agregar categoría
         </button>
       </div>
 
-      {guardando && <p className="info-msg">Guardando orden…</p>}
+      {/* Barra pegada arriba mientras haya cambios sin guardar: se ve
+          aunque se haga scroll hasta el fondo de la lista. */}
+      {hayCambios && (
+        <div className="orden-barra-guardar" role="status">
+          <span>
+            ✋ Tienes <strong>{movidos.size}</strong> movimiento{movidos.size === 1 ? '' : 's'} sin guardar.
+          </span>
+          <span className="orden-barra-guardar-botones">
+            <button type="button" className="btn btn-secondary btn-small" onClick={descartarCambios} disabled={guardando}>
+              Descartar
+            </button>
+            <button type="button" className="btn btn-primary btn-small" onClick={guardarTodo} disabled={guardando}>
+              {guardando ? 'Guardando…' : '💾 Guardar orden'}
+            </button>
+          </span>
+        </div>
+      )}
+      {guardando && (
+        <div className="orden-guardando-toast" role="alert">
+          <span className="orden-guardando-giro" aria-hidden="true" /> Guardando el orden…
+        </div>
+      )}
       {mensaje && <p className="info-msg error">{mensaje}</p>}
 
-          {gruposLocal.map((grupo, indiceCategoria) => (
-        <section key={grupo.nombre} className={`orden-categoria-box ${grupo.oculta ? 'categoria-oculta' : ''}`}>
+      {/* ---- Zona 🔥 Ofertas (2026-10-01, pendiente P11) ---- */}
+      {(ofertasLocal.length > 0 || zonaOfertasOculta) && (!textoBuscadoOrden || ofertasVisibles.length > 0) && (
+        <section className={`orden-categoria-box orden-ofertas-box ${zonaOfertasOculta ? 'categoria-oculta' : ''}`}>
           <div className="orden-categoria-header">
-            <div className="orden-botones-mover">
-              <button
-                type="button"
-                className="orden-mover-btn"
-                onClick={() => moverCategoria(indiceCategoria, -1)}
-                disabled={indiceCategoria === 0}
-                title="Subir esta categoría un lugar"
-                aria-label="Subir esta categoría un lugar"
-              >
-                ▲
-              </button>
-              <button
-                type="button"
-                className="orden-mover-btn"
-                onClick={() => moverCategoria(indiceCategoria, 1)}
-                disabled={indiceCategoria === gruposLocal.length - 1}
-                title="Bajar esta categoría un lugar"
-                aria-label="Bajar esta categoría un lugar"
-              >
-                ▼
-              </button>
-            </div>
             <h3>
-              {grupo.nombre}
-              {grupo.oculta && <span className="badge badge-oculto">Oculta del catálogo</span>}
+              🔥 Ofertas <span className="orden-conteo">({ofertasLocal.length})</span>
+              {zonaOfertasOculta && <span className="badge badge-oculto">Oculta del catálogo</span>}
             </h3>
             <div className="orden-categoria-botones">
               <button
                 type="button"
                 className="btn btn-secondary btn-small"
-                onClick={() => abrirRenombrar(grupo.nombre)}
+                onClick={toggleZonaOfertas}
+                disabled={cambiandoZonaOfertas || bloqueoPorCambios}
+                title={tituloBloqueo}
               >
-                ✏️ Renombrar
-              </button>
-              <button
-                type="button"
-                className="btn btn-secondary btn-small"
-                onClick={() => toggleOcultarCategoria(grupo)}
-                disabled={ocultandoCategoria === grupo.nombre}
-              >
-                {grupo.oculta ? '👁️ Mostrar' : '🙈 Ocultar'}
-              </button>
-              <button
-                type="button"
-                className="btn btn-eliminar btn-small"
-                onClick={() => abrirEliminar(grupo)}
-              >
-                🗑️ Eliminar
+                {zonaOfertasOculta ? 'Mostrar zona' : 'Ocultar zona'}
               </button>
             </div>
           </div>
-
-          {grupo.productos.length === 0 ? (
-            <p className="muted">Todavía no hay productos en esta categoría.</p>
+          <p className="muted orden-ofertas-nota">
+            Es el carrusel de "🔥 Ofertas" que sale hasta arriba del catálogo. Aquí decides en qué orden van. Ocultar
+            la zona NO quita los productos ni su precio de oferta: siguen saliendo en su categoría de siempre. Para
+            sacar un producto de Ofertas, edítalo en Stock (quítale el precio de oferta).
+          </p>
+          {ofertasLocal.length === 0 ? (
+            <p className="muted">Ahorita no hay ningún producto en oferta.</p>
           ) : (
             <ul className="orden-lista">
-              {grupo.productos.map((p, i) => (
-                <li key={p.ID} className="orden-fila">
-                  <div className="orden-botones-mover">
-                    <button
-                      type="button"
-                      className="orden-mover-btn"
-                      onClick={() => moverProducto(grupo.nombre, i, -1)}
-                      disabled={i === 0}
-                      title="Subir un lugar"
-                      aria-label="Subir un lugar"
-                    >
-                      ▲
-                    </button>
-                    <button
-                      type="button"
-                      className="orden-mover-btn"
-                      onClick={() => moverProducto(grupo.nombre, i, 1)}
-                      disabled={i === grupo.productos.length - 1}
-                      title="Bajar un lugar"
-                      aria-label="Bajar un lugar"
-                    >
-                      ▼
-                    </button>
-                  </div>
-                  {primeraFoto(p.FotoURL) ? (
-                    <img src={primeraFoto(p.FotoURL)} alt={p.Nombre} className="orden-thumb" />
-                  ) : (
-                    <div className="orden-thumb orden-thumb-vacia">Sin foto</div>
-                  )}
-                  <span className="orden-nombre">{p.Nombre}</span>
-                  {!esProductoVisible(p) && <span className="badge badge-oculto">Oculto</span>}
-                </li>
-              ))}
+              {ofertasVisibles.map(({ p, i }) =>
+                filaProducto({ p, i, total: ofertasLocal.length, lista: 'ofertas', clave: `o:${p.ID}`, onMover: moverOfertaA })
+              )}
             </ul>
           )}
         </section>
-      ))}
+      )}
+
+      {gruposVisibles.length === 0 && textoBuscadoOrden && ofertasVisibles.length === 0 && (
+        <p className="info-msg">No hay ningún producto ni categoría con "{busquedaOrden}".</p>
+      )}
+
+      {gruposVisibles.map(({ grupo, indiceCategoria, filas }) => {
+        const contraida = !textoBuscadoOrden && contraidas.has(grupo.nombre);
+        return (
+          <section
+            key={grupo.nombre}
+            id={`orden-c:${grupo.nombre}`}
+            className={`orden-categoria-box ${grupo.oculta ? 'categoria-oculta' : ''} ${resaltado === `c:${grupo.nombre}` ? 'orden-fila-movida' : ''}`}
+          >
+            <div className="orden-categoria-header">
+              <CampoPosicion
+                posicion={indiceCategoria + 1}
+                total={gruposLocal.length}
+                onMover={(destino) => moverCategoriaA(indiceCategoria, destino)}
+                etiqueta={`Categoría ${grupo.nombre}`}
+              />
+              <div className="orden-botones-mover">
+                <button
+                  type="button"
+                  className="orden-mover-btn"
+                  onClick={() => moverCategoriaA(indiceCategoria, indiceCategoria - 1)}
+                  disabled={indiceCategoria === 0 || guardando}
+                  title="Subir esta categoría un lugar"
+                  aria-label="Subir esta categoría un lugar"
+                >
+                  ▲
+                </button>
+                <button
+                  type="button"
+                  className="orden-mover-btn"
+                  onClick={() => moverCategoriaA(indiceCategoria, indiceCategoria + 1)}
+                  disabled={indiceCategoria === gruposLocal.length - 1 || guardando}
+                  title="Bajar esta categoría un lugar"
+                  aria-label="Bajar esta categoría un lugar"
+                >
+                  ▼
+                </button>
+              </div>
+              <button
+                type="button"
+                className="orden-contraer-btn"
+                onClick={() => alternarContraida(grupo.nombre)}
+                aria-expanded={!contraida}
+                title={contraida ? 'Ver los productos de esta categoría' : 'Esconder los productos de esta categoría'}
+              >
+                {contraida ? '▸' : '▾'}
+              </button>
+              <h3>
+                {grupo.nombre} <span className="orden-conteo">({grupo.productos.length})</span>
+                {grupo.oculta && <span className="badge badge-oculto">Oculta del catálogo</span>}
+              </h3>
+              <div className="orden-categoria-botones">
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-small"
+                  onClick={() => abrirRenombrar(grupo.nombre)}
+                  disabled={bloqueoPorCambios}
+                  title={tituloBloqueo}
+                >
+                  ✏️ Renombrar
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-small"
+                  onClick={() => toggleOcultarCategoria(grupo)}
+                  disabled={ocultandoCategoria === grupo.nombre || bloqueoPorCambios}
+                  title={tituloBloqueo}
+                >
+                  {grupo.oculta ? 'Mostrar' : 'Ocultar'}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-eliminar btn-small"
+                  onClick={() => abrirEliminar(grupo)}
+                  disabled={bloqueoPorCambios}
+                  title={tituloBloqueo}
+                >
+                  🗑️ Eliminar
+                </button>
+              </div>
+            </div>
+
+            {!contraida &&
+              (grupo.productos.length === 0 ? (
+                <p className="muted">Todavía no hay productos en esta categoría.</p>
+              ) : (
+                <ul className="orden-lista">
+                  {filas.map(({ p, i }) =>
+                    filaProducto({
+                      p,
+                      i,
+                      total: grupo.productos.length,
+                      lista: `cat:${grupo.nombre}`,
+                      clave: `p:${p.ID}`,
+                      onMover: (desde, hasta) => moverProductoA(grupo.nombre, desde, hasta),
+                    })
+                  )}
+                </ul>
+              ))}
+          </section>
+        );
+      })}
 
       {renombrando && (
         <div className="modal-overlay" onClick={() => setRenombrando(null)}>
@@ -5945,6 +6326,34 @@ function AnaliticaTab({ sesionToken }) {
 // (2026-10-01, pendiente P2 de Claudia). Se usa en el login y en los dos
 // modales de Usuarios (crear usuario / cambiar contraseña). Recibe los
 // mismos props que un <input> normal.
+//
+// Corrección del mismo día (Claudia, con capturas): el ícono era un emoji
+// (👁️ / 🙈) que no combinaba con el diseño, y además estaba AL REVÉS — el
+// ojo abierto salía cuando la contraseña estaba oculta. Ahora son dos
+// dibujos de línea sencillos, del mismo estilo, y el ícono dice el ESTADO:
+//   ojo cerrado (tachado)  -> la contraseña NO se ve
+//   ojo abierto            -> la contraseña SÍ se ve
+function IconoOjo({ abierto }) {
+  return (
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" />
+      <circle cx="12" cy="12" r="3" />
+      {!abierto && <path d="M4 4l16 16" />}
+    </svg>
+  );
+}
+
 function CampoContrasena(props) {
   const [visible, setVisible] = useState(false);
   return (
@@ -5954,10 +6363,11 @@ function CampoContrasena(props) {
         type="button"
         className="campo-contrasena-ojo"
         onClick={() => setVisible((v) => !v)}
-        aria-label={visible ? 'Ocultar contraseña' : 'Mostrar contraseña'}
-        title={visible ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+        aria-pressed={visible}
+        aria-label={visible ? 'La contraseña se ve — clic para ocultarla' : 'La contraseña está oculta — clic para verla'}
+        title={visible ? 'La contraseña se ve — clic para ocultarla' : 'La contraseña está oculta — clic para verla'}
       >
-        {visible ? '🙈' : '👁️'}
+        <IconoOjo abierto={visible} />
       </button>
     </span>
   );
