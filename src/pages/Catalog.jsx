@@ -268,6 +268,8 @@ export default function Catalog() {
   // el servidor manda las dos cosas junto con el catálogo.
   const [ofertasOculta, setOfertasOculta] = useState(false);
   const [ofertasOrden, setOfertasOrden] = useState([]);
+  // Título de la zona (se puede renombrar desde "Orden del catálogo").
+  const [ofertasTitulo, setOfertasTitulo] = useState('');
 
   // Arreglo (2026-09-25, reportado por Claudia: "al salirme del catálogo y
   // volverme a meter tengo que actualizarlo manualmente, ya que si no dice
@@ -302,6 +304,7 @@ export default function Catalog() {
         if (data.telefonoPedidos !== undefined) setTelefonoPedidos(data.telefonoPedidos || '');
         if (data.ofertasOculta !== undefined) setOfertasOculta(!!data.ofertasOculta);
         if (Array.isArray(data.ofertasOrden)) setOfertasOrden(data.ofertasOrden.map(String));
+        if (data.ofertasTitulo !== undefined) setOfertasTitulo(String(data.ofertasTitulo || ''));
         setEstado('listo');
       })
       .catch((err) => {
@@ -725,7 +728,7 @@ export default function Catalog() {
 
           {productosEnOferta.length > 0 && !ofertasOculta && (
             <section className="categoria-seccion categoria-seccion-ofertas">
-              <h2 className="categoria-titulo categoria-titulo-ofertas">🔥 Ofertas</h2>
+              <h2 className="categoria-titulo categoria-titulo-ofertas">🔥 {ofertasTitulo || 'Ofertas'}</h2>
               <CategoriaCarrusel>{tarjetas(productosEnOferta)}</CategoriaCarrusel>
             </section>
           )}
