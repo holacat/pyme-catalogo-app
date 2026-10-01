@@ -1,4 +1,5 @@
 import { obtenerInfoOferta } from './ProductCard.jsx';
+import BotonMantener from './BotonMantener.jsx';
 
 // Modal para revisar el "carrito" (el pedido con varios productos) antes
 // de mandarlo. Aquí el cliente puede quitar productos, subir/bajar
@@ -60,23 +61,23 @@ export default function CarritoModal({ items, onQuitar, onCambiarCantidad, onClo
                     </span>
                   </div>
                   <div className="carrito-item-cantidad">
-                    <button
-                      type="button"
-                      onClick={() => onCambiarCantidad(producto.ID, cantidad - 1)}
+                    {/* 2026-10-01: se pueden mantener presionados para
+                        avanzar rápido (ver BotonMantener.jsx). */}
+                    <BotonMantener
+                      onPaso={() => onCambiarCantidad(producto.ID, cantidad - 1)}
                       disabled={cantidad <= 1}
                       aria-label="Quitar uno"
                     >
                       −
-                    </button>
+                    </BotonMantener>
                     <span>{cantidad}</span>
-                    <button
-                      type="button"
-                      onClick={() => onCambiarCantidad(producto.ID, cantidad + 1)}
+                    <BotonMantener
+                      onPaso={() => onCambiarCantidad(producto.ID, cantidad + 1)}
                       disabled={cantidad >= stockDisponible}
                       aria-label="Agregar uno"
                     >
                       +
-                    </button>
+                    </BotonMantener>
                   </div>
                   <div className="carrito-item-subtotal" aria-label={`Subtotal de ${producto.Nombre}`}>
                     {dinero(unitario * cantidad)}
