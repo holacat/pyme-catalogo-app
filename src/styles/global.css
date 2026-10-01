@@ -2740,9 +2740,9 @@ select:disabled {
 .aviso-panel-azul { background: #eef3fb; border-color: #b9cdf0; }
 .aviso-panel-encabezado {
   display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 12px;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 10px;
 }
 .aviso-panel-titulo { font-weight: 600; }
 .aviso-panel-rojo .aviso-panel-titulo { font-weight: 400; }
