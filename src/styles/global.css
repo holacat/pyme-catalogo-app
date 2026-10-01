@@ -3354,8 +3354,34 @@ body.orden-arrastrando-tactil {
 }
 .orden-categoria-header[draggable="true"] { cursor: grab; }
 .orden-categoria-header .orden-agarradera { font-size: 1.15rem; }
-.orden-categoria-box.orden-categoria-destino-arriba { box-shadow: 0 -5px 0 0 var(--brand); }
-.orden-categoria-box.orden-categoria-destino-abajo { box-shadow: 0 5px 0 0 var(--brand); }
+/* Guía al arrastrar una categoría (Claudia: "no me guío"): en el hueco
+   donde va a quedar sale una barra verde con letras — "Aquí queda «NOMBRE»
+   · lugar N" — arriba o abajo de la categoría sobre la que estás. */
+.orden-categoria-box { position: relative; }
+.orden-categoria-box.orden-categoria-destino-arriba,
+.orden-categoria-box.orden-categoria-destino-abajo { border-color: var(--brand); }
+.orden-categoria-box.orden-categoria-destino-arriba::before,
+.orden-categoria-box.orden-categoria-destino-abajo::after {
+  content: attr(data-destino-texto);
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1.12rem;
+  line-height: 1.12rem;
+  background: var(--brand);
+  color: white;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-align: center;
+  border-radius: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 0.5rem;
+  pointer-events: none;
+}
+.orden-categoria-box.orden-categoria-destino-arriba::before { top: -1.2rem; }
+.orden-categoria-box.orden-categoria-destino-abajo::after { bottom: -1.2rem; }
 .orden-fila-movida { animation: ordenMovida 2.5s ease-out; }
 @keyframes ordenMovida {
   0%, 35% { background-color: #fff59d; box-shadow: 0 0 0 2px #f0c14b; }
@@ -3390,4 +3416,131 @@ body.orden-arrastrando-tactil {
   background: white;
   color: inherit;
   border: 1px solid var(--border);
+}
+
+/* ==== Separación vertical entre columnas en Stock y Pedidos ====
+   (2026-10-01, Claudia: "deberían tener una separación vertical de sus
+   columnas para no perderse, minimalista, del mismo color del diseño").
+   Una rayita de 1px del MISMO gris que ya separa los renglones
+   (var(--border)); en el encabezado, un tono apenas más marcado para que
+   se alcance a ver sobre su fondo gris. Se dibuja como fondo de la celda
+   (no como "border") para que también acompañe al encabezado fijo y a la
+   columna fija de "Guardar" cuando la tabla se desplaza. */
+.stock-table th:not(:last-child),
+.stock-table td:not(:last-child),
+.pedidos-table th:not(:nth-last-child(-n+2)),
+.pedidos-table td:not(:nth-last-child(-n+2)) {
+  background-image: linear-gradient(var(--border), var(--border));
+  background-repeat: no-repeat;
+  background-position: right top;
+  background-size: 1px 100%;
+}
+/* Pedidos: la última columna (Guardar) está fija a la derecha; su rayita va
+   de SU lado izquierdo para que siga viéndose al desplazar la tabla. */
+.pedidos-table th:last-child:not(:first-child),
+.pedidos-table td:last-child:not(:first-child) {
+  background-image: linear-gradient(var(--border), var(--border));
+  background-repeat: no-repeat;
+  background-position: left top;
+  background-size: 1px 100%;
+}
+.stock-table th:not(:last-child),
+.pedidos-table th:not(:nth-last-child(-n+2)),
+.pedidos-table th:last-child:not(:first-child) {
+  background-image: linear-gradient(#d9dde3, #d9dde3);
+}
+
+/* ==== Encabezados en MAYÚSCULAS (2026-10-01, pedido por Claudia con
+   capturas de Stock, Pedidos, Estado de cuenta, Bitácora, Usuarios, la
+   barra de pestañas y el título del panel) ====
+   Se hace solo con estilo ("text-transform"): los textos de la app no se
+   reescribieron, así que si algún día se quiere regresar basta con quitar
+   estas reglas. Como las mayúsculas ocupan más ancho, la letra de los
+   títulos de tabla y de las pestañas va un pelito más chica y con un poco
+   de separación entre letras, para que las tablas no se ensanchen. */
+.data-table th {
+  text-transform: uppercase;
+  font-size: 0.76rem;
+  letter-spacing: 0.03em;
+}
+.stock-table th,
+.pedidos-table th {
+  font-size: 0.68rem;
+  letter-spacing: 0.01em;
+}
+.tabs button,
+.tabs .tab-ordenable-texto {
+  text-transform: uppercase;
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+}
+.tabs button { padding-left: 0.85rem; padding-right: 0.85rem; }
+.tabs .tabs-ordenar-btn { font-size: 0.74rem; }
+.dashboard-header h2 {
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.brand { text-transform: uppercase; letter-spacing: 0.02em; }
+
+/* ==== Orden del catálogo: el renglón de la CATEGORÍA va en una franja
+   verde clara (2026-10-01, Claudia: "deben estar delimitados por una fila
+   verde iluminada para que se distinga de los productos y uno no se
+   confunda"). Es el mismo verde de la marca, muy suave, con una barrita
+   verde fuerte a la izquierda; los renglones de productos siguen en gris.
+   La franja ocupa todo el ancho de la caja, como el encabezado de una
+   tarjeta. */
+.orden-categoria-header {
+  margin: -0.9rem -1rem 0.7rem;
+  padding: 0.6rem 1rem 0.6rem calc(1rem - 4px);
+  background: #e4f3ea;
+  border-left: 4px solid var(--brand);
+  border-bottom: 1px solid #b9dcc8;
+  border-radius: 9px 9px 0 0;
+}
+/* Categoría contraída (solo se ve su franja): sin hueco debajo. */
+.orden-categoria-box > .orden-categoria-header:last-child {
+  margin-bottom: -0.9rem;
+  border-bottom: none;
+  border-radius: 9px;
+}
+.orden-categoria-header h3 { color: var(--brand-dark); }
+.orden-categoria-header .orden-conteo { color: #4b6b58; }
+/* La zona de Ofertas conserva su color propio (rojo suave), con la misma
+   forma de franja. */
+.orden-ofertas-box .orden-categoria-header {
+  background: #ffe9e4;
+  border-left-color: #ef4444;
+  border-bottom-color: #fca5a5;
+}
+.orden-ofertas-box .orden-categoria-header h3 { color: #7f1d1d; }
+.orden-ofertas-box .orden-categoria-header .orden-conteo { color: #9b4a4a; }
+/* Categoría oculta del catálogo: franja gris, para que se note apagada. */
+.orden-categoria-box.categoria-oculta .orden-categoria-header {
+  background: #eef0f2;
+  border-left-color: #9ca3af;
+  border-bottom-color: var(--border);
+}
+/* Los títulos que se pueden ordenar son botones, y los botones no heredan
+   solos las mayúsculas ni la separación de letras: se les pide heredarlas. */
+.data-table th button {
+  text-transform: inherit;
+  letter-spacing: inherit;
+}
+
+/* Orden del catálogo en CELULAR: con el ⠿ más grande quedaba muy poco
+   espacio para el nombre del producto y se partía a media palabra. Se
+   aprietan un poco los espacios y el botón "↑ Al inicio" se queda solo
+   con su flecha. */
+@media (max-width: 520px) {
+  .orden-fila { gap: 0.4rem; padding: 0.35rem 0.4rem; }
+  .orden-categoria-box { padding-left: 0.6rem; padding-right: 0.6rem; }
+  .orden-categoria-header {
+    margin-left: -0.6rem;
+    margin-right: -0.6rem;
+    padding-left: calc(0.6rem - 4px);
+    padding-right: 0.6rem;
+  }
+  .orden-al-inicio { font-size: 0; padding: 0.3rem 0.5rem; }
+  .orden-al-inicio::before { content: '⤒'; font-size: 0.95rem; }
+  .orden-nombre { overflow-wrap: break-word; word-break: normal; }
 }
