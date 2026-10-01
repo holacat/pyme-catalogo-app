@@ -252,6 +252,18 @@ export function actualizarOrdenOfertas({ sesionToken, productoIds, resumen }) {
   return post({ action: 'actualizarOrdenOfertas', sesionToken, productoIds, resumen });
 }
 
+// Cambia el título de la zona de Ofertas en el catálogo (2026-10-01).
+// Título vacío = regresar al nombre original, "Ofertas".
+export function renombrarZonaOfertas({ sesionToken, titulo }) {
+  return post({ action: 'renombrarZonaOfertas', sesionToken, titulo });
+}
+
+// "Eliminar" la zona de Ofertas: le quita la oferta a TODOS los productos
+// que la tengan (vuelven a su precio normal). No borra ningún producto.
+export function quitarTodasLasOfertas({ sesionToken }) {
+  return post({ action: 'quitarTodasLasOfertas', sesionToken });
+}
+
 // Cambia el nombre de una categoría en TODOS los productos que la tengan,
 // de un jalón (por ejemplo, "Bolsas" -> "Bolsos").
 export function renombrarCategoria({ sesionToken, categoriaAnterior, categoriaNueva }) {
