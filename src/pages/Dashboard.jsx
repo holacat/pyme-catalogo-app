@@ -679,6 +679,35 @@ export default function Dashboard() {
     const temporizador = setTimeout(() => setDuenosExpandidos(false), 5 * 60 * 1000);
     return () => clearTimeout(temporizador);
   }, [duenosExpandidos]);
+
+  // ---- Sesión cambiada en OTRA pestaña (2026-10-01, pendiente P6 de
+  // Claudia: "al darle reiniciar en el panel de admin me pasó directamente
+  // al panel de un vendedor") ----
+  // Causa real: la sesión se guarda en localStorage, que COMPARTEN todas las
+  // pestañas del mismo navegador. Si en otra pestaña se entra con otra
+  // cuenta (o se cierra la sesión), esta pestaña seguía viéndose como la
+  // cuenta anterior, pero al recargarla tomaba la sesión nueva — y algunas
+  // partes (como subir fotos, que lee el token directo de localStorage)
+  // podían mandar cosas a nombre de la OTRA cuenta sin que se notara. Podía
+  // pasar en los dos sentidos (de admin a vendedor y de vendedor a admin).
+  // Ahora, en cuanto otra pestaña cambia la sesión, esta lo detecta (evento
+  // "storage" del navegador) y se bloquea con un aviso claro, pidiendo
+  // recargar — nunca se mezclan dos cuentas en silencio.
+  const [sesionCambiadaFuera, setSesionCambiadaFuera] = useState(null); // null | 'otraCuenta' | 'cerrada'
+  const sesionTokenRef = useRef(sesionToken);
+  sesionTokenRef.current = sesionToken;
+  useEffect(() => {
+    function alCambiarAlmacenamiento(e) {
+      if (e.key !== TOKEN_KEY && e.key !== null) return; // null = se borró todo el almacenamiento
+      const tokenDeEstaPestana = sesionTokenRef.current;
+      if (!tokenDeEstaPestana) return; // esta pestaña no tiene sesión abierta, no hay nada que mezclar
+      const tokenNuevo = e.key === null ? null : e.newValue;
+      if (tokenNuevo === tokenDeEstaPestana) return;
+      setSesionCambiadaFuera(tokenNuevo ? 'otraCuenta' : 'cerrada');
+    }
+    window.addEventListener('storage', alCambiarAlmacenamiento);
+    return () => window.removeEventListener('storage', alCambiarAlmacenamiento);
+  }, []);
   // Igual que "productoResaltadoId" de arriba, pero para saltar a la
   // pestaña Pedidos y resaltar la fila de un pedido en concreto (se usa
   // desde el aviso de una solicitud de reembolso en Alertas).
@@ -1389,8 +1418,7 @@ export default function Dashboard() {
           autoComplete="username"
           required
         />
-        <input
-          type="password"
+        <CampoContrasena
           placeholder="Contraseña"
           value={inputContrasena}
           onChange={(e) => setInputContrasena(e.target.value)}
@@ -1589,6 +1617,9 @@ export default function Dashboard() {
     const largos = (p.Duenos || []).map((d) => String(String(d.usuarioId) === String(usuarioId) ? 'Yo' : d.nombre || '').length);
     return Math.max(max, ...largos, 0);
   }, 0);
+  // Con el ancho normal de la columna caben ~12 letras en mayúsculas (lo
+  // justo para "TRABAJADOR 1"); más largo que eso se recorta con "…".
+  const hayNombresDuenoRecortados = largoNombreDuenoMasLargo > 12;
   const anchoNombresDuenosExpandidos = `${(Math.min(Math.max(largoNombreDuenoMasLargo, 6), 40) * 0.72).toFixed(2)}em`;
 
   // ---- Avisos (2026-10-01, pedido por Claudia con capturas) ----
@@ -1835,6 +1866,28 @@ export default function Dashboard() {
 
   return (
     <div className="dashboard">
+      {sesionCambiadaFuera && (
+        <div className="modal-overlay sesion-cambiada-overlay" role="alertdialog" aria-modal="true">
+          <div className="modal-box">
+            <h3>⚠️ La sesión cambió en otra pestaña</h3>
+            <p>
+              {sesionCambiadaFuera === 'otraCuenta'
+                ? 'En otra pestaña de este mismo navegador se entró con OTRA cuenta. Para no mezclar cuentas (y que nada se guarde a nombre de quien no es), esta pestaña ya no se puede seguir usando así.'
+                : 'En otra pestaña de este mismo navegador se cerró la sesión. Para no seguir trabajando con una sesión que ya se cerró, esta pestaña ya no se puede seguir usando así.'}
+            </p>
+            <p className="muted">
+              Al recargar, esta pestaña va a quedar con la sesión que esté abierta ahora en este navegador
+              {sesionCambiadaFuera === 'cerrada' ? ' (o sea, te va a pedir iniciar sesión)' : ''}. Si quieres usar dos
+              cuentas a la vez, usa otro navegador o una ventana de incógnito para la segunda.
+            </p>
+            <div className="modal-actions">
+              <button type="button" className="btn btn-primary" onClick={() => window.location.reload()}>
+                Recargar esta pestaña
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <IndicadorCarga activo={mostrarIndicadorCarga} progreso={progresoCarga} />
       <div className="dashboard-header">
         <h2>Panel de administración</h2>
@@ -2080,19 +2133,26 @@ export default function Dashboard() {
                     </button>
                   </th>
                   <th>
-                    Dueño{' '}
-                    <button
-                      type="button"
-                      className="btn-expandir-duenos"
-                      onClick={() => setDuenosExpandidos((v) => !v)}
-                      title={
-                        duenosExpandidos
-                          ? 'Achicar los nombres otra vez (se achican solos después de 5 minutos)'
-                          : 'Ver los nombres completos de los dueños'
-                      }
-                    >
-                      {duenosExpandidos ? '⇤' : '↔'}
-                    </button>
+                    Dueño
+                    {/* Aclarado (2026-10-01, Claudia: "no entiendo cuál es la
+                        función de la flecha"): antes era un ↔ sin texto, que
+                        además salía aunque ningún nombre estuviera recortado.
+                        Ahora dice qué hace, y solo aparece cuando de verdad
+                        hay algún nombre recortado con "…" en la tabla. */}
+                    {(hayNombresDuenoRecortados || duenosExpandidos) && (
+                      <button
+                        type="button"
+                        className="btn-expandir-duenos"
+                        onClick={() => setDuenosExpandidos((v) => !v)}
+                        title={
+                          duenosExpandidos
+                            ? 'Vuelve a recortar los nombres largos (se recortan solos después de 5 minutos)'
+                            : 'Algunos nombres están recortados con "…" — clic para verlos completos'
+                        }
+                      >
+                        {duenosExpandidos ? '↩ Recortar nombres' : '🔍 Ver nombres completos'}
+                      </button>
+                    )}
                   </th>
                   <th>Mínimo</th>
                   <th>Actualizar stock</th>
@@ -3995,7 +4055,21 @@ function StockRow({
       </td>
       <td><CeldaTruncada texto={categoria} /></td>
       <td>{producto.CodigoPropio ? <CeldaTruncada texto={producto.CodigoPropio} /> : '—'}</td>
-      <td>${Number(producto.Precio).toLocaleString('es-MX')}</td>
+      <td>
+        {/* Pendiente P10 de Claudia (2026-10-01): antes aquí solo se veía el
+            precio normal aunque el producto estuviera en oferta. Ahora, si
+            tiene un precio de oferta válido (mayor a 0 y menor al normal —
+            la misma regla del catálogo), se ve el normal tachado y el de
+            oferta resaltado, que es el que de verdad se cobra. */}
+        {Number(producto.PrecioOferta) > 0 && Number(producto.PrecioOferta) < Number(producto.Precio) ? (
+          <span className="stock-precio-oferta" title="En oferta — este es el precio que se cobra">
+            <s>${Number(producto.Precio).toLocaleString('es-MX')}</s>
+            <strong>${Number(producto.PrecioOferta).toLocaleString('es-MX')}</strong>
+          </span>
+        ) : (
+          <>${Number(producto.Precio).toLocaleString('es-MX')}</>
+        )}
+      </td>
          <td>
         {producto.Stock}
         {Number(producto.Stock) === 0 && <span className="badge badge-agotado">AGOTADO</span>}
@@ -4756,8 +4830,7 @@ function UsuariosTab({ usuarios, sesionToken, soyAdminCentral, onCambio, iniciar
             </label>
             <label className="modal-field">
               Contraseña
-              <input
-                type="password"
+              <CampoContrasena
                 value={nuevaContrasena}
                 onChange={(e) => setNuevaContrasena(e.target.value)}
                 minLength={4}
@@ -4855,8 +4928,7 @@ function UsuariosTab({ usuarios, sesionToken, soyAdminCentral, onCambio, iniciar
             <h3>Cambiar contraseña de {cambiandoClave.Nombre}</h3>
             <label className="modal-field">
               Contraseña nueva
-              <input
-                type="password"
+              <CampoContrasena
                 value={claveNueva}
                 onChange={(e) => setClaveNueva(e.target.value)}
                 minLength={4}
@@ -5567,6 +5639,28 @@ function AnaliticaTab({ sesionToken }) {
         </>
       )}
     </div>
+  );
+}
+
+// Campo de contraseña con "ojito" para ver/ocultar lo que se escribió
+// (2026-10-01, pendiente P2 de Claudia). Se usa en el login y en los dos
+// modales de Usuarios (crear usuario / cambiar contraseña). Recibe los
+// mismos props que un <input> normal.
+function CampoContrasena(props) {
+  const [visible, setVisible] = useState(false);
+  return (
+    <span className="campo-contrasena">
+      <input {...props} type={visible ? 'text' : 'password'} />
+      <button
+        type="button"
+        className="campo-contrasena-ojo"
+        onClick={() => setVisible((v) => !v)}
+        aria-label={visible ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+        title={visible ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+      >
+        {visible ? '🙈' : '👁️'}
+      </button>
+    </span>
   );
 }
 
