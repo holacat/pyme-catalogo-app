@@ -418,6 +418,9 @@ const PERMISOS_KEY = 'pyme_sesion_permisos';
 // Qué recuadros de avisos de arriba están minimizados (como puntito de
 // color) en este navegador — ver "avisosMinimizados" en Dashboard.
 const AVISOS_MINIMIZADOS_KEY = 'pyme_avisos_minimizados';
+// Orden de las pestañas elegido por cada persona (2026-10-01, pendiente P13):
+// se guarda en este navegador, una lista por cuenta (se le agrega el ID).
+const ORDEN_PESTANAS_KEY = 'pyme_orden_pestanas_';
 
 // Etapa 4, rediseño del candado de Pedidos (2026-09-28): llave del permiso
 // especial "¿puede saltarse el candado de un pedido ajeno?" dentro de ese
@@ -679,6 +682,39 @@ export default function Dashboard() {
     const temporizador = setTimeout(() => setDuenosExpandidos(false), 5 * 60 * 1000);
     return () => clearTimeout(temporizador);
   }, [duenosExpandidos]);
+
+  // ---- Orden de las pestañas a gusto de cada quien (2026-10-01, pendiente
+  // P13 de Claudia: "poder alterar el orden de las pestañas del panel de
+  // manera sencilla por si hay unas que ocupan más las tengan más cerca, y
+  // que tenga un botón de regresar a orden default, y que no genere
+  // registro en la Bitácora") ----
+  // Se guarda solo en ESTE navegador (localStorage), por cuenta — nunca
+  // llega al servidor, así que tampoco a la Bitácora. Se arrastra cada
+  // pestaña a su lugar, o se usan las flechitas ◀ ▶ (en celular).
+  const [ordenPestanas, setOrdenPestanas] = useState([]);
+  const [ordenandoPestanas, setOrdenandoPestanas] = useState(false);
+  const [pestanaArrastrada, setPestanaArrastrada] = useState(null);
+  useEffect(() => {
+    if (!usuarioId) {
+      setOrdenPestanas([]);
+      return;
+    }
+    try {
+      const guardado = JSON.parse(localStorage.getItem(ORDEN_PESTANAS_KEY + usuarioId) || '[]');
+      setOrdenPestanas(Array.isArray(guardado) ? guardado : []);
+    } catch {
+      setOrdenPestanas([]);
+    }
+  }, [usuarioId]);
+  function guardarOrdenPestanas(nuevoOrden) {
+    setOrdenPestanas(nuevoOrden);
+    try {
+      if (nuevoOrden.length === 0) localStorage.removeItem(ORDEN_PESTANAS_KEY + usuarioId);
+      else localStorage.setItem(ORDEN_PESTANAS_KEY + usuarioId, JSON.stringify(nuevoOrden));
+    } catch {
+      // Sin almacenamiento: el orden dura hasta recargar, no pasa nada más.
+    }
+  }
 
   // ---- Sesión cambiada en OTRA pestaña (2026-10-01, pendiente P6 de
   // Claudia: "al darle reiniciar en el panel de admin me pasó directamente
@@ -1957,56 +1993,104 @@ export default function Dashboard() {
         </div>
       )}
 
-         <div className="tabs">
-        {puedeVer('stock') && (
-          <button className={tab === 'stock' ? 'active' : ''} onClick={() => cambiarTab('stock')}>Stock</button>
-        )}
-        {puedeVer('pedidos') && (
-          <button className={tab === 'pedidos' ? 'active' : ''} onClick={() => cambiarTab('pedidos')}>
-            Pedidos ({pedidos.length})
-          </button>
-        )}
-        {puedeVer('alertas') && (
-          <button className={tab === 'alertas' ? 'active' : ''} onClick={() => cambiarTab('alertas')}>
-            Alertas ({conteoAlertasPestana})
-          </button>
-        )}
-        {puedeVer('cuenta') && (
-          <button className={tab === 'cuenta' ? 'active' : ''} onClick={() => cambiarTab('cuenta')}>
-            📄 Estado de cuenta
-          </button>
-        )}
-        {puedeVer('bitacora') && (
-          <button className={tab === 'bitacora' ? 'active' : ''} onClick={() => cambiarTab('bitacora')}>
-            🗒️ Bitácora
-          </button>
-        )}
-        {puedeVer('usuarios') && (
-          <button className={tab === 'usuarios' ? 'active' : ''} onClick={() => cambiarTab('usuarios')}>
-            👤 Usuarios
-          </button>
-        )}
-        {puedeVer('analitica') && (
-          <button className={tab === 'analitica' ? 'active' : ''} onClick={() => cambiarTab('analitica')}>
-            📈 Analítica de ventas
-          </button>
-        )}
-        {puedeVer('orden') && (
-          <button className={tab === 'orden' ? 'active' : ''} onClick={() => cambiarTab('orden')}>
-            🔀 Orden del catálogo
-          </button>
-        )}
-        {puedeVer('nuevo') && (
-          <button className={tab === 'nuevo' ? 'active' : ''} onClick={() => cambiarTab('nuevo')}>
-            + Agregar producto
-          </button>
-        )}
-        {esAdminCentral && (
-          <button className={tab === 'permisos' ? 'active' : ''} onClick={() => cambiarTab('permisos')}>
-            🔐 Permisos
-          </button>
-        )}
-      </div>
+      {/* Pestañas (2026-10-01, pendiente P13): se arman desde una lista
+          para poder acomodarlas en el orden que cada quien elija — ver
+          "ordenPestanas" arriba. El orden ORIGINAL es el de esta lista. */}
+      {(() => {
+        const todas = [
+          { clave: 'stock', texto: 'Stock', visible: puedeVer('stock') },
+          { clave: 'pedidos', texto: `Pedidos (${pedidos.length})`, visible: puedeVer('pedidos') },
+          { clave: 'alertas', texto: `Alertas (${conteoAlertasPestana})`, visible: puedeVer('alertas') },
+          { clave: 'cuenta', texto: '📄 Estado de cuenta', visible: puedeVer('cuenta') },
+          { clave: 'bitacora', texto: '🗒️ Bitácora', visible: puedeVer('bitacora') },
+          { clave: 'usuarios', texto: '👤 Usuarios', visible: puedeVer('usuarios') },
+          { clave: 'analitica', texto: '📈 Analítica de ventas', visible: puedeVer('analitica') },
+          { clave: 'orden', texto: '🔀 Orden del catálogo', visible: puedeVer('orden') },
+          { clave: 'nuevo', texto: '+ Agregar producto', visible: puedeVer('nuevo') },
+          { clave: 'permisos', texto: '🔐 Permisos', visible: esAdminCentral },
+        ].filter((p) => p.visible);
+        const posicionGuardada = (clave) => {
+          const i = ordenPestanas.indexOf(clave);
+          return i === -1 ? Number.MAX_SAFE_INTEGER : i;
+        };
+        const pestanas = todas
+          .map((p, indiceOriginal) => ({ ...p, indiceOriginal }))
+          .sort((x, y) => posicionGuardada(x.clave) - posicionGuardada(y.clave) || x.indiceOriginal - y.indiceOriginal);
+        const claves = pestanas.map((p) => p.clave);
+        const esOrdenOriginal = claves.every((c, i) => c === todas[i].clave);
+
+        function mover(clave, destino) {
+          const lista = claves.filter((c) => c !== clave);
+          const limite = Math.max(0, Math.min(destino, lista.length));
+          lista.splice(limite, 0, clave);
+          guardarOrdenPestanas(lista);
+        }
+
+        return (
+          <div className={`tabs${ordenandoPestanas ? ' tabs-ordenando' : ''}`}>
+            {pestanas.map((p, i) =>
+              ordenandoPestanas ? (
+                <span
+                  key={p.clave}
+                  className={`tab-ordenable${pestanaArrastrada === p.clave ? ' arrastrando' : ''}`}
+                  draggable
+                  onDragStart={(e) => {
+                    setPestanaArrastrada(p.clave);
+                    e.dataTransfer.effectAllowed = 'move';
+                    try { e.dataTransfer.setData('text/plain', p.clave); } catch { /* algunos navegadores */ }
+                  }}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    if (pestanaArrastrada && pestanaArrastrada !== p.clave) mover(pestanaArrastrada, i);
+                    setPestanaArrastrada(null);
+                  }}
+                  onDragEnd={() => setPestanaArrastrada(null)}
+                  title="Arrástrala a su lugar, o usa las flechitas"
+                >
+                  <button type="button" className="tab-mover" onClick={() => mover(p.clave, i - 1)} disabled={i === 0} aria-label={`Mover ${p.texto} a la izquierda`}>
+                    ◀
+                  </button>
+                  <span className="tab-ordenable-texto">⠿ {p.texto}</span>
+                  <button type="button" className="tab-mover" onClick={() => mover(p.clave, i + 1)} disabled={i === pestanas.length - 1} aria-label={`Mover ${p.texto} a la derecha`}>
+                    ▶
+                  </button>
+                </span>
+              ) : (
+                <button key={p.clave} className={tab === p.clave ? 'active' : ''} onClick={() => cambiarTab(p.clave)}>
+                  {p.texto}
+                </button>
+              )
+            )}
+            {ordenandoPestanas ? (
+              <span className="tabs-ordenar-acciones">
+                <button type="button" className="tabs-ordenar-btn" onClick={() => guardarOrdenPestanas([])} disabled={esOrdenOriginal}>
+                  ↺ Orden original
+                </button>
+                <button type="button" className="tabs-ordenar-btn tabs-ordenar-listo" onClick={() => setOrdenandoPestanas(false)}>
+                  ✓ Listo
+                </button>
+              </span>
+            ) : (
+              <button
+                type="button"
+                className="tabs-ordenar-btn tabs-ordenar-abrir"
+                onClick={() => setOrdenandoPestanas(true)}
+                title="Acomodar las pestañas en el orden que tú quieras (solo cambia en este navegador)"
+                aria-label="Acomodar pestañas"
+              >
+                ⇄ Acomodar
+              </button>
+            )}
+          </div>
+        );
+      })()}
+      {ordenandoPestanas && (
+        <p className="muted tabs-ordenar-ayuda">
+          Arrastra cada pestaña a donde la quieras (o usa ◀ ▶). Se guarda solita en este navegador, solo para tu cuenta, y
+          no se anota en la Bitácora. Dale "✓ Listo" al terminar.
+        </p>
+      )}
 
       {!puedeVer(tab) && tab !== 'permisos' && (
         <p className="info-msg">
