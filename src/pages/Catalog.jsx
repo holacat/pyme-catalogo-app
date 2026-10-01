@@ -34,6 +34,17 @@ function borrarClienteGuardado() {
   }
 }
 
+// Precio que de verdad se cobra por unidad (2026-10-01, bug real
+// encontrado al revisar los pendientes de Claudia): si el producto tiene
+// un precio de oferta válido, se usa ESE — antes el carrito y el mensaje de
+// WhatsApp usaban siempre el precio normal, aunque la tarjeta enseñara el
+// de oferta. Misma regla que la tarjeta ("obtenerInfoOferta") y que el
+// servidor al registrar el pedido (Code.gs, "crearPedido").
+function precioQueSeCobra(producto) {
+  const { precioOferta } = obtenerInfoOferta(producto);
+  return precioOferta !== null ? precioOferta : Number(producto.Precio) || 0;
+}
+
 // Mensaje de WhatsApp para pedir VARIOS productos juntos (carrito).
 // "telefonoDinamico" (2026-09-30, pedido por Claudia): el número ya NO está
 // fijo en la variable de entorno de Vercel — el servidor lo manda junto con
@@ -47,16 +58,22 @@ function borrarClienteGuardado() {
 function buildWhatsAppLinkCarrito(items, nombre, telefonoDinamico) {
   const phone = telefonoDinamico || import.meta.env.VITE_WHATSAPP_NUMBER;
   const lineas = items
-    .map(
-      ({ producto, cantidad }) =>
-        `🛍️ ${producto.Nombre} x${cantidad} — $${(Number(producto.Precio) * cantidad).toLocaleString('es-MX')}`
-    )
+    .map(({ producto, cantidad }) => {
+      const unitario = precioQueSeCobra(producto);
+      const normal = Number(producto.Precio) || 0;
+      const notaOferta = unitario < normal
+        ? ` (oferta: $${unitario.toLocaleString('es-MX')} c/u, antes $${normal.toLocaleString('es-MX')})`
+        : '';
+      return `🛍️ ${producto.Nombre} x${cantidad} — $${(unitario * cantidad).toLocaleString('es-MX')}${notaOferta}`;
+    })
     .join('\n');
-  const total = items.reduce((acc, { producto, cantidad }) => acc + Number(producto.Precio) * cantidad, 0);
+  const total = items.reduce((acc, { producto, cantidad }) => acc + precioQueSeCobra(producto) * cantidad, 0);
+  const piezas = items.reduce((acc, { cantidad }) => acc + cantidad, 0);
   const mensaje =
     `Hola, soy ${nombre}.\n` +
     `Me interesan estos productos:\n` +
     `${lineas}\n` +
+    `📦 Total de piezas: ${piezas}\n` +
     `💲 Total aproximado: $${total.toLocaleString('es-MX')}\n` +
     `¿Siguen disponibles?`;
   return `https://wa.me/${phone}?text=${encodeURIComponent(mensaje)}`;
