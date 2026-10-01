@@ -20,6 +20,8 @@ import {
     actualizarOrdenMultiple,
   actualizarOrdenCategorias,
   actualizarOrdenOfertas,
+  renombrarZonaOfertas,
+  quitarTodasLasOfertas,
   renombrarCategoria,
   eliminarCategoria,
   crearUsuario,
@@ -3574,6 +3576,7 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
   const categoriaOrdenExplicito = opciones.categoriaOrden || [];
   const ofertasOrdenGuardado = opciones.ofertasOrden || [];
   const zonaOfertasOculta = (opciones.ofertasOculta || []).length > 0;
+  const tituloOfertas = (opciones.ofertasTitulo || [])[0] || 'Ofertas';
 
   const [gruposLocal, setGruposLocal] = useState(() =>
     agruparParaOrden(productos, categoriasPredeterminadas, categoriasOcultas, categoriaOrdenExplicito)
@@ -3599,6 +3602,14 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
   const [busquedaOrden, setBusquedaOrden] = useState('');
   const [contraidas, setContraidas] = useState(() => new Set());
   const [cambiandoZonaOfertas, setCambiandoZonaOfertas] = useState(false);
+  // Renombrar / Eliminar la zona de Ofertas (2026-10-01, Claudia: "a la de
+  // Ofertas le faltan los botones de Eliminar y Renombrar").
+  const [renombrandoOfertas, setRenombrandoOfertas] = useState(false);
+  const [tituloOfertasNuevo, setTituloOfertasNuevo] = useState('');
+  const [guardandoTituloOfertas, setGuardandoTituloOfertas] = useState(false);
+  const [eliminandoOfertas, setEliminandoOfertas] = useState(false);
+  const [confirmoQuitarOfertas, setConfirmoQuitarOfertas] = useState(false);
+  const [quitandoOfertas, setQuitandoOfertas] = useState(false);
 
   const [renombrando, setRenombrando] = useState(null); // nombre de categoría actual, o null
   const [nombreNuevo, setNombreNuevo] = useState('');
@@ -3817,6 +3828,41 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
       });
   }
 
+  function confirmarRenombrarOfertas() {
+    setGuardandoTituloOfertas(true);
+    setMensaje('');
+    iniciarCarga?.();
+    renombrarZonaOfertas({ sesionToken, titulo: tituloOfertasNuevo.trim() })
+      .then(() => {
+        setRenombrandoOfertas(false);
+        return onCambio();
+      })
+      .catch((err) => setMensaje(`Error al renombrar la zona de Ofertas: ${err.message}`))
+      .finally(() => {
+        setGuardandoTituloOfertas(false);
+        terminarCarga?.();
+      });
+  }
+
+  // "Eliminar" la zona de Ofertas = quitarle la oferta a TODOS los productos
+  // (vuelven a su precio normal). No borra ningún producto.
+  function confirmarQuitarOfertas() {
+    if (!confirmoQuitarOfertas) return;
+    setQuitandoOfertas(true);
+    setMensaje('');
+    iniciarCarga?.();
+    quitarTodasLasOfertas({ sesionToken })
+      .then(() => {
+        setEliminandoOfertas(false);
+        return onCambio();
+      })
+      .catch((err) => setMensaje(`Error al quitar las ofertas: ${err.message}`))
+      .finally(() => {
+        setQuitandoOfertas(false);
+        terminarCarga?.();
+      });
+  }
+
   function alternarContraida(nombre) {
     setContraidas((prev) => {
       const siguiente = new Set(prev);
@@ -4010,7 +4056,15 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
   const ofertasVisibles = ofertasLocal
     .map((p, i) => ({ p, i }))
     .filter(({ p }) => !textoBuscadoOrden || coincideProducto(p) || 'ofertas'.includes(textoBuscadoOrden));
-  const todasContraidas = gruposLocal.length > 0 && gruposLocal.every((g) => contraidas.has(g.nombre));
+  // La zona de Ofertas también se contrae (arreglo 2026-10-01: "el botón de
+  // contraer no contrae a la de Ofertas, las demás sí"). Se guarda en la
+  // misma lista de contraídas con una clave especial que no puede chocar con
+  // el nombre de ninguna categoría.
+  const CLAVE_OFERTAS = '\u0000ofertas';
+  const hayZonaOfertas = ofertasLocal.length > 0 || zonaOfertasOculta;
+  const clavesContraibles = gruposLocal.map((g) => g.nombre).concat(hayZonaOfertas ? [CLAVE_OFERTAS] : []);
+  const todasContraidas = clavesContraibles.length > 0 && clavesContraibles.every((k) => contraidas.has(k));
+  const ofertasContraida = !textoBuscadoOrden && contraidas.has(CLAVE_OFERTAS);
 
   return (
     <div className="orden-catalogo">
@@ -4034,7 +4088,7 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
         <button
           type="button"
           className="btn btn-secondary"
-          onClick={() => setContraidas(todasContraidas ? new Set() : new Set(gruposLocal.map((g) => g.nombre)))}
+          onClick={() => setContraidas(todasContraidas ? new Set() : new Set(clavesContraibles))}
           title="Con las categorías contraídas es más fácil acomodar el orden de las categorías entre sí"
         >
           {todasContraidas ? '▾ Expandir todas' : '▸ Contraer todas'}
@@ -4069,14 +4123,35 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
       {mensaje && <p className="info-msg error">{mensaje}</p>}
 
       {/* ---- Zona 🔥 Ofertas (2026-10-01, pendiente P11) ---- */}
-      {(ofertasLocal.length > 0 || zonaOfertasOculta) && (!textoBuscadoOrden || ofertasVisibles.length > 0) && (
+      {hayZonaOfertas && (!textoBuscadoOrden || ofertasVisibles.length > 0) && (
         <section className={`orden-categoria-box orden-ofertas-box ${zonaOfertasOculta ? 'categoria-oculta' : ''}`}>
           <div className="orden-categoria-header">
+            <button
+              type="button"
+              className="orden-contraer-btn"
+              onClick={() => alternarContraida(CLAVE_OFERTAS)}
+              aria-expanded={!ofertasContraida}
+              title={ofertasContraida ? 'Ver los productos en oferta' : 'Esconder los productos en oferta'}
+            >
+              {ofertasContraida ? '▸' : '▾'}
+            </button>
             <h3>
-              🔥 Ofertas <span className="orden-conteo">({ofertasLocal.length})</span>
+              🔥 {tituloOfertas} <span className="orden-conteo">({ofertasLocal.length})</span>
               {zonaOfertasOculta && <span className="badge badge-oculto">Oculta del catálogo</span>}
             </h3>
             <div className="orden-categoria-botones">
+              <button
+                type="button"
+                className="btn btn-secondary btn-small"
+                onClick={() => {
+                  setTituloOfertasNuevo(tituloOfertas === 'Ofertas' ? '' : tituloOfertas);
+                  setRenombrandoOfertas(true);
+                }}
+                disabled={bloqueoPorCambios}
+                title={tituloBloqueo}
+              >
+                ✏️ Renombrar
+              </button>
               <button
                 type="button"
                 className="btn btn-secondary btn-small"
@@ -4084,23 +4159,39 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
                 disabled={cambiandoZonaOfertas || bloqueoPorCambios}
                 title={tituloBloqueo}
               >
-                {zonaOfertasOculta ? 'Mostrar zona' : 'Ocultar zona'}
+                {zonaOfertasOculta ? 'Mostrar' : 'Ocultar'}
+              </button>
+              <button
+                type="button"
+                className="btn btn-eliminar btn-small"
+                onClick={() => {
+                  setConfirmoQuitarOfertas(false);
+                  setEliminandoOfertas(true);
+                }}
+                disabled={bloqueoPorCambios || ofertasLocal.length === 0}
+                title={tituloBloqueo || (ofertasLocal.length === 0 ? 'No hay ningún producto en oferta' : undefined)}
+              >
+                🗑️ Eliminar
               </button>
             </div>
           </div>
-          <p className="muted orden-ofertas-nota">
-            Es el carrusel de "🔥 Ofertas" que sale hasta arriba del catálogo. Aquí decides en qué orden van. Ocultar
-            la zona NO quita los productos ni su precio de oferta: siguen saliendo en su categoría de siempre. Para
-            sacar un producto de Ofertas, edítalo en Stock (quítale el precio de oferta).
-          </p>
-          {ofertasLocal.length === 0 ? (
-            <p className="muted">Ahorita no hay ningún producto en oferta.</p>
-          ) : (
-            <ul className="orden-lista">
-              {ofertasVisibles.map(({ p, i }) =>
-                filaProducto({ p, i, total: ofertasLocal.length, lista: 'ofertas', clave: `o:${p.ID}`, onMover: moverOfertaA })
+          {!ofertasContraida && (
+            <>
+              <p className="muted orden-ofertas-nota">
+                Es el carrusel de "🔥 {tituloOfertas}" que sale hasta arriba del catálogo. Aquí decides en qué orden van.
+                "Ocultar" NO quita los productos ni su precio de oferta: siguen saliendo en su categoría de siempre. Para
+                sacar UN producto de Ofertas, edítalo en Stock (quítale el precio de oferta).
+              </p>
+              {ofertasLocal.length === 0 ? (
+                <p className="muted">Ahorita no hay ningún producto en oferta.</p>
+              ) : (
+                <ul className="orden-lista">
+                  {ofertasVisibles.map(({ p, i }) =>
+                    filaProducto({ p, i, total: ofertasLocal.length, lista: 'ofertas', clave: `o:${p.ID}`, onMover: moverOfertaA })
+                  )}
+                </ul>
               )}
-            </ul>
+            </>
           )}
         </section>
       )}
@@ -4210,6 +4301,76 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
           </section>
         );
       })}
+
+      {renombrandoOfertas && (
+        <div className="modal-overlay" onClick={() => setRenombrandoOfertas(false)}>
+          <div className="modal-box" onClick={(e) => e.stopPropagation()}>
+            <h3>Renombrar la zona de Ofertas</h3>
+            <p className="muted">
+              Cambia el título con el que sale esta zona hasta arriba del catálogo (hoy dice "🔥 {tituloOfertas}"). El 🔥
+              se queda siempre. No cambia ningún producto ni ningún precio. Si lo dejas vacío, vuelve a decir "Ofertas".
+            </p>
+            <label className="modal-field">
+              Nuevo título
+              <input
+                value={tituloOfertasNuevo}
+                onChange={(e) => setTituloOfertasNuevo(e.target.value.slice(0, 40))}
+                placeholder="Ofertas"
+                autoFocus
+              />
+            </label>
+            <div className="modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setRenombrandoOfertas(false)}>
+                Cancelar
+              </button>
+              <button type="button" className="btn btn-primary" disabled={guardandoTituloOfertas} onClick={confirmarRenombrarOfertas}>
+                {guardandoTituloOfertas ? 'Guardando…' : 'Guardar título'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {eliminandoOfertas && (
+        <div className="modal-overlay" onClick={() => setEliminandoOfertas(false)}>
+          <div className="modal-box" onClick={(e) => e.stopPropagation()}>
+            <h3>Eliminar la zona de "{tituloOfertas}"</h3>
+            <p className="muted">
+              Esto le quita la oferta a los {ofertasLocal.length} producto{ofertasLocal.length === 1 ? '' : 's'} que la
+              tienen: vuelven a su precio normal y, como ya no queda ninguno en oferta, la zona desaparece del catálogo.
+            </p>
+            <p className="muted">
+              <strong>No se borra ningún producto.</strong> Si solo quieres que la zona no se vea (sin tocar los precios),
+              mejor usa "Ocultar".
+            </p>
+            <div className="aviso-peligro">
+              ⚠️ Para volver a poner una oferta habría que escribirle otra vez su precio de oferta a cada producto (en la
+              Bitácora queda anotado el precio de oferta que tenía cada uno).
+              <label className="modal-opcion-checkbox">
+                <input
+                  type="checkbox"
+                  checked={confirmoQuitarOfertas}
+                  onChange={(e) => setConfirmoQuitarOfertas(e.target.checked)}
+                />
+                Sí, entiendo, quiero quitar todas las ofertas.
+              </label>
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setEliminandoOfertas(false)}>
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn btn-eliminar"
+                disabled={quitandoOfertas || !confirmoQuitarOfertas}
+                onClick={confirmarQuitarOfertas}
+              >
+                {quitandoOfertas ? 'Aplicando…' : 'Quitar todas las ofertas'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {renombrando && (
         <div className="modal-overlay" onClick={() => setRenombrando(null)}>
