@@ -3955,6 +3955,90 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
   const raizOrdenRef = useRef(null);
   const fantasmaRef = useRef(null);
   const tactilRef = useRef(null);
+
+  // ---- Arrastrar una CATEGORÍA: que sea igual de fácil que un producto ----
+  // Claudia (2026-10-01): "desplazar una categoría no es tan fácil como un
+  // producto, no me guío y no funciona igual". El problema: una categoría
+  // abierta es una caja altísima (con todos sus productos adentro), así que
+  // había que arrastrarla muy lejos y no se veía dónde iba a quedar. Ahora,
+  // MIENTRAS se arrastra una categoría:
+  //   1. Todas las categorías se muestran contraídas (solo su renglón de
+  //      título), así quedan como una lista corta — igual que los productos.
+  //      Al soltar, cada una vuelve a como estaba (abierta o contraída).
+  //   2. Se puede soltar en cualquier parte (encima de una categoría, en el
+  //      hueco entre dos, arriba de la primera o abajo de la última): se
+  //      toma la categoría más cercana a la altura del puntero o del dedo.
+  //   3. En el hueco donde va a quedar sale una barra verde que lo dice con
+  //      letras: "Aquí queda «NOMBRE» · lugar N".
+  // "compactar" es solo visual y temporal; no cambia qué categorías tiene
+  // Claudia contraídas.
+  const [compactar, setCompactar] = useState(false);
+  const compactarRef = useRef(false);
+  const arrastreRef = useRef(null);
+  arrastreRef.current = arrastre;
+  // Para que la pantalla no "brinque" cuando las cajas se encogen o se
+  // vuelven a abrir: se anota a qué altura estaba un encabezado antes del
+  // cambio y, ya con el cambio hecho, se desplaza la página lo necesario
+  // para que ese encabezado quede a esa misma altura.
+  const anclaCompactarRef = useRef(null);
+  // Hueco invisible arriba de la lista: solo se usa mientras se arrastra una
+  // categoría, cuando la página no puede desplazarse lo suficiente para que
+  // la categoría agarrada se quede bajo el puntero (pasa con las primeras).
+  const espaciadorRef = useRef(null);
+  useLayoutEffect(() => {
+    const ancla = anclaCompactarRef.current;
+    anclaCompactarRef.current = null;
+    const raiz = raizOrdenRef.current;
+    const espaciador = espaciadorRef.current;
+    if (!compactar) {
+      // Se acabó el arrastre: fuera el hueco y la altura reservada.
+      if (espaciador) espaciador.style.height = '0px';
+      if (raiz) raiz.style.minHeight = '';
+    }
+    if (ancla && ancla.el.isConnected) {
+      const diferencia = ancla.el.getBoundingClientRect().top - ancla.top;
+      if (Math.abs(diferencia) > 1) window.scrollBy(0, diferencia);
+      if (compactar && espaciador) {
+        const falta = ancla.top - ancla.el.getBoundingClientRect().top;
+        if (falta > 1) espaciador.style.height = `${Math.round(falta)}px`;
+      }
+    }
+    if (tactilRef.current) tactilRef.current.recalcular = true;
+  }, [compactar]);
+
+  function encabezadoDeCategoria(indice) {
+    const raiz = raizOrdenRef.current;
+    if (!raiz) return null;
+    let encontrado = null;
+    raiz.querySelectorAll('[data-orden-lista="categorias"]').forEach((el) => {
+      if (Number(el.dataset.ordenIndice) === indice) encontrado = el.querySelector('.orden-categoria-header');
+    });
+    return encontrado;
+  }
+  function empezarACompactar(indice) {
+    if (compactarRef.current) return;
+    const el = encabezadoDeCategoria(indice);
+    compactarRef.current = true;
+    anclaCompactarRef.current = el ? { el, top: el.getBoundingClientRect().top } : null;
+    // Se reserva la altura que tiene la pestaña ahorita, para que la página
+    // no se "acorte" de golpe al contraer las categorías (si se acortara,
+    // el navegador brincaría hacia arriba y la categoría agarrada se iría
+    // de debajo del puntero).
+    const raiz = raizOrdenRef.current;
+    if (raiz) raiz.style.minHeight = `${raiz.offsetHeight}px`;
+    setCompactar(true);
+  }
+  // Al terminar de arrastrar una categoría (se haya movido o no). Si se
+  // movió ("hasta" distinto de "desde"), la pantalla se acomoda para que la
+  // categoría quede justo donde se soltó.
+  function terminarDeCompactar(desde, hasta) {
+    if (!compactarRef.current) return;
+    compactarRef.current = false;
+    const elMovido = encabezadoDeCategoria(desde);
+    const elReferencia = hasta !== null && hasta !== undefined && hasta !== desde ? encabezadoDeCategoria(hasta) : elMovido;
+    anclaCompactarRef.current = elMovido && elReferencia ? { el: elMovido, top: elReferencia.getBoundingClientRect().top } : null;
+    setCompactar(false);
+  }
   // Siempre apunta a las funciones de mover de ESTE render (las del momento
   // de soltar), no a las del momento en que se puso el dedo.
   const moverPorListaRef = useRef(null);
@@ -3964,24 +4048,44 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
     else if (lista.startsWith('cat:')) moverProductoA(lista.slice(4), desde, hasta);
   };
 
-  // ¿Sobre cuál renglón (de la misma lista) está el dedo? Se calcula por la
-  // altura del dedo: el renglón que lo contiene o, si está en un hueco o se
-  // pasó del principio/final, el más cercano.
-  function destinoTactil(lista, y) {
+  // ¿En qué lugar quedaría lo que se está arrastrando si se soltara a esta
+  // altura de la pantalla? Sirve igual para el dedo y para el mouse, y para
+  // productos, Ofertas y categorías. La regla es la de cualquier lista que
+  // se acomoda arrastrando: cuenta el HUECO más cercano al puntero — entre
+  // el renglón que queda arriba y el que queda abajo —, así que da lo mismo
+  // soltar encima de un renglón que en el espacio entre dos.
+  //   - Categorías: se puede soltar en cualquier parte de la pestaña.
+  //   - Productos: solo cuenta cerca de su propia lista; si el puntero se
+  //     va lejos (por ejemplo a otra categoría), no se mueve nada.
+  // Regresa el lugar nuevo (contando desde 0) o "desde" si no hay cambio.
+  function destinoPorAltura(lista, desde, y, limites) {
     const raiz = raizOrdenRef.current;
-    if (!raiz) return null;
-    let mejor = null;
-    let mejorDistancia = Infinity;
+    if (!raiz) return desde;
+    let arriba = null; // el renglón más bajo que queda ARRIBA del puntero
+    let abajo = null; // el renglón más alto que queda ABAJO del puntero
+    let tope = Infinity;
+    let fondo = -Infinity;
     raiz.querySelectorAll('[data-orden-lista]').forEach((el) => {
       if (el.dataset.ordenLista !== lista) return;
       const r = el.getBoundingClientRect();
-      const distancia = y < r.top ? r.top - y : y > r.bottom ? y - r.bottom : 0;
-      if (distancia < mejorDistancia) {
-        mejorDistancia = distancia;
-        mejor = Number(el.dataset.ordenIndice);
-      }
+      tope = Math.min(tope, r.top);
+      fondo = Math.max(fondo, r.bottom);
+      const indice = Number(el.dataset.ordenIndice);
+      if (indice === desde) return;
+      if (r.top + r.height / 2 < y) {
+        if (arriba === null || indice > arriba) arriba = indice;
+      } else if (abajo === null || indice < abajo) abajo = indice;
     });
-    return mejor;
+    // Dónde empieza y termina la lista en pantalla (lo usa el desplazamiento
+    // automático del dedo para no seguir de largo cuando ya se ve el final).
+    if (limites) {
+      limites.tope = tope;
+      limites.fondo = fondo;
+    }
+    if (lista !== 'categorias' && (y < tope - 48 || y > fondo + 48)) return desde;
+    if (arriba !== null && arriba > desde) return arriba;
+    if (abajo !== null && abajo < desde) return abajo;
+    return desde;
   }
 
   function terminarTactil(soltar) {
@@ -3996,21 +4100,41 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
     document.body.classList.remove('orden-arrastrando-tactil');
     setArrastre(null);
     setSobre(null);
-    if (soltar && t.destino !== null && t.destino !== t.indice) moverPorListaRef.current(t.lista, t.indice, t.destino);
+    const seMueve = soltar && t.destino !== null && t.destino !== t.indice;
+    if (t.lista === 'categorias') terminarDeCompactar(t.indice, seMueve ? t.destino : null);
+    if (seMueve) moverPorListaRef.current(t.lista, t.indice, t.destino);
   }
 
   function iniciarTactil(e, lista, indice, texto) {
     // Con mouse se usa el arrastre normal de computadora (el de abajo).
     if (e.pointerType === 'mouse' || guardando || tactilRef.current) return;
     e.preventDefault();
-    const t = { lista, indice, destino: indice, x: e.clientX, y: e.clientY, pointerId: e.pointerId, raf: 0 };
+    const t = {
+      lista,
+      indice,
+      destino: indice,
+      x: e.clientX,
+      y: e.clientY,
+      pointerId: e.pointerId,
+      raf: 0,
+      limites: { tope: -Infinity, fondo: Infinity },
+    };
+    const BORDE = 80; // alto de la zona de arriba/abajo donde la página se desplaza sola
     const actualizar = () => {
-      const destino = destinoTactil(lista, t.y);
-      if (destino !== null && destino !== t.destino) {
-        t.destino = destino;
-        setSobre({ lista, indice: destino });
-      }
+      // Con el dedo pegado al borde de la pantalla (la zona donde la página
+      // se desplaza sola) cuenta como "hasta el final / hasta el principio"
+      // de la lista, aunque la lista ya haya quedado un poco más adentro.
+      let y = t.y;
+      if (t.y > window.innerHeight - BORDE) y = Math.min(y, t.limites.fondo - 1);
+      else if (t.y < BORDE) y = Math.max(y, t.limites.tope + 1);
+      const destino = destinoPorAltura(lista, indice, y, t.limites);
       const fantasma = fantasmaRef.current;
+      if (destino !== t.destino) {
+        t.destino = destino;
+        setSobre(destino === indice ? null : { lista, indice: destino });
+        // La etiqueta que sigue al dedo también dice a qué lugar va.
+        if (fantasma) fantasma.textContent = destino === indice ? `⠿ ${texto}` : `⠿ ${texto} → lugar ${destino + 1}`;
+      }
       if (fantasma) {
         const x = Math.min(t.x + 16, window.innerWidth - fantasma.offsetWidth - 8);
         fantasma.style.transform = `translate(${Math.max(8, x)}px, ${Math.max(8, t.y - 46)}px)`;
@@ -4019,12 +4143,15 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
     // Desplazamiento automático cerca de los bordes de la pantalla.
     const ciclo = () => {
       if (tactilRef.current !== t) return;
-      const BORDE = 80;
       let paso = 0;
       if (t.y < BORDE) paso = -Math.ceil((BORDE - t.y) / 5);
       else if (t.y > window.innerHeight - BORDE) paso = Math.ceil((t.y - (window.innerHeight - BORDE)) / 5);
-      if (paso) {
-        window.scrollBy(0, paso);
+      // Si ya se ve el final (o el principio) de la lista, no seguir de largo.
+      if (paso > 0 && t.limites.fondo < window.innerHeight - 40) paso = 0;
+      if (paso < 0 && t.limites.tope > 40) paso = 0;
+      if (paso) window.scrollBy(0, paso);
+      if (paso || t.recalcular) {
+        t.recalcular = false;
         actualizar();
       }
       t.raf = requestAnimationFrame(ciclo);
@@ -4053,6 +4180,7 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
       fantasmaRef.current.style.display = 'block';
     }
     actualizar();
+    if (lista === 'categorias') empezarACompactar(indice);
     t.raf = requestAnimationFrame(ciclo);
     try { navigator.vibrate?.(12); } catch { /* no todos los celulares vibran */ }
   }
@@ -4081,7 +4209,7 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
   );
 
   // ---- Arrastrar y soltar (en computadora) ----
-  function propsArrastre(lista, indice, alSoltar) {
+  function propsArrastre(lista, indice) {
     return {
       draggable: !guardando,
       onDragStart: (e) => {
@@ -4095,17 +4223,7 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
         e.dataTransfer.effectAllowed = 'move';
         try { e.dataTransfer.setData('text/plain', String(indice)); } catch { /* algunos navegadores */ }
       },
-      onDragOver: (e) => {
-        if (!arrastre || arrastre.lista !== lista) return;
-        e.preventDefault();
-        if (!sobre || sobre.lista !== lista || sobre.indice !== indice) setSobre({ lista, indice });
-      },
-      onDrop: (e) => {
-        e.preventDefault();
-        if (arrastre && arrastre.lista === lista && arrastre.indice !== indice) alSoltar(arrastre.indice, indice);
-        setArrastre(null);
-        setSobre(null);
-      },
+      // Dónde se suelta ya no lo decide cada renglón: ver "propsSoltar".
       onDragEnd: () => {
         setArrastre(null);
         setSobre(null);
@@ -4139,7 +4257,7 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
         className={clasesFila(lista, i, clave)}
         data-orden-lista={lista}
         data-orden-indice={i}
-        {...propsArrastre(lista, i, (desde, hasta) => onMover(desde, hasta))}
+        {...propsArrastre(lista, i)}
       >
         <span className="orden-agarradera" aria-hidden="true" title="Arrastra para mover" {...propsAgarradera(lista, i, p.Nombre || 'Producto')}>⠿</span>
         <CampoPosicion posicion={i + 1} total={total} onMover={(destino) => onMover(i, destino)} etiqueta={p.Nombre} />
@@ -4285,12 +4403,46 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
   const hayZonaOfertas = ofertasLocal.length > 0 || zonaOfertasOculta;
   const clavesContraibles = gruposLocal.map((g) => g.nombre).concat(hayZonaOfertas ? [CLAVE_OFERTAS] : []);
   const todasContraidas = clavesContraibles.length > 0 && clavesContraibles.every((k) => contraidas.has(k));
-  const ofertasContraida = !textoBuscadoOrden && contraidas.has(CLAVE_OFERTAS);
+  const ofertasContraida = (!textoBuscadoOrden && contraidas.has(CLAVE_OFERTAS)) || compactar;
+
+  // Arrastre con el MOUSE: dónde se puede soltar. Antes cada renglón
+  // decidía por su cuenta; ahora lo decide la pestaña completa con la misma
+  // regla que el dedo ("destinoPorAltura"), para que productos y categorías
+  // se comporten exactamente igual.
+  const categoriaArrastrada = arrastre && arrastre.lista === 'categorias' ? gruposLocal[arrastre.indice] : null;
+  const propsSoltar = {
+    onDragOver: (e) => {
+      if (!arrastre || tactilRef.current) return;
+      const destino = destinoPorAltura(arrastre.lista, arrastre.indice, e.clientY);
+      if (destino === arrastre.indice) {
+        // Sin cambio (está sobre su propio lugar, o lejos de su lista).
+        if (arrastre.lista === 'categorias') e.preventDefault();
+        if (sobre) setSobre(null);
+        return;
+      }
+      e.preventDefault();
+      if (!sobre || sobre.lista !== arrastre.lista || sobre.indice !== destino) {
+        setSobre({ lista: arrastre.lista, indice: destino });
+      }
+    },
+    onDrop: (e) => {
+      if (!arrastre || tactilRef.current) return;
+      e.preventDefault();
+      const { lista, indice: desde } = arrastre;
+      const destino = destinoPorAltura(lista, desde, e.clientY);
+      const seMueve = destino !== desde;
+      if (lista === 'categorias') terminarDeCompactar(desde, seMueve ? destino : null);
+      if (seMueve) moverPorListaRef.current(lista, desde, destino);
+      setArrastre(null);
+      setSobre(null);
+    },
+  };
 
   return (
-    <div className="orden-catalogo" ref={raizOrdenRef}>
+    <div className="orden-catalogo" ref={raizOrdenRef} {...propsSoltar}>
       {/* Etiqueta que sigue al dedo mientras se arrastra en celular. */}
       <div ref={fantasmaRef} className="orden-fantasma" aria-hidden="true" style={{ display: 'none' }} />
+      <div ref={espaciadorRef} aria-hidden="true" style={{ height: 0 }} />
       <p className="muted">
         Acomoda todo lo que quieras y al final dale <strong>💾 Guardar orden</strong> (un solo guardado). Para mover
         algo: escribe el número de lugar en su cajita y da Enter (por ejemplo, del 10 al 2 de un jalón), usa ▲ ▼ para
@@ -4424,7 +4576,7 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
       )}
 
       {gruposVisibles.map(({ grupo, indiceCategoria, filas }) => {
-        const contraida = !textoBuscadoOrden && contraidas.has(grupo.nombre);
+        const contraida = (!textoBuscadoOrden && contraidas.has(grupo.nombre)) || compactar;
         // Arrastrar CATEGORÍAS (2026-10-01, pedido por Claudia: "el mismo
         // sistema de arrastre que tienen los productos debería poder hacer
         // lo mismo entre categorías"). Se agarra del ENCABEZADO de la
@@ -4435,8 +4587,11 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
         // agarra, y la caja completa es donde se puede soltar. Como los
         // productos usan otra "lista" ("cat:NOMBRE"), arrastrar un producto
         // nunca mueve una categoría ni al revés.
-        const arrastreCategoria = propsArrastre('categorias', indiceCategoria, moverCategoriaA);
+        const arrastreCategoria = propsArrastre('categorias', indiceCategoria);
         const arrastrandoCategorias = !!arrastre && arrastre.lista === 'categorias';
+        const esDestino =
+          arrastrandoCategorias && !!sobre && sobre.lista === 'categorias' && sobre.indice === indiceCategoria &&
+          arrastre.indice !== indiceCategoria;
         const clasesCategoria = [
           'orden-categoria-box',
           grupo.oculta && 'categoria-oculta',
@@ -4453,14 +4608,28 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
             className={clasesCategoria}
             data-orden-lista="categorias"
             data-orden-indice={indiceCategoria}
-            onDragOver={arrastreCategoria.onDragOver}
-            onDrop={arrastreCategoria.onDrop}
+            data-destino-texto={
+              esDestino && categoriaArrastrada ? `Aquí queda «${categoriaArrastrada.nombre}» · lugar ${indiceCategoria + 1}` : undefined
+            }
           >
             <div
               className="orden-categoria-header"
               draggable={arrastreCategoria.draggable}
-              onDragStart={arrastreCategoria.onDragStart}
-              onDragEnd={arrastreCategoria.onDragEnd}
+              onDragStart={(e) => {
+                arrastreCategoria.onDragStart(e);
+                // Un instante DESPUÉS de agarrarla (no en el mismo momento:
+                // si la página cambia justo al empezar, algunos navegadores
+                // cancelan el arrastre) se contraen todas las categorías.
+                setTimeout(() => {
+                  const a = arrastreRef.current;
+                  if (a && a.lista === 'categorias' && !tactilRef.current) empezarACompactar(a.indice);
+                }, 30);
+              }}
+              onDragEnd={() => {
+                arrastreCategoria.onDragEnd();
+                // Si se soltó fuera de la pestaña o se canceló con Esc.
+                terminarDeCompactar(indiceCategoria, null);
+              }}
             >
               <span
                 className="orden-agarradera"
