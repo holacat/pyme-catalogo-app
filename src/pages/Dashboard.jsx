@@ -1,5 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { Children, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal, flushSync } from 'react-dom';
 import {
   login,
   // Arreglo de rendimiento (2026-09-25): `cargarPanelCompleto` reemplaza a
@@ -668,6 +668,15 @@ export default function Dashboard() {
   // pendiente en Stock, salta a la fila de ese producto y la resalta unos
   // segundos en amarillo.
   const [productoResaltadoId, setProductoResaltadoId] = useState(null);
+  // P14 (2026-10-01): cuántos renglones se ven en Stock y en Pedidos (50,
+  // 100 o todos). "productoFijadoId" / "pedidoFijadoId": el renglón al que
+  // se saltó desde un aviso se queda a la vista aunque caiga fuera del
+  // corte (si no, desaparecería a los 4 segundos, cuando se le quita el
+  // resaltado amarillo).
+  const [limiteFilasStock, setLimiteFilasStock] = useLimiteFilas('stock');
+  const [limiteFilasPedidos, setLimiteFilasPedidos] = useLimiteFilas('pedidos');
+  const [productoFijadoId, setProductoFijadoId] = useState(null);
+  const [pedidoFijadoId, setPedidoFijadoId] = useState(null);
   // Solicitudes de reembolso (2026-09-30, pedido por Claudia): mismo
   // patrón que las Transferencias de arriba. "Pendientes" solo le llega a
   // quien puede responderlas (permiso candadoReembolsos/Admin Central);
@@ -1508,6 +1517,7 @@ export default function Dashboard() {
   // aviso de una solicitud de reembolso en Alertas, a qué pedido corresponde.
   function irAPedidoYResaltar(pedidoId) {
     setTab('pedidos');
+    setPedidoFijadoId(pedidoId);
     setPedidoResaltadoId(pedidoId);
     setTimeout(() => setPedidoResaltadoId(null), 4000);
   }
@@ -1516,6 +1526,7 @@ export default function Dashboard() {
   // el producto para que su fila se resalte en amarillo un momento.
   function irAStockYResaltar(productoId) {
     setTab('stock');
+    setProductoFijadoId(productoId);
     setProductoResaltadoId(productoId);
     setTimeout(() => setProductoResaltadoId(null), 4000);
   }  
@@ -1682,6 +1693,15 @@ export default function Dashboard() {
       ? productosOrdenadosPorColumna.filter(esDuenoDelProducto)
       : productosOrdenadosPorColumna;
 
+  // P14: de todos los productos que pasan los filtros, cuáles se dibujan
+  // (los primeros 50 / 100 / todos). El buscador y los filtros siguen
+  // buscando en TODOS, no solo en los que se ven.
+  const productosVisibles = recortarFilas(
+    productosFiltrados,
+    limiteFilasStock,
+    (p) => sinGuardar.has(`stock:${p.ID}`) || String(p.ID) === String(productoFijadoId)
+  );
+
   const filtroFechaActivo = !!(filtroDesde || filtroHasta);
   const hayFiltrosStockActivos =
     filtroFechaActivo || !!filtroCategoriaStock || !!busquedaStock.trim() || filtroStockPersonal === 'mio';
@@ -1746,6 +1766,13 @@ export default function Dashboard() {
     ? pedidosPorDueno.filter((p) => estadoCanonicoPedido(p.Estado) === filtroEstado)
     : pedidosPorDueno;
 
+  // P14: los pedidos que se dibujan (los más recientes primero).
+  const pedidosVisibles = recortarFilas(
+    pedidosFiltrados,
+    limiteFilasPedidos,
+    (ped) => sinGuardar.has(`pedido:${ped.ID}`) || String(ped.ID) === String(pedidoFijadoId)
+  );
+
   const filtroPedidoFechaActivo = !!(filtroPedidoDesde || filtroPedidoHasta);
 
   function limpiarFiltroPedidoFecha() {
@@ -1768,7 +1795,7 @@ export default function Dashboard() {
   // la pestaña donde se atiende (solicitudes de stock arriba de Stock,
   // reembolsos arriba de Pedidos), sin duplicar el código.
   const listaSolicitudesStock = (
-    <ul className="transferencias-pendientes-lista">
+    <ListaVerMas className="transferencias-pendientes-lista" limite={3}>
                              {transferenciasPendientes.map((t) => (
                   <li key={t.ID} className="transferencias-pendientes-item">
                     <span>
@@ -1804,7 +1831,7 @@ export default function Dashboard() {
                     </div>
                   </li>
                 ))}
-              </ul>
+              </ListaVerMas>
   );
   const bloqueReembolsos = (
     <>
@@ -1819,7 +1846,7 @@ export default function Dashboard() {
               la solicitud ve nomás un aviso de que sigue en camino (mismo
               patrón que "transferenciasEnProceso" de arriba). */}
           {solicitudesReembolsoPendientes.length > 0 && (
-            <ul className="transferencias-en-proceso-lista solicitudes-reembolso-lista">
+            <ListaVerMas className="transferencias-en-proceso-lista solicitudes-reembolso-lista" limite={3}>
               {solicitudesReembolsoPendientes.map((s) => (
                 <li key={s.ID} className="solicitud-reembolso-pendiente">
                   <span>
@@ -1866,10 +1893,10 @@ export default function Dashboard() {
                   )}
                 </li>
               ))}
-            </ul>
+            </ListaVerMas>
           )}
           {solicitudesReembolsoResueltas.length > 0 && (
-            <ul className="transferencias-resueltas-lista solicitudes-reembolso-lista">
+            <ListaVerMas className="transferencias-resueltas-lista solicitudes-reembolso-lista" limite={3}>
               {solicitudesReembolsoResueltas.map((s) => (
                 <li
                   key={s.ID}
@@ -1894,7 +1921,7 @@ export default function Dashboard() {
                   </button>
                 </li>
               ))}
-            </ul>
+            </ListaVerMas>
           )}
     </>
   );
@@ -1926,19 +1953,8 @@ export default function Dashboard() {
       nombre: 'Bajo inventario',
       ids: alertas.map((a) => a.ID),
       visibleAqui: true,
-      titulo: (
-        <>
-          ⚠️ {alertas.length} producto(s) con bajo inventario:{' '}
-          {alertas.map((a, i) => (
-            <span key={a.ID}>
-              <button type="button" className="link-button" onClick={() => irAStockYResaltar(a.ID)}>
-                {a.Nombre}{a.CodigoPropio ? ` (${a.CodigoPropio})` : ''}
-              </button>
-              {i < alertas.length - 1 ? ', ' : ''}
-            </span>
-          ))}
-        </>
-      ),
+      // P14: si son muchos productos, se ven los primeros 6 y "… y N más".
+      titulo: <TituloBajoInventario alertas={alertas} onIr={irAStockYResaltar} />,
       contenido: null,
     },
     {
@@ -2082,11 +2098,12 @@ export default function Dashboard() {
           <p className="aviso-flotante-titulo">
             ⚠️ Tienes {sinGuardar.size} cambio(s) sin guardar:
           </p>
-          <ul>
+          {/* P14: si son muchos cambios, se ven los primeros 4 y "Ver N más". */}
+          <ListaVerMas limite={4}>
             {Array.from(sinGuardar.values()).map((descripcion, i) => (
               <li key={i}>{descripcion}</li>
             ))}
-          </ul>
+          </ListaVerMas>
           <div className="aviso-flotante-acciones">
             <button type="button" className="btn btn-secondary btn-small" onClick={cancelarCambios}>
               Cancelar cambios (Esc)
@@ -2407,7 +2424,7 @@ export default function Dashboard() {
                 </tr>
               </thead>
               <tbody>
-                {productosFiltrados.map((p) => (
+                {productosVisibles.map((p) => (
                                                                     <StockRow
                     key={`${p.ID}-${resetToken}`}
                     producto={p}
@@ -2435,6 +2452,16 @@ export default function Dashboard() {
               <p className="info-msg">Ningún producto coincide con la búsqueda o los filtros de arriba.</p>
             )}
           </div>
+          <BarraFilas
+            total={productosFiltrados.length}
+            visibles={productosVisibles.length}
+            limite={limiteFilasStock}
+            onCambiar={(valor) => {
+              setProductoFijadoId(null);
+              setLimiteFilasStock(valor);
+            }}
+            nombre="productos"
+          />
         </>
       )}
 
@@ -2546,7 +2573,7 @@ export default function Dashboard() {
                 </tr>
               </thead>
               <tbody>
-                {pedidosFiltrados.map((ped) => (
+                {pedidosVisibles.map((ped) => (
                   <PedidoRow
                     key={`${ped.ID}-${resetToken}`}
                     pedido={ped}
@@ -2570,6 +2597,16 @@ export default function Dashboard() {
               <p className="info-msg">Ningún pedido coincide con el estado, el rango de fechas o el filtro de "Ver pedidos de…" de arriba.</p>
             )}
           </div>
+          <BarraFilas
+            total={pedidosFiltrados.length}
+            visibles={pedidosVisibles.length}
+            limite={limiteFilasPedidos}
+            onCambiar={(valor) => {
+              setPedidoFijadoId(null);
+              setLimiteFilasPedidos(valor);
+            }}
+            nombre="pedidos"
+          />
         </>
       )}
 
@@ -2587,7 +2624,7 @@ export default function Dashboard() {
             </div>
           )}
                    {transferenciasEnProceso.length > 0 && (
-            <ul className="transferencias-en-proceso-lista">
+            <ListaVerMas className="transferencias-en-proceso-lista" limite={6}>
               {transferenciasEnProceso.map((t) => (
                 <li key={t.ID}>
                                   {t.Tipo === 'Oferta' ? (
@@ -2597,10 +2634,10 @@ export default function Dashboard() {
                   )}
                 </li>
               ))}
-            </ul>
+            </ListaVerMas>
           )}
                   {transferenciasResueltas.length > 0 && (
-            <ul className="transferencias-resueltas-lista">
+            <ListaVerMas className="transferencias-resueltas-lista" limite={6}>
               {transferenciasResueltas.map((t) => (
                 <li
                   key={t.ID}
@@ -2625,10 +2662,10 @@ export default function Dashboard() {
                   </button>
                 </li>
               ))}
-            </ul>
+            </ListaVerMas>
           )}
           {transferenciasAplicadas.length > 0 && (
-            <ul className="transferencias-resueltas-lista">
+            <ListaVerMas className="transferencias-resueltas-lista" limite={6}>
               {transferenciasAplicadas.map((t) => (
                 <li key={t.ID} className="transferencia-aplicada">
                   <span>
@@ -2648,10 +2685,10 @@ export default function Dashboard() {
                   </button>
                 </li>
               ))}
-            </ul>
+            </ListaVerMas>
           )}
           {bloqueReembolsos}
-                   <ul className="alert-list">
+                   <ListaVerMas className="alert-list" limite={10}>
             {alertas.length === 0 && <li>Sin alertas de bajo inventario 🎉</li>}
             {alertas.map((a) => (
               <li key={a.ID}>
@@ -2660,7 +2697,7 @@ export default function Dashboard() {
                 </button>
               </li>
             ))}
-          </ul>
+          </ListaVerMas>
         </>
       )}
 
@@ -5018,6 +5055,154 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
   );
 }
 
+// ============================================================================
+// P14 de la lista de Claudia (2026-10-01): "si tienen mucha info se agrandan
+// a niveles poco visuales... a cierto tamaño debe de haber un ... y opción de
+// ver más y poderlo abrir y cerrar... o la tabla de pedidos si es muy larga,
+// el típico recuadro de mostrar todos o 100".
+// Dos piezas que se reutilizan en todo el panel:
+//   1. Tablas largas: "Mostrar 50 / 100 / Todos" (Stock, Pedidos, Bitácora,
+//      Estado de cuenta).
+//   2. Listas de avisos largas: se ven las primeras y un "Ver N más".
+// ============================================================================
+
+// ---- 1. Tablas largas ----
+// 0 = "Todos". Lo que cada quien elige se recuerda en ESTE navegador, por
+// tabla (igual que el orden de las pestañas): no se guarda en la hoja ni
+// genera nada en la Bitácora.
+const OPCIONES_FILAS = [50, 100, 0];
+const LLAVE_FILAS_POR_TABLA = 'pyme_filas_por_tabla';
+
+function leerLimiteFilas(tabla) {
+  try {
+    const guardado = JSON.parse(window.localStorage.getItem(LLAVE_FILAS_POR_TABLA) || '{}');
+    const valor = Number(guardado[tabla]);
+    return OPCIONES_FILAS.includes(valor) ? valor : OPCIONES_FILAS[0];
+  } catch {
+    return OPCIONES_FILAS[0];
+  }
+}
+
+function useLimiteFilas(tabla) {
+  const [limite, setLimite] = useState(() => leerLimiteFilas(tabla));
+  function cambiar(valor) {
+    setLimite(valor);
+    try {
+      const guardado = JSON.parse(window.localStorage.getItem(LLAVE_FILAS_POR_TABLA) || '{}');
+      guardado[tabla] = valor;
+      window.localStorage.setItem(LLAVE_FILAS_POR_TABLA, JSON.stringify(guardado));
+    } catch {
+      /* navegador sin almacenamiento: la elección dura mientras la pestaña esté abierta */
+    }
+  }
+  return [limite, cambiar];
+}
+
+// Regresa los primeros "limite" renglones. "siempreVisible" permite dejar
+// a la vista renglones que quedarían fuera del corte pero NO deben
+// desaparecer: los que tienen un cambio sin guardar (si se escondieran, el
+// cambio se perdería sin avisar) y el renglón al que se saltó desde un aviso.
+function recortarFilas(lista, limite, siempreVisible) {
+  if (!limite || lista.length <= limite) return lista;
+  return lista.filter((elemento, i) => i < limite || (siempreVisible ? siempreVisible(elemento) : false));
+}
+
+// La barrita "Mostrando 50 de 119 pedidos · Mostrar: 50 | 100 | Todos".
+// No aparece si la tabla tiene 50 renglones o menos (no hay nada que cortar).
+function BarraFilas({ total, visibles, limite, onCambiar, nombre }) {
+  if (total <= OPCIONES_FILAS[0]) return null;
+  // Si el límite elegido ya alcanza para todos, en la práctica es "Todos".
+  const efectivo = limite && total > limite ? limite : 0;
+  const opciones = OPCIONES_FILAS.filter((opcion) => opcion === 0 || total > opcion);
+  return (
+    <div className="barra-filas" role="group" aria-label={`Cuántos ${nombre} mostrar`}>
+      <span>
+        Mostrando <strong>{visibles}</strong> de <strong>{total}</strong> {nombre}
+      </span>
+      <span className="barra-filas-opciones">
+        Mostrar:
+        {opciones.map((opcion) => (
+          <button
+            key={opcion}
+            type="button"
+            className={`barra-filas-btn${efectivo === opcion ? ' activo' : ''}`}
+            aria-pressed={efectivo === opcion}
+            onClick={() => onCambiar(opcion)}
+          >
+            {opcion === 0 ? 'Todos' : opcion}
+          </button>
+        ))}
+      </span>
+    </div>
+  );
+}
+
+// ---- 2. Listas de avisos largas ----
+// <ListaVerMas> es un <ul> normal que solo enseña los primeros "limite"
+// renglones y, si hay más, un botón "▾ Ver N más" / "▴ Ver menos".
+function ListaVerMas({ children, limite = 3, className }) {
+  const [abierta, setAbierta] = useState(false);
+  const hijos = Children.toArray(children);
+  const sobran = hijos.length - limite;
+  const visibles = abierta || sobran <= 0 ? hijos : hijos.slice(0, limite);
+  return (
+    <>
+      <ul className={className}>{visibles}</ul>
+      {sobran > 0 && (
+        <button type="button" className="ver-mas-btn" onClick={() => setAbierta((v) => !v)} aria-expanded={abierta}>
+          {abierta ? '▴ Ver menos' : `▾ Ver ${sobran} más`}
+        </button>
+      )}
+    </>
+  );
+}
+
+// Igual que la de arriba pero sin <ul>: para notas sueltas dentro de una
+// celda (por ejemplo los "⏳ Le asignaste…" de un producto en Stock).
+function GrupoVerMas({ children, limite = 2 }) {
+  const [abierto, setAbierto] = useState(false);
+  const hijos = Children.toArray(children);
+  const sobran = hijos.length - limite;
+  if (sobran <= 0) return <>{hijos}</>;
+  return (
+    <>
+      {abierto ? hijos : hijos.slice(0, limite)}
+      <button type="button" className="ver-mas-btn" onClick={() => setAbierto((v) => !v)} aria-expanded={abierto}>
+        {abierto ? '▴ Ver menos' : `▾ Ver ${sobran} más`}
+      </button>
+    </>
+  );
+}
+
+// Título del aviso de bajo inventario: "⚠️ N producto(s)…: a, b, c… y 12 más".
+function TituloBajoInventario({ alertas, onIr }) {
+  const LIMITE = 6;
+  const [abierto, setAbierto] = useState(false);
+  const sobran = alertas.length - LIMITE;
+  const visibles = abierto || sobran <= 0 ? alertas : alertas.slice(0, LIMITE);
+  return (
+    <>
+      ⚠️ {alertas.length} producto(s) con bajo inventario:{' '}
+      {visibles.map((a, i) => (
+        <span key={a.ID}>
+          <button type="button" className="link-button" onClick={() => onIr(a.ID)}>
+            {a.Nombre}{a.CodigoPropio ? ` (${a.CodigoPropio})` : ''}
+          </button>
+          {i < visibles.length - 1 ? ', ' : ''}
+        </span>
+      ))}
+      {sobran > 0 && (
+        <>
+          {abierto ? ' ' : '… '}
+          <button type="button" className="ver-mas-btn ver-mas-btn-enlinea" onClick={() => setAbierto((v) => !v)} aria-expanded={abierto}>
+            {abierto ? '▴ Ver menos' : `▾ y ${sobran} más`}
+          </button>
+        </>
+      )}
+    </>
+  );
+}
+
 // Bug reportado por Claudia (2026-09-24): un Nombre/Categoría/Código muy
 // largo (sobre todo sin espacios, como los productos de prueba con puras
 // "X" seguidas) se salía de su columna en la tabla de Stock y se veía
@@ -5066,6 +5251,17 @@ function StockRow({
   // "Guardando…" y se bloquea para no mandarla dos veces sin querer.
   const [guardandoStock, setGuardandoStock] = useState(false);
   const stockConocido = useRef(producto.Stock);
+  // P14 (2026-10-01): los dos avisos de la columna "Actualizar stock" ya no
+  // son texto fijo debajo del campo (ensanchaban la columna y alargaban el
+  // renglón): ahora son comentarios flotantes, igual que en Pedidos.
+  //   - "No es tuyo": un candadito 🔒 junto al botón; su explicación sale al
+  //     pasarle el mouse o darle clic.
+  //   - "Solo puedes bajar hasta N": sale solo cuando se escribe una
+  //     cantidad que no se puede guardar, pegado al campo.
+  const candadoStockRef = useRef(null);
+  const campoStockRef = useRef(null);
+  const [avisoCandadoStock, setAvisoCandadoStock] = useState(null); // null | 'hover' | 'clic'
+  const [avisoMinimoCerrado, setAvisoMinimoCerrado] = useState(false);
   const sinGuardar = Number(valor) !== Number(producto.Stock);
   const llave = `stock:${producto.ID}`;
   const visible = esProductoVisible(producto);
@@ -5342,11 +5538,16 @@ function StockRow({
                       )}
                     </div>
                   )}
-                  {misOfertasEnProceso.filter((t) => String(t.DuenoID) === String(d.usuarioId)).map((t) => (
-                    <div key={t.ID} className="muted campo-nota">
-                      ⏳ Le asignaste {t.Cantidad} a {t.SolicitanteNombre}, esperando que acepte
-                    </div>
-                  ))}
+                  {/* P14: si hay muchas asignaciones en espera de este mismo
+                      dueño, se ven 2 y "Ver N más" (antes cada una
+                      alargaba el renglón del producto). */}
+                  <GrupoVerMas limite={2}>
+                    {misOfertasEnProceso.filter((t) => String(t.DuenoID) === String(d.usuarioId)).map((t) => (
+                      <div key={t.ID} className="muted campo-nota">
+                        ⏳ Le asignaste {t.Cantidad} a {t.SolicitanteNombre}, esperando que acepte
+                      </div>
+                    ))}
+                  </GrupoVerMas>
                 </li>
               );
                     })}
@@ -5356,14 +5557,17 @@ function StockRow({
       <td>{producto.StockMinimo}</td>
       <td>
         <div className="stock-editor">
-          <div className="campo-numero-wrapper">
+          <div className="campo-numero-wrapper" ref={campoStockRef}>
             <input
               type="text"
               inputMode="numeric"
               className={excedeMiPropioStock ? 'campo-modificado' : sinGuardar ? 'campo-modificado' : ''}
               value={valor}
               disabled={!puedoEditar || guardandoStock}
-              onChange={(e) => setValor(limitarDigitos(e.target.value, MAX_DIGITOS_STOCK))}
+              onChange={(e) => {
+                setAvisoMinimoCerrado(false);
+                setValor(limitarDigitos(e.target.value, MAX_DIGITOS_STOCK));
+              }}
             />
             <BotonesPasoNumero
               disabled={!puedoEditar || guardandoStock}
@@ -5387,13 +5591,39 @@ function StockRow({
           >
             {guardandoStock ? 'Guardando…' : 'Guardar'}
           </button>
+          {!puedoEditar && (
+            <button
+              ref={candadoStockRef}
+              type="button"
+              className="btn-icono-aviso"
+              onMouseEnter={() => setAvisoCandadoStock((v) => v || 'hover')}
+              onMouseLeave={() => setAvisoCandadoStock((v) => (v === 'hover' ? null : v))}
+              onClick={() => setAvisoCandadoStock((v) => (v === 'clic' ? null : 'clic'))}
+              aria-label="Este producto no es tuyo"
+            >
+              🔒
+            </button>
+          )}
         </div>
-        {!puedoEditar && <p className="muted campo-nota">🔒 No es tuyo — usa "Solicitar" junto al dueño.</p>}
-        {puedoEditar && excedeMiPropioStock && (
-          <p className="muted campo-nota aviso-stock-propio">
-            Solo puedes bajar hasta {minimoPermitidoStock} — de este producto tienes {miCantidadPropiaStock} asignado
-            a ti, y bajar más afectaría el stock de alguien más.
-          </p>
+        {!puedoEditar && (
+          <AvisoFlotante
+            anclaRef={candadoStockRef}
+            abierto={avisoCandadoStock !== null}
+            onCerrar={() => setAvisoCandadoStock(null)}
+            autoCerrarMs={avisoCandadoStock === 'clic' ? 6000 : 0}
+          >
+            <strong>No es tuyo.</strong> Para tener de este producto, usa "Solicitar" junto al nombre de su dueño.
+          </AvisoFlotante>
+        )}
+        {puedoEditar && (
+          <AvisoFlotante
+            anclaRef={campoStockRef}
+            abierto={excedeMiPropioStock && !avisoMinimoCerrado}
+            onCerrar={() => setAvisoMinimoCerrado(true)}
+          >
+            <strong>Solo puedes bajar hasta {minimoPermitidoStock}.</strong> De este producto tienes{' '}
+            {miCantidadPropiaStock} asignado a ti, y bajar más afectaría el stock de alguien más.
+          </AvisoFlotante>
         )}
       </td>
       <td className="celda-acciones">
@@ -5483,6 +5713,27 @@ function textoRangoFechas(desde, hasta) {
 function EstadoCuentaTab({ movimientos, pedidos, productos }) {
   const [desde, setDesde] = useState('');
   const [hasta, setHasta] = useState('');
+  // P14 (2026-10-01): "Mostrar 50 / 100 / Todos". OJO con la impresión: esta
+  // misma tabla es la que se imprime / se guarda como PDF, así que justo
+  // antes de imprimir se dibujan TODOS los renglones (si no, el PDF saldría
+  // incompleto) y al terminar se regresa a lo que estaba. Funciona igual
+  // con el botón de aquí que con Ctrl+P del navegador.
+  const [limiteFilas, setLimiteFilas] = useLimiteFilas('cuenta');
+  const [imprimiendo, setImprimiendo] = useState(false);
+  useEffect(() => {
+    function antesDeImprimir() {
+      flushSync(() => setImprimiendo(true));
+    }
+    function despuesDeImprimir() {
+      setImprimiendo(false);
+    }
+    window.addEventListener('beforeprint', antesDeImprimir);
+    window.addEventListener('afterprint', despuesDeImprimir);
+    return () => {
+      window.removeEventListener('beforeprint', antesDeImprimir);
+      window.removeEventListener('afterprint', despuesDeImprimir);
+    };
+  }, []);
 
   // Los Movimientos solo guardan el ID del pedido — el nombre del producto y
   // su código propio se buscan aquí usando los Pedidos y Productos que el
@@ -5510,6 +5761,10 @@ function EstadoCuentaTab({ movimientos, pedidos, productos }) {
 
   const movimientosOrdenados = movimientos.slice().reverse(); // más recientes primero
   const movimientosFiltrados = movimientosOrdenados.filter((m) => movimientoEnRangoDeFecha(m, desde, hasta));
+  // P14: en PANTALLA se dibujan los primeros 50 / 100 / todos. Los totales
+  // de abajo siempre suman TODOS los movimientos del rango, y al imprimir o
+  // guardar como PDF también salen TODOS (ver "imprimiendo").
+  const movimientosVisibles = imprimiendo ? movimientosFiltrados : recortarFilas(movimientosFiltrados, limiteFilas);
 
   const totalAbonos = movimientosFiltrados
     .filter((m) => m.Tipo === 'Abono')
@@ -5542,7 +5797,13 @@ function EstadoCuentaTab({ movimientos, pedidos, productos }) {
             Quitar filtro de fechas
           </button>
         )}
-        <button type="button" className="btn btn-primary btn-small" onClick={() => window.print()}>
+        <button type="button" className="btn btn-primary btn-small" onClick={() => {
+          // Se dibujan todos los renglones ANTES de abrir la ventana de
+          // impresión (el evento "beforeprint" de arriba hace lo mismo, pero
+          // así no se depende de que el navegador lo dispare a tiempo).
+          flushSync(() => setImprimiendo(true));
+          window.print();
+        }}>
           🖨️ Imprimir / Guardar como PDF
         </button>
       </div>
@@ -5585,7 +5846,7 @@ function EstadoCuentaTab({ movimientos, pedidos, productos }) {
                   pantalla Y la que se imprime/guarda como PDF (mismo
                   elemento, ver el "id=estado-cuenta-imprimible" de arriba),
                   así que este cambio se refleja en los dos automáticamente. */}
-              {movimientosFiltrados.map((m) => (
+              {movimientosVisibles.map((m) => (
                 <tr key={m.ID}>
                   <td>{formatearFechaHora(m.Fecha)}</td>
                   <td>{m.Cliente || '—'}</td>
@@ -5610,6 +5871,14 @@ function EstadoCuentaTab({ movimientos, pedidos, productos }) {
             <p className="info-msg">No hay movimientos en el rango de fechas de arriba.</p>
           )}
         </div>
+        {/* No sale en la impresión / PDF (ver ".barra-filas" en global.css). */}
+        <BarraFilas
+          total={movimientosFiltrados.length}
+          visibles={movimientosVisibles.length}
+          limite={limiteFilas}
+          onCambiar={setLimiteFilas}
+          nombre="movimientos"
+        />
 
         <div className="estado-cuenta-totales">
           <p>
@@ -5677,6 +5946,12 @@ function BitacoraTab({ bitacora }) {
     (!filtroAccion || normalizarParaFiltro(b.Accion) === filtroAccion) &&
     (!textoBuscado || normalizarParaFiltro(conEtiquetasDeEstado(b.Detalle)).includes(textoBuscado))
   ));
+
+  // P14: de los movimientos que pasan los filtros, cuántos se dibujan (los
+  // más recientes primero). Los filtros y el buscador siguen buscando en
+  // TODA la Bitácora.
+  const [limiteFilas, setLimiteFilas] = useLimiteFilas('bitacora');
+  const bitacoraVisible = recortarFilas(bitacoraFiltrada, limiteFilas);
 
   const hayFiltroFechas = !!(desde || hasta);
   const hayOtrosFiltros = !!(filtroUsuario || filtroAccion || buscarDetalle);
@@ -5758,7 +6033,7 @@ function BitacoraTab({ bitacora }) {
             </tr>
           </thead>
           <tbody>
-            {bitacoraFiltrada.map((b) => (
+            {bitacoraVisible.map((b) => (
               <tr key={b.ID}>
                 <td>{formatearFechaHora(b.Fecha)}</td>
                 <td>{b.Usuario || '—'}</td>
@@ -5784,6 +6059,13 @@ function BitacoraTab({ bitacora }) {
           <p className="info-msg">No hay cambios registrados con los filtros de arriba.</p>
         )}
       </div>
+      <BarraFilas
+        total={bitacoraFiltrada.length}
+        visibles={bitacoraVisible.length}
+        limite={limiteFilas}
+        onCambiar={setLimiteFilas}
+        nombre="cambios"
+      />
     </div>
   );
 }
