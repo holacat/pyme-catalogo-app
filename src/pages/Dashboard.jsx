@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   login,
   // Arreglo de rendimiento (2026-09-25): `cargarPanelCompleto` reemplaza a
@@ -5364,6 +5365,89 @@ function AnaliticaTab({ sesionToken }) {
   );
 }
 
+// ---- Aviso flotante "tipo comentario de Word" (2026-09-30, pedido por
+// Claudia con capturas) ----
+// Antes, los avisos de la columna Estado de Pedidos ("Ya pasó más de 1
+// hora...", "🔒 No te pertenece este pedido.", "No tienes el permiso para
+// reembolsar...", "⏳ Ya enviaste una solicitud...") eran párrafos fijos
+// DENTRO de la celda: salían siempre, aunque nadie hubiera intentado nada, y
+// hacían cada fila mucho más alta. Claudia pidió que solo salgan cuando se
+// intenta justo la acción que quieren prevenir, y "en forma tipo comentario
+// de Word": una burbujita que FLOTA al lado del campo (encima de la tabla,
+// sin empujar ni ensanchar nada), y que se cierra sola, con la ✕, o al dar
+// clic en cualquier otro lado.
+//
+// Se dibuja con un "portal" directo en <body> y con posición fija en la
+// pantalla (no dentro de la celda), para que la caja con scroll de la tabla
+// nunca la recorte. Se acomoda a la DERECHA del campo (como los comentarios
+// de Word en el margen); si no cabe, a la izquierda. Si la página o la tabla
+// se desplazan, se cierra (en vez de quedarse flotando fuera de lugar).
+function AvisoFlotante({ anclaRef, abierto, onCerrar, autoCerrarMs = 0, children }) {
+  const burbujaRef = useRef(null);
+  const onCerrarRef = useRef(onCerrar);
+  onCerrarRef.current = onCerrar;
+
+  useLayoutEffect(() => {
+    const burbuja = burbujaRef.current;
+    const ancla = anclaRef && anclaRef.current;
+    if (!abierto || !burbuja || !ancla) return;
+    const r = ancla.getBoundingClientRect();
+    const ancho = burbuja.offsetWidth;
+    const alto = burbuja.offsetHeight;
+    const MARGEN = 8;
+    const SEPARACION = 10;
+    let left = r.right + SEPARACION;
+    let lado = 'lado-derecha';
+    if (left + ancho > window.innerWidth - MARGEN) {
+      left = r.left - SEPARACION - ancho;
+      lado = 'lado-izquierda';
+    }
+    left = Math.max(MARGEN, left);
+    let top = r.top + r.height / 2 - 18;
+    top = Math.max(MARGEN, Math.min(top, window.innerHeight - alto - MARGEN));
+    const centroAncla = r.top + r.height / 2 - top;
+    burbuja.style.left = `${left}px`;
+    burbuja.style.top = `${top}px`;
+    burbuja.style.setProperty('--flecha-top', `${Math.max(12, Math.min(centroAncla, alto - 12))}px`);
+    burbuja.classList.remove('lado-derecha', 'lado-izquierda');
+    burbuja.classList.add(lado);
+    burbuja.style.visibility = 'visible';
+  }, [abierto, anclaRef, children]);
+
+  useEffect(() => {
+    if (!abierto) return undefined;
+    function cerrar() { onCerrarRef.current(); }
+    function alTocarAfuera(e) {
+      if (burbujaRef.current && burbujaRef.current.contains(e.target)) return;
+      if (anclaRef && anclaRef.current && anclaRef.current.contains(e.target)) return;
+      cerrar();
+    }
+    document.addEventListener('mousedown', alTocarAfuera);
+    document.addEventListener('touchstart', alTocarAfuera);
+    window.addEventListener('scroll', cerrar, true);
+    window.addEventListener('resize', cerrar);
+    const temporizador = autoCerrarMs > 0 ? setTimeout(cerrar, autoCerrarMs) : null;
+    return () => {
+      document.removeEventListener('mousedown', alTocarAfuera);
+      document.removeEventListener('touchstart', alTocarAfuera);
+      window.removeEventListener('scroll', cerrar, true);
+      window.removeEventListener('resize', cerrar);
+      if (temporizador) clearTimeout(temporizador);
+    };
+  }, [abierto, autoCerrarMs, anclaRef]);
+
+  if (!abierto || typeof document === 'undefined') return null;
+  return createPortal(
+    <div ref={burbujaRef} className="comentario-flotante" role="status" style={{ visibility: 'hidden', left: 0, top: 0 }}>
+      <button type="button" className="comentario-flotante-cerrar" onClick={() => onCerrarRef.current()} aria-label="Cerrar aviso">
+        ✕
+      </button>
+      {children}
+    </div>,
+    document.body
+  );
+}
+
 function PedidoRow({
   pedido,
   categoria,
@@ -5408,11 +5492,42 @@ function PedidoRow({
   const [candadoAbierto, setCandadoAbierto] = useState(false);
   const puedoEditarPedido = soyDuenoDelPedido || sinDuenoAsignado || (puedeSaltarCandado && candadoAbierto);
 
+  // Aviso flotante (tipo comentario de Word) de esta fila — ver
+  // "AvisoFlotante" arriba. Solo uno a la vez; cada tipo se ancla al campo o
+  // iconito que lo provocó:
+  //   'reabrir'             → al menú de Estado (se intentó reabrir un
+  //                           Cancelado de hace más de 1 hora)
+  //   'reembolsoSinPermiso' → al menú de Estado (se eligió "Reembolsado" sin
+  //                           tener el permiso directo)
+  //   'noEsTuyo'            → al iconito 🔒 (pedido ajeno)
+  //   'candadoAbierto'      → al iconito 🔓 (se acaba de desbloquear)
+  //   'solicitudPendiente'  → al iconito ⏳ (ya se mandó la solicitud)
+  const [avisoAbierto, setAvisoAbierto] = useState(null);
+  const selectEstadoRef = useRef(null);
+  const iconoCandadoRef = useRef(null);
+  const iconoCandadoAbiertoRef = useRef(null);
+  const iconoPendienteRef = useRef(null);
+  const anclaDelAviso = {
+    reabrir: selectEstadoRef,
+    reembolsoSinPermiso: selectEstadoRef,
+    noEsTuyo: iconoCandadoRef,
+    candadoAbierto: iconoCandadoAbiertoRef,
+    solicitudPendiente: iconoPendienteRef,
+  }[avisoAbierto] || null;
+  function alternarAviso(tipo) {
+    setAvisoAbierto((actual) => (actual === tipo ? null : tipo));
+  }
+
   function handleAbrirCandado() {
     const confirmar = window.confirm(
       'Vas a alterar información de ventas de un producto que no es tuyo. ¿Seguro que quieres continuar?'
     );
-    if (confirmar) setCandadoAbierto(true);
+    if (confirmar) {
+      setCandadoAbierto(true);
+      setAvisoAbierto('candadoAbierto');
+    } else {
+      setAvisoAbierto(null);
+    }
   }
 
   // Corrección 2026-09-28 (reportada por Claudia): faltaba la manera de
@@ -5422,6 +5537,7 @@ function PedidoRow({
   // esto no pide confirmación, a diferencia de abrirlo.
   function handleCerrarCandado() {
     setCandadoAbierto(false);
+    setAvisoAbierto(null);
   }
 
   const [cantidad, setCantidad] = useState(pedido.Cantidad);
@@ -5466,8 +5582,20 @@ function PedidoRow({
   // referencia) — hay que escribir un monto mayor a cero a propósito antes
   // de que "Guardar" se habilite (ver "montoReembolsoInvalido" abajo).
   function handleCambiarEstado(nuevoEstado) {
+    // Aviso flotante (2026-09-30, pedido por Claudia): "En proceso" se
+    // sigue OFRECIENDO en el menú de un Cancelado aunque ya haya pasado la
+    // 1a hora — así el aviso sale justo cuando alguien intenta reabrirlo (y
+    // no pegado en la celda todo el tiempo). El cambio NO se aplica: el
+    // menú se queda en "Cancelado".
+    if (pedido.Estado === 'Cancelado' && nuevoEstado === 'En proceso' && !puedeReabrirCancelado) {
+      setAvisoAbierto('reabrir');
+      return;
+    }
     if (nuevoEstado === 'Reembolsado' && estado !== 'Reembolsado') {
       setMontoReembolso('');
+      if (!puedeReembolsar && !haySolicitudPendienteReembolso) setAvisoAbierto('reembolsoSinPermiso');
+    } else {
+      setAvisoAbierto(null);
     }
     setEstado(nuevoEstado);
   }
@@ -5595,58 +5723,74 @@ function PedidoRow({
         </div>
       </td>
       <td>
-        <select
-          className={cambioEstado ? 'campo-modificado' : ''}
-          value={estado}
-          onChange={(e) => handleCambiarEstado(e.target.value)}
-          disabled={!puedoEditarPedido}
-        >
-          {/* Flujo de Estados (2026-09-29): solo se ofrecen los siguientes
-              pasos válidos desde el Estado GUARDADO del pedido (nunca desde
-              el que esté seleccionado sin guardar todavía) — así nunca se
-              puede ni siquiera elegir un salto que el servidor rechazaría
-              (por ejemplo, regresar un "Pagado" directo a "Cancelado").
-              Arreglo (2026-09-30): se quita del menú "En proceso" viniendo
-              de "Cancelado" ya pasada la 1a hora (el servidor de todos
-              modos lo rechazaría). "Reembolsado" SÍ se sigue ofreciendo
-              aunque esta cuenta no tenga el candado especial de
-              Reembolsos — ver la AMPLIACIÓN de abajo: ahora en vez de
-              bloquearlo, elegirlo y guardar manda una SOLICITUD al Admin
-              en lugar de aplicar el cambio directo. */}
-          {opcionesEstadoPedido(pedido.Estado)
-            .filter((opcion) => !(pedido.Estado === 'Cancelado' && opcion === 'En proceso' && !puedeReabrirCancelado))
-            .map((opcion) => (
+        {/* Rediseño (2026-09-30, pedido por Claudia con capturas): los
+            avisos de esta columna ya NO son párrafos fijos dentro de la
+            celda (salían siempre y hacían cada fila mucho más alta) — ahora
+            son burbujitas flotantes "tipo comentario de Word" (ver
+            "AvisoFlotante") que solo salen al intentar la acción que
+            quieren prevenir, o al dar clic en el iconito (🔒 / 🔓 / ⏳) que
+            queda junto al menú, del mismo alto que el menú, sin agrandar la
+            fila. Lo único que se queda dentro de la celda es la cajita de
+            "Monto a reembolsar" (hay que escribir ahí) y el renglón corto de
+            "Reembolsado: $X" (es un dato, no un aviso). */}
+        <div className="pedido-estado-linea">
+          <select
+            ref={selectEstadoRef}
+            className={cambioEstado ? 'campo-modificado' : ''}
+            value={estado}
+            onChange={(e) => handleCambiarEstado(e.target.value)}
+            disabled={!puedoEditarPedido}
+          >
+            {/* Flujo de Estados (2026-09-29): solo se ofrecen los siguientes
+                pasos válidos desde el Estado GUARDADO del pedido (nunca desde
+                el que esté seleccionado sin guardar todavía). "En proceso"
+                viniendo de "Cancelado" se sigue ofreciendo aunque ya haya
+                pasado la 1a hora, a propósito: al elegirlo NO se aplica, solo
+                sale el aviso flotante de por qué (ver handleCambiarEstado; el
+                servidor de todos modos lo rechazaría). "Reembolsado" se
+                ofrece aunque no se tenga el permiso directo: guardarlo manda
+                una SOLICITUD al Administrador. */}
+            {opcionesEstadoPedido(pedido.Estado).map((opcion) => (
               <option key={opcion}>{opcion}</option>
             ))}
-        </select>
-        {/* AMPLIACIÓN (2026-09-30, pedido explícito de Claudia): antes esta
-            cuenta ni siquiera podía elegir "Reembolsado" sin el permiso —
-            ahora sí puede, solo que guardar no aplica el cambio directo:
-            se le envía una SOLICITUD de permiso al Administrador (ver
-            Alertas), y el pedido se queda como estaba hasta que él la
-            confirme o la cancele. */}
-        {/* Arreglo (2026-09-30, reportado por Claudia con captura): este
-            aviso aparecía en TODOS los pedidos "Pagado" sin permiso, aunque
-            nadie hubiera tocado el menú de Estado todavía — ahora solo
-            aparece mientras de verdad se esté eligiendo "Reembolsado" (y
-            solo antes de que la solicitud ya se haya mandado; una vez
-            mandada se reemplaza por el aviso de "⏳ Ya enviaste..." de
-            abajo, para no mostrar los dos a la vez). */}
-        {seleccionandoReembolsoPendiente && !puedeReembolsar && !haySolicitudPendienteReembolso && (
-          <p className="muted campo-nota">
-            🔒 No tienes el permiso para reembolsar directo — si guardas con
-            "Reembolsado" elegido, se le envía una solicitud al
-            Administrador para que la confirme o la cancele.
-          </p>
-        )}
-        {pedido.Estado === 'Cancelado' && !puedeReabrirCancelado && (
-          <p className="muted campo-nota">Ya pasó más de 1 hora — este pedido cancelado ya no se puede reabrir.</p>
-        )}
-        {/* Arreglo (2026-09-30): esta cajita SOLO aparece mientras se eligió
-            "Reembolsado" y todavía no se ha guardado — una vez guardado
-            (reembolsoYaConfirmado) desaparece por completo y se reemplaza
-            por el texto fijo de abajo, para no dejar un cuadro de texto sin
-            ningún uso ya estorbando y ensanchando la fila. */}
+          </select>
+          {!puedoEditarPedido && (
+            <button
+              ref={iconoCandadoRef}
+              type="button"
+              className="btn-icono-aviso"
+              onClick={() => alternarAviso('noEsTuyo')}
+              title="No te pertenece este pedido"
+              aria-label="No te pertenece este pedido"
+            >
+              🔒
+            </button>
+          )}
+          {puedoEditarPedido && candadoAbierto && !soyDuenoDelPedido && !sinDuenoAsignado && (
+            <button
+              ref={iconoCandadoAbiertoRef}
+              type="button"
+              className="btn-icono-aviso btn-icono-aviso-abierto"
+              onClick={handleCerrarCandado}
+              title="Candado abierto — clic para volver a bloquear esta fila"
+              aria-label="Volver a bloquear esta fila"
+            >
+              🔓
+            </button>
+          )}
+          {haySolicitudPendienteReembolso && (
+            <button
+              ref={iconoPendienteRef}
+              type="button"
+              className="btn-icono-aviso"
+              onClick={() => alternarAviso('solicitudPendiente')}
+              title="Solicitud de reembolso pendiente"
+              aria-label="Solicitud de reembolso pendiente"
+            >
+              ⏳
+            </button>
+          )}
+        </div>
         {seleccionandoReembolsoPendiente && !haySolicitudPendienteReembolso && (
           <div className="pedido-reembolso-caja">
             <label>
@@ -5663,71 +5807,57 @@ function PedidoRow({
             </label>
           </div>
         )}
-        {/* Arreglo (2026-09-30, reportado por Claudia): una vez que la
-            solicitud YA se mandó, ya no tiene caso seguir mostrando la
-            cajita editable de monto (nada de lo que se escriba ahí hace
-            ya nada) — se reemplaza por este aviso fijo, que además es lo
-            que le avisa a esta misma pantalla que deje de marcar la fila
-            como "sin guardar" (ver "haySolicitudPendienteReembolso" arriba). */}
-        {haySolicitudPendienteReembolso && (
-          <p className="muted campo-nota">
-            ⏳ Ya enviaste una solicitud de reembolso por{' '}
-            {formatearMoneda(Number(solicitudReembolsoPendiente.MontoSolicitado) || 0)} — pendiente de que el
-            Administrador la confirme o la cancele.
-          </p>
-        )}
         {reembolsoYaConfirmado && (
           <p className="muted campo-nota">
             Reembolsado:{' '}
             {montoReembolsado !== undefined ? formatearMoneda(montoReembolsado) : 'Sin registrar (antes de esta función)'}
           </p>
         )}
-        {/* Etapa 4, rediseño del candado (2026-09-28): mismo patrón visual
-            que ya usa Stock para avisar por qué la fila salió gris — pero
-            ahora, si esta cuenta SÍ tiene permiso de saltarse el candado
-            (Admin Central, o quien se lo hayan dado en 🔐 Permisos), se le
-            ofrece el candadito para desbloquear esta fila EN CONCRETO, con
-            una confirmación explícita antes de abrirlo (nunca en silencio,
-            para evitar un clic accidental sobre ventas de alguien más). */}
-        {/* Corrección 2026-09-28 (pedida por Claudia): el texto largo de
-            este aviso, al heredar "white-space: nowrap" de ".data-table td"
-            (ver global.css), se negaba a partirse en varias líneas y
-            estiraba muchísimo la columna Estado (y con ella, toda la
-            tabla) — obligando a un scroll horizontal exagerado. Se acortó
-            el mensaje Y se le puso "white-space: normal" + un ancho máximo
-            a esta columna para que ya no pueda volver a pasar, sin
-            importar qué tan largo sea el texto que se ponga aquí. */}
-        {!puedoEditarPedido && (
-          <p className="muted campo-nota">
-            🔒 No te pertenece este pedido.
-            {puedeSaltarCandado && (
-              <>
-                {' '}
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-small btn-candado-pedido"
-                  onClick={handleAbrirCandado}
-                  title="Vas a alterar información de ventas de un producto que no es tuyo"
-                >
-                  🔓 Desbloquear
-                </button>
-              </>
-            )}
-          </p>
-        )}
-        {puedoEditarPedido && candadoAbierto && !soyDuenoDelPedido && !sinDuenoAsignado && (
-          <p className="muted campo-nota campo-nota-candado-abierto">
-            🔓 Candado abierto — estás editando un pedido que no es tuyo.{' '}
-            <button
-              type="button"
-              className="btn btn-secondary btn-small btn-candado-pedido"
-              onClick={handleCerrarCandado}
-              title="Vuelve a bloquear esta fila"
-            >
-              🔒 Bloquear de nuevo
-            </button>
-          </p>
-        )}
+        <AvisoFlotante
+          anclaRef={anclaDelAviso}
+          abierto={!!avisoAbierto && !!anclaDelAviso}
+          onCerrar={() => setAvisoAbierto(null)}
+          autoCerrarMs={avisoAbierto === 'noEsTuyo' ? 0 : 7000}
+        >
+          {avisoAbierto === 'reabrir' && (
+            <>Ya pasó más de 1 hora desde que se canceló — este pedido ya no se puede reabrir.</>
+          )}
+          {avisoAbierto === 'reembolsoSinPermiso' && (
+            <>
+              🔒 No tienes el permiso para reembolsar directo — si guardas con "Reembolsado" elegido, se le envía
+              una solicitud al Administrador para que la confirme o la cancele.
+            </>
+          )}
+          {avisoAbierto === 'noEsTuyo' && (
+            <>
+              🔒 No te pertenece este pedido.
+              {puedeSaltarCandado ? (
+                <div className="comentario-flotante-acciones">
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-small"
+                    onClick={handleAbrirCandado}
+                    title="Vas a alterar información de ventas de un producto que no es tuyo"
+                  >
+                    🔓 Desbloquear
+                  </button>
+                </div>
+              ) : (
+                <> Solo su dueño (o el Admin Central) lo puede cambiar.</>
+              )}
+            </>
+          )}
+          {avisoAbierto === 'candadoAbierto' && (
+            <>🔓 Candado abierto — estás editando un pedido que no es tuyo. Para volver a bloquearlo, da clic en el 🔓.</>
+          )}
+          {avisoAbierto === 'solicitudPendiente' && haySolicitudPendienteReembolso && (
+            <>
+              ⏳ Ya enviaste una solicitud de reembolso por{' '}
+              {formatearMoneda(Number(solicitudReembolsoPendiente.MontoSolicitado) || 0)} — pendiente de que el
+              Administrador la confirme o la cancele.
+            </>
+          )}
+        </AvisoFlotante>
       </td>
       <td>
         {duenos.length === 0 ? (
@@ -5751,7 +5881,13 @@ function PedidoRow({
           className="btn btn-small"
           onClick={handleGuardar}
           disabled={!sinGuardar || guardando || montoReembolsoInvalido}
-          title={montoReembolsoInvalido ? 'Escribe el monto a reembolsar antes de guardar' : undefined}
+          title={
+            haySolicitudPendienteReembolso
+              ? 'Ya enviaste una solicitud de reembolso — pendiente de que el Administrador la confirme o la cancele'
+              : montoReembolsoInvalido
+                ? 'Escribe el monto a reembolsar antes de guardar'
+                : undefined
+          }
         >
           {haySolicitudPendienteReembolso ? 'Pendiente' : guardando ? 'Guardando…' : 'Guardar'}
         </button>
