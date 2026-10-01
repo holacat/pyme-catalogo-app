@@ -3573,4 +3573,99 @@ body.orden-arrastrando-tactil {
 .pedidos-table th {
   border-bottom: 1px solid #d9dde3;
 }
-  
+
+/* ==== P14 (2026-10-01): "Mostrar 50 / 100 / Todos" y "Ver más" ====
+   Claudia: "si tienen mucha info se agrandan a niveles poco visuales... a
+   cierto tamaño debe de haber un ... y opción de ver más... o la tabla de
+   pedidos si es muy larga, el típico recuadro de mostrar todos o 100". */
+/* Barrita debajo de las tablas largas (Stock, Pedidos, Bitácora, Estado de
+   cuenta): "Mostrando 50 de 119 pedidos · Mostrar: 50 | 100 | Todos". */
+.barra-filas {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem 1rem;
+  margin: 0.5rem 0 1rem;
+  padding: 0.45rem 0.75rem;
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+.barra-filas strong { color: var(--text); }
+.barra-filas-opciones {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.barra-filas-btn {
+  border: 1px solid var(--border);
+  background: white;
+  border-radius: 999px;
+  padding: 0.2rem 0.7rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--text);
+}
+.barra-filas-btn:hover { border-color: var(--brand); color: var(--brand-dark); }
+.barra-filas-btn.activo {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: white;
+}
+/* Botón "▾ Ver N más" / "▴ Ver menos" de las listas de avisos. */
+.ver-mas-btn {
+  display: inline-block;
+  margin: 0.3rem 0 0;
+  padding: 0.1rem 0.5rem;
+  background: none;
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--brand-dark);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ver-mas-btn:hover { border-color: var(--brand); background: white; }
+.ver-mas-btn-enlinea { margin: 0; }
+/* Dentro de la columna Dueño de Stock el botón no debe ensanchar la celda. */
+.stock-table .stock-duenos-lista li.stock-dueno-linea > .ver-mas-btn.ver-mas-btn {
+  justify-self: start;
+  width: auto;
+  min-width: 0;
+  margin-top: 0;
+}
+/* En el aviso flotante de "cambios sin guardar" (fondo oscuro o de color). */
+.aviso-flotante .ver-mas-btn { margin-bottom: 0.3rem; }
+/* Al imprimir / guardar como PDF no sale la barrita (y la tabla trae TODOS
+   los renglones, ver EstadoCuentaTab en Dashboard.jsx). */
+@media print {
+  .barra-filas,
+  .ver-mas-btn { display: none !important; }
+}
+
+/* ==== Renglón "en uso" en Stock y Pedidos (2026-10-01, Claudia: "cuando
+   toque una fila que se ponga en un azul leve que combine con el sistema,
+   para así ubicar la fila que estamos editando") ====
+   El renglón que se tocó por última vez (su fondo o cualquiera de sus
+   campos y botones) queda en azul claro, con una barrita azul a la
+   izquierda, hasta que se toque otro. Es el mismo azul suave de los avisos
+   azules del panel. Si el renglón tiene un cambio SIN GUARDAR manda el
+   amarillo de siempre (es el aviso más importante). */
+.stock-table tbody tr[data-fila-activa]:not(.fila-sin-guardar) td,
+.pedidos-table tbody tr[data-fila-activa]:not(.fila-sin-guardar) td {
+  background-color: #e8f1fc;
+}
+.stock-table tbody tr[data-fila-activa]:not(.fila-sin-guardar) td:first-child,
+.pedidos-table tbody tr[data-fila-activa]:not(.fila-sin-guardar) td:first-child {
+  box-shadow: inset 4px 0 0 #6f9fd8;
+}
+/* Arreglo de paso: en un renglón con cambios sin guardar, la columna fija
+   "Guardar" de Pedidos se quedaba en blanco en vez de amarillo. */
+.pedidos-table tbody tr.fila-sin-guardar td {
+  background-color: #fff7e0;
+}
