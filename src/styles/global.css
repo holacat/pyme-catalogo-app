@@ -3993,3 +3993,99 @@ body.orden-arrastrando-tactil {
   .sucursal-table .btn-chip { padding: 0.3rem 0.35rem; font-size: 0.72rem; }
   .sucursal-sello { padding: 0.12rem 0.4rem; font-size: 0.7rem; }
 }
+
+/* ==== Vista de CELULAR más compacta (2026-10-02) ====
+   Claudia (con capturas desde su teléfono): el panel "se ve feo" por
+   default en el celular, y tanto el panel como el catálogo se ven mucho
+   mejor con "Sitio para computadoras" — pero ahí todo queda demasiado
+   chiquito (sobre todo los botones + y −). Pidió dejarlo "más parecido a
+   esos tamaños, pero no tanto, para que tampoco sea incómodo de usar".
+
+   Qué se hace aquí, SOLO en pantallas de hasta 700px de ancho (en
+   computadora no cambia absolutamente nada):
+   1. Se arregla lo que de verdad lo afeaba: el encabezado del panel
+      ("Sesión… / Actualizar / Cerrar sesión") no cabía y se salía de la
+      pantalla; por eso el navegador encogía la página y la franja verde de
+      arriba se veía cortada. Ahora esa fila se acomoda en dos renglones.
+   2. Todo se dibuja más chico de manera pareja bajando el tamaño base de
+      la letra (casi todas las medidas del sitio están en "rem", o sea, son
+      proporcionales a él): el catálogo a 13px y el panel a 11px (lo normal
+      son 16px). Queda a medio camino entre la vista de celular de antes y
+      "Sitio para computadoras".
+   3. Lo que se toca con el dedo NO se achica al parejo: los botones + y −
+      del catálogo quedan MÁS grandes que antes, y los botoncitos de las
+      tablas conservan un alto mínimo.
+   Para hacerlo todo más grande o más chico basta cambiar los dos
+   "font-size" de aquí abajo. */
+@media (max-width: 700px) {
+  html { font-size: 13px; }
+  /* El panel lleva tablas con muchas columnas: un poco más compacto. */
+  html:has(.dashboard-header) { font-size: 11px; }
+
+  .app-header { padding: 0.75rem 1rem; }
+  main { padding: 1rem 0.8rem; }
+
+  /* Los campos que no tenían tamaño de letra propio usaban el del
+     navegador (más grande que lo demás): que sigan al resto del texto. */
+  select, input, textarea { font-size: 1rem; }
+
+  /* ---- Panel: encabezado en dos renglones, sin salirse de la pantalla ---- */
+  .dashboard-header { flex-wrap: wrap; gap: 0.5rem 0.8rem; }
+  .dashboard-header h2 { margin: 0; font-size: 1.35rem; }
+  .dashboard-header-acciones {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    min-width: 0;
+    margin-left: auto;
+  }
+  .dashboard-header-acciones .btn { padding: 0.5rem 0.75rem; white-space: nowrap; }
+  .texto-usuario-conectado { white-space: normal; overflow-wrap: anywhere; }
+
+  /* ---- Panel: pestañas ---- */
+  .tabs { gap: 0.4rem; }
+  .tabs button { padding: 0.55rem 0.7rem; }
+
+  /* ---- Panel: tablas más apretadas (caben más columnas a la vista). Los
+     títulos largos ("FECHA AGREGADO") pueden ir en dos renglones. ---- */
+  .data-table th, .data-table td { padding: 0.45rem 0.4rem; }
+  .data-table th { white-space: normal; line-height: 1.15; }
+  .stock-table th, .stock-table td,
+  .pedidos-table th, .pedidos-table td { padding: 0.35rem 0.28rem; }
+  .stock-table th:nth-child(3), .stock-table td:nth-child(3) { max-width: 108px; }
+  .stock-table th:nth-child(4), .stock-table td:nth-child(4) { max-width: 78px; }
+  .stock-table th:nth-child(5), .stock-table td:nth-child(5) { max-width: 68px; }
+  .stock-table .stock-thumb, .stock-table .stock-thumb-vacia { width: 24px; height: 24px; }
+  .stock-table .stock-editor input { width: 58px; }
+  .pedido-input-cant { width: 42px; }
+  .pedido-input-tel { width: 86px; }
+  .pedido-input-notas { width: 84px; }
+  .pedidos-filtro-dueno-admin select {
+    padding: 0.35rem 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: white;
+  }
+
+  /* Botoncitos de las tablas: la letra se achica, pero el botón conserva
+     un alto mínimo para atinarle con el dedo. */
+  .btn-chip, .btn-small { min-height: 20px; }
+  .stock-table .btn-chip, .stock-table .btn-small { min-height: 18px; }
+
+  /* Orden del catálogo: la agarradera ⠿ para arrastrar con el dedo se queda
+     del tamaño de antes (en px, para que no se achique con lo demás). */
+  @media (pointer: coarse) {
+    .orden-agarradera { font-size: 22px; padding: 9px 8px; }
+    .orden-categoria-header .orden-agarradera { font-size: 23px; }
+  }
+
+  /* ---- Catálogo: se ven dos productos por renglón (y asoma el tercero,
+     para que se note que se puede deslizar). Antes cabía uno solo. ---- */
+  .categoria-carrusel .product-card { flex: 0 0 45%; max-width: none; }
+  .categoria-carrusel .product-body { padding: 0.7rem 0.6rem 0.8rem; }
+  .categoria-carrusel .product-body h3 { font-size: 1rem; }
+  .categoria-carrusel .product-actions .btn { font-size: 0.82rem; padding: 0.6rem 0.3rem; }
+  /* Botones + y −: más grandes que antes, para el dedo. */
+  .cantidad-selector button { width: 30px; height: 30px; min-width: 30px; font-size: 1.15rem; }
+  .catalog-grid .cantidad-selector button { width: 24px; height: 24px; min-width: 24px; font-size: 1rem; }
+}
