@@ -3738,6 +3738,29 @@ body.orden-arrastrando-tactil {
   border-radius: 8px;
   font-size: 0.85rem;
 }
+/* El mensaje se puede minimizar (Claudia, 2026-10-02: "está muy largo"):
+   queda una pastillita con cuántos hay y el filtro al lado. */
+.papelera-texto { flex: 1 1 22rem; min-width: 0; }
+.papelera-barra-mini {
+  display: inline-flex;
+  justify-content: flex-start;
+  padding: 0.25rem 0.7rem 0.25rem 0.3rem;
+  border-radius: 999px;
+}
+.papelera-pastilla,
+.papelera-minimizar {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border: 1px solid #b9cdf0;
+  background: #fff;
+  border-radius: 999px;
+  padding: 0.2rem 0.7rem;
+  white-space: nowrap;
+}
+.papelera-minimizar { font-size: 0.8rem; color: #3d5a8a; }
+.papelera-pastilla:hover,
+.papelera-minimizar:hover { background: #dfe9f8; }
 .papelera-filtro {
   display: inline-flex;
   align-items: center;
