@@ -6329,9 +6329,13 @@ function SucursalTab({ sucursales, usuarioId, esAdminCentral, sesionToken, onCam
                   <td>
                     {p.foto ? <img className="sucursal-foto" src={p.foto} alt="" loading="lazy" /> : <span className="muted">—</span>}
                   </td>
-                  <td className="sucursal-celda-nombre">{p.nombre}</td>
-                  <td>{p.codigo || '—'}</td>
-                  <td>{p.categoria}</td>
+                  {/* Nombre, código y categoría largos se recortan con "…"
+                      (clic para verlos completos), igual que en Stock —
+                      Claudia, 2026-10-02: "el nombre del producto se ve
+                      desproporcionado… no recorta". */}
+                  <td className="sucursal-celda-nombre"><CeldaTruncada texto={p.nombre} /></td>
+                  <td>{p.codigo ? <CeldaTruncada texto={p.codigo} /> : '—'}</td>
+                  <td><CeldaTruncada texto={p.categoria} /></td>
                   <td>{p.cantidad}</td>
                   <td>{p.enProceso || 0}</td>
                   <td><strong>{p.disponible}</strong></td>
