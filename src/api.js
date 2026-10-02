@@ -413,3 +413,12 @@ export function responderSolicitudReembolso({ sesionToken, solicitudId, aceptar 
 export function marcarSolicitudReembolsoVista({ sesionToken, solicitudId }) {
   return post({ action: 'marcarSolicitudReembolsoVista', sesionToken, solicitudId });
 }
+
+// ---- Papelera de la Bitácora (P1, 2026-10-02) ----
+// Deshace un cambio de la Bitácora. Solo el Admin Central (el backend
+// también lo revisa). Con "soloRevisar: true" no cambia nada: solo contesta
+// qué pasaría ({ sePuede, motivo, lineas, avisos }), para enseñarlo en la
+// ventana de confirmación antes de restaurar de verdad.
+export function restaurarCambio({ sesionToken, papeleraId, soloRevisar }) {
+  return post({ action: 'restaurarCambio', sesionToken, papeleraId, soloRevisar: !!soloRevisar });
+}
