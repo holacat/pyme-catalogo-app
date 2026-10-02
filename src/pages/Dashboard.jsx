@@ -22,6 +22,7 @@ import {
   actualizarOrdenOfertas,
   renombrarZonaOfertas,
   quitarTodasLasOfertas,
+  restaurarCambio,
   renombrarCategoria,
   eliminarCategoria,
   crearUsuario,
@@ -641,6 +642,11 @@ export default function Dashboard() {
   const [alertas, setAlertas] = useState([]);
   const [movimientos, setMovimientos] = useState([]);
   const [bitacora, setBitacora] = useState([]);
+  // Papelera (P1, 2026-10-02): qué renglones de la Bitácora se pueden
+  // restaurar todavía (o ya se restauraron). Solo le llega al Admin Central;
+  // a los demás les llega vacía. "papeleraDias" = cuántos días se guardan.
+  const [papelera, setPapelera] = useState([]);
+  const [papeleraDias, setPapeleraDias] = useState(30);
     const [usuarios, setUsuarios] = useState([]);
   // Funcionalidad 2 (Stock personal + transferencias, 2026-09): lista
   // completa de solicitudes (para el historial de Admin/Admin Central), y
@@ -1122,6 +1128,8 @@ export default function Dashboard() {
         setOpciones(r.opciones || {});
         setMovimientos(r.movimientos || []);
         setBitacora(r.bitacora || []);
+        setPapelera(r.papelera || []);
+        if (r.papeleraDias) setPapeleraDias(r.papeleraDias);
         setUsuarios(r.usuarios || []);
         setTransferencias(r.transferencias || []);
         // Arreglo (2026-09-25, reportado por Claudia: el aviso de "sigue
@@ -1286,6 +1294,7 @@ export default function Dashboard() {
     setAlertas([]);
     setMovimientos([]);
     setBitacora([]);
+    setPapelera([]);
     setUsuarios([]);
     setTransferencias([]);
     setTransferenciasPendientes([]);
@@ -1389,7 +1398,7 @@ export default function Dashboard() {
 
    function handleEliminarProducto(producto) {
     const confirmar = window.confirm(
-      `¿Seguro que quieres eliminar "${producto.Nombre}" para siempre? Esta acción no se puede deshacer desde la app.`
+      `¿Seguro que quieres eliminar "${producto.Nombre}"? Si fue un error, el Admin Central puede regresarlo desde la Bitácora durante ${papeleraDias} días; después ya no.`
     );
     if (!confirmar) return;
     iniciarCarga();
@@ -2705,7 +2714,18 @@ export default function Dashboard() {
         <EstadoCuentaTab movimientos={movimientos} pedidos={pedidos} productos={productos} />
       )}
 
-      {tab === 'bitacora' && puedeVer('bitacora') && <BitacoraTab bitacora={bitacora} />}
+      {tab === 'bitacora' && puedeVer('bitacora') && (
+        <BitacoraTab
+          bitacora={bitacora}
+          papelera={papelera}
+          papeleraDias={papeleraDias}
+          esAdminCentral={esAdminCentral}
+          sesionToken={sesionToken}
+          onCambio={() => cargarTodo(sesionToken, { silencioso: true })}
+          iniciarCarga={iniciarCarga}
+          terminarCarga={terminarCarga}
+        />
+      )}
 
       {tab === 'usuarios' && puedeVer('usuarios') && (
         <UsuariosTab
@@ -5003,8 +5023,8 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
               mejor usa "Ocultar".
             </p>
             <div className="aviso-peligro">
-              ⚠️ Para volver a poner una oferta habría que escribirle otra vez su precio de oferta a cada producto (en la
-              Bitácora queda anotado el precio de oferta que tenía cada uno).
+              ⚠️ Si fue un error, el Admin Central puede regresar todas las ofertas de un jalón desde la Bitácora durante
+              30 días. Después de eso habría que escribirle otra vez su precio de oferta a cada producto.
               <label className="modal-opcion-checkbox">
                 <input
                   type="checkbox"
@@ -5124,14 +5144,14 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
                 checked={borrarProductosTambien}
                 onChange={() => setBorrarProductosTambien(true)}
               />
-              Borrar la categoría Y sus {eliminando.cantidad} producto{eliminando.cantidad === 1 ? '' : 's'}{' '}
-              para siempre.
+              Borrar la categoría Y sus {eliminando.cantidad} producto{eliminando.cantidad === 1 ? '' : 's'}.
             </label>
 
             {borrarProductosTambien && (
               <div className="aviso-peligro">
-                ⚠️ Esto NO se puede deshacer desde la app: se van a borrar {eliminando.cantidad}{' '}
-                producto{eliminando.cantidad === 1 ? '' : 's'} de tu inventario para siempre.
+                ⚠️ Se van a borrar {eliminando.cantidad} producto{eliminando.cantidad === 1 ? '' : 's'} de tu
+                inventario. Si fue un error, el Admin Central puede regresarlos desde la Bitácora durante 30 días;
+                después de eso ya no se pueden recuperar desde la app.
                 <label className="modal-opcion-checkbox">
                   <input
                     type="checkbox"
@@ -6042,9 +6062,60 @@ function normalizarParaFiltro(texto) {
     .toUpperCase();
 }
 
-function BitacoraTab({ bitacora }) {
+function BitacoraTab({ bitacora, papelera = [], papeleraDias = 30, esAdminCentral = false, sesionToken, onCambio, iniciarCarga, terminarCarga }) {
   const [desde, setDesde] = useState('');
   const [hasta, setHasta] = useState('');
+  // ---- Papelera (P1 de la lista de Claudia, 2026-10-02) ----
+  // "Que haya una opción de restaurar cualquier cambio de la bitácora, como
+  // una tipo papelera… con sus respectivos avisos… solo en el Admin
+  // Central." Cada renglón de la Bitácora que todavía se puede deshacer
+  // trae un botón "↩ Restaurar" (solo lo ve el Admin Central). Al darle
+  // clic NO se restaura nada todavía: primero el servidor contesta, en
+  // palabras, qué va a cambiar y de qué hay que tener cuidado; se enseña en
+  // una ventana y solo se aplica si se confirma.
+  const papeleraPorId = {};
+  papelera.forEach((p) => { papeleraPorId[String(p.ID)] = p; });
+  const hayPapelera = esAdminCentral;
+  const [soloRestaurables, setSoloRestaurables] = useState(false);
+  // { renglon, cargando, plan: { sePuede, motivo, lineas, avisos } | null, error }
+  const [restaurando, setRestaurando] = useState(null);
+  const [confirmoRestaurar, setConfirmoRestaurar] = useState(false);
+  const [aplicandoRestaurar, setAplicandoRestaurar] = useState(false);
+  const [avisoRestaurado, setAvisoRestaurado] = useState('');
+
+  function abrirRestaurar(renglon) {
+    setAvisoRestaurado('');
+    setConfirmoRestaurar(false);
+    setRestaurando({ renglon, cargando: true, plan: null, error: '' });
+    restaurarCambio({ sesionToken, papeleraId: renglon.ID, soloRevisar: true })
+      .then((plan) => {
+        setRestaurando((actual) => (actual && actual.renglon.ID === renglon.ID ? { renglon, cargando: false, plan, error: '' } : actual));
+      })
+      .catch((err) => {
+        setRestaurando((actual) => (actual && actual.renglon.ID === renglon.ID ? { renglon, cargando: false, plan: null, error: err.message } : actual));
+      });
+  }
+
+  function confirmarRestaurar() {
+    if (!restaurando || !restaurando.plan || !restaurando.plan.sePuede) return;
+    if (restaurando.plan.avisos.length > 0 && !confirmoRestaurar) return;
+    const renglon = restaurando.renglon;
+    setAplicandoRestaurar(true);
+    iniciarCarga?.();
+    restaurarCambio({ sesionToken, papeleraId: renglon.ID })
+      .then(() => {
+        setRestaurando(null);
+        setAvisoRestaurado(`Listo: se restauró "${renglon.Accion}" (el del ${formatearFechaHora(renglon.Fecha)}). Quedó anotado en la Bitácora como "Restaurar cambio".`);
+        return onCambio?.();
+      })
+      .catch((err) => {
+        setRestaurando((actual) => (actual ? { ...actual, error: err.message } : actual));
+      })
+      .finally(() => {
+        setAplicandoRestaurar(false);
+        terminarCarga?.();
+      });
+  }
   // Filtros nuevos (2026-10-01, pendiente P7 de Claudia: "que la bitácora
   // haya un filtro para filtrar por usuarios u acciones"). Las listas de
   // opciones se arman solas con lo que de verdad existe en la Bitácora, así
@@ -6071,11 +6142,17 @@ function BitacoraTab({ bitacora }) {
   const opcionesAccion = opcionesUnicas('Accion');
 
   const textoBuscado = normalizarParaFiltro(buscarDetalle);
+  const esRestaurable = (b) => {
+    const entrada = papeleraPorId[String(b.ID)];
+    return !!entrada && entrada.Estado !== 'Restaurado';
+  };
+  const cuantosRestaurables = hayPapelera ? bitacoraOrdenada.filter(esRestaurable).length : 0;
   const bitacoraFiltrada = bitacoraOrdenada.filter((b) => (
     movimientoEnRangoDeFecha(b, desde, hasta) &&
     (!filtroUsuario || normalizarParaFiltro(b.Usuario) === filtroUsuario) &&
     (!filtroAccion || normalizarParaFiltro(b.Accion) === filtroAccion) &&
-    (!textoBuscado || normalizarParaFiltro(conEtiquetasDeEstado(b.Detalle)).includes(textoBuscado))
+    (!textoBuscado || normalizarParaFiltro(conEtiquetasDeEstado(b.Detalle)).includes(textoBuscado)) &&
+    (!(hayPapelera && soloRestaurables) || esRestaurable(b))
   ));
 
   // P14: de los movimientos que pasan los filtros, cuántos se dibujan (los
@@ -6085,7 +6162,7 @@ function BitacoraTab({ bitacora }) {
   const bitacoraVisible = recortarFilas(bitacoraFiltrada, limiteFilas);
 
   const hayFiltroFechas = !!(desde || hasta);
-  const hayOtrosFiltros = !!(filtroUsuario || filtroAccion || buscarDetalle);
+  const hayOtrosFiltros = !!(filtroUsuario || filtroAccion || buscarDetalle || (hayPapelera && soloRestaurables));
 
   function limpiarFiltro() {
     setDesde('');
@@ -6096,6 +6173,7 @@ function BitacoraTab({ bitacora }) {
     setFiltroUsuario('');
     setFiltroAccion('');
     setBuscarDetalle('');
+    setSoloRestaurables(false);
   }
 
   return (
@@ -6148,6 +6226,22 @@ function BitacoraTab({ bitacora }) {
         )}
       </div>
 
+      {/* Papelera: explicación corta + filtro, solo para el Admin Central. */}
+      {hayPapelera && (
+        <div className="papelera-barra">
+          <span>
+            🗑️ <strong>Papelera:</strong> puedes deshacer los cambios de productos, stock y catálogo de los últimos{' '}
+            {papeleraDias} días con el botón <strong>↩ Restaurar</strong> de su renglón. Hoy hay{' '}
+            <strong>{cuantosRestaurables}</strong> que se pueden restaurar.
+          </span>
+          <label className="papelera-filtro">
+            <input type="checkbox" checked={soloRestaurables} onChange={(e) => setSoloRestaurables(e.target.checked)} />
+            Ver solo lo que se puede restaurar
+          </label>
+        </div>
+      )}
+      {avisoRestaurado && <p className="papelera-listo" role="status">✅ {avisoRestaurado}</p>}
+
       <p className="muted">
         {textoRangoFechas(desde, hasta)} · {bitacoraFiltrada.length} cambio{bitacoraFiltrada.length === 1 ? '' : 's'}
         {hayOtrosFiltros ? ' con los filtros de arriba' : ''}
@@ -6161,6 +6255,7 @@ function BitacoraTab({ bitacora }) {
               <th>Usuario</th>
               <th>Acción</th>
               <th>Detalle</th>
+              {hayPapelera && <th>Restaurar</th>}
             </tr>
           </thead>
           <tbody>
@@ -6182,6 +6277,26 @@ function BitacoraTab({ bitacora }) {
                     pueda leer el detalle completo envuelto en varias líneas
                     dentro de la misma celda. */}
                 <td><CeldaTruncada texto={b.Detalle ? conEtiquetasDeEstado(b.Detalle) : '—'} /></td>
+                {hayPapelera && (
+                  <td className="papelera-celda">
+                    {(() => {
+                      const entrada = papeleraPorId[String(b.ID)];
+                      if (!entrada) return <span className="muted">—</span>;
+                      if (entrada.Estado === 'Restaurado') {
+                        return (
+                          <span className="papelera-restaurado" title={entrada.FechaRestaurado ? `Restaurado el ${formatearFechaHora(entrada.FechaRestaurado)}` : undefined}>
+                            ✔ Restaurado{entrada.RestauradoPor ? ` por ${entrada.RestauradoPor}` : ''}
+                          </span>
+                        );
+                      }
+                      return (
+                        <button type="button" className="btn btn-secondary btn-small papelera-btn" onClick={() => abrirRestaurar(b)}>
+                          ↩ Restaurar
+                        </button>
+                      );
+                    })()}
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
@@ -6197,6 +6312,72 @@ function BitacoraTab({ bitacora }) {
         onCambiar={setLimiteFilas}
         nombre="cambios"
       />
+
+      {/* Ventana de confirmación de la Papelera. Primero se ve QUÉ va a
+          pasar (lo calcula el servidor con los datos de este momento); no se
+          cambia nada hasta darle "Restaurar". */}
+      {restaurando && (
+        <div className="modal-overlay" onClick={() => { if (!aplicandoRestaurar) setRestaurando(null); }}>
+          <div className="modal-box modal-box-papelera" onClick={(e) => e.stopPropagation()}>
+            <h3>↩ Restaurar este cambio</h3>
+            <div className="papelera-cambio">
+              <p>
+                <strong>{restaurando.renglon.Accion || 'Cambio'}</strong> · {formatearFechaHora(restaurando.renglon.Fecha)} ·{' '}
+                {restaurando.renglon.Usuario || '—'}
+              </p>
+              <p className="muted papelera-cambio-detalle">{conEtiquetasDeEstado(restaurando.renglon.Detalle || '')}</p>
+            </div>
+
+            {restaurando.cargando && <p className="muted">Revisando qué pasaría al restaurarlo…</p>}
+
+            {restaurando.plan && !restaurando.plan.sePuede && (
+              <div className="aviso-peligro">
+                🚫 Este cambio no se puede restaurar: {restaurando.plan.motivo}
+              </div>
+            )}
+
+            {restaurando.plan && restaurando.plan.sePuede && (
+              <>
+                <p className="papelera-subtitulo">Esto es lo que va a pasar:</p>
+                <ul className="papelera-lineas">
+                  {restaurando.plan.lineas.map((linea, i) => <li key={i}>{linea}</li>)}
+                </ul>
+                {restaurando.plan.avisos.length > 0 && (
+                  <div className="aviso-peligro">
+                    <strong>⚠️ Antes de restaurar, toma en cuenta:</strong>
+                    <ul className="papelera-avisos">
+                      {restaurando.plan.avisos.map((aviso, i) => <li key={i}>{aviso}</li>)}
+                    </ul>
+                    <label className="modal-opcion-checkbox">
+                      <input type="checkbox" checked={confirmoRestaurar} onChange={(e) => setConfirmoRestaurar(e.target.checked)} />
+                      Sí, entiendo, quiero restaurarlo.
+                    </label>
+                  </div>
+                )}
+                <p className="muted">Lo demás no se toca. Restaurar queda anotado en la Bitácora con tu nombre.</p>
+              </>
+            )}
+
+            {restaurando.error && <p className="info-msg error">Error: {restaurando.error}</p>}
+
+            <div className="modal-actions">
+              <button type="button" className="btn btn-secondary" disabled={aplicandoRestaurar} onClick={() => setRestaurando(null)}>
+                {restaurando.plan && !restaurando.plan.sePuede ? 'Cerrar' : 'Cancelar'}
+              </button>
+              {restaurando.plan && restaurando.plan.sePuede && (
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={aplicandoRestaurar || (restaurando.plan.avisos.length > 0 && !confirmoRestaurar)}
+                  onClick={confirmarRestaurar}
+                >
+                  {aplicandoRestaurar ? 'Restaurando…' : '↩ Restaurar'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
