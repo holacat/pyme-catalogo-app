@@ -2908,54 +2908,166 @@ const CAMPOS_CON_OPCIONES = [
 // nada, el valor que ya tenía se queda igual. También se puede seguir
 // escribiendo libremente como antes (no es obligatorio elegir de la
 // lista).
+//
+// Arreglo (2026-10-02, reportado por Claudia: "sigue fallando... cuando le
+// damos clic a un campo y ya tiene una categoría dentro debería seguir
+// viendo cuáles otras hay... si le doy clic no veo qué más hay a menos que
+// la borre"). La causa: la lista solo se abría cuando el campo RECIBÍA el
+// foco. Después de elegir una opción el campo se queda con el foco, así que
+// volver a darle clic ya no hacía nada (no hay un "nuevo" foco) y parecía
+// que no había más opciones. Ahora la lista se abre:
+//   - al dar clic o tocar el campo, SIEMPRE (tenga o no el foco, tenga o no
+//     algo escrito), mostrando TODAS las opciones;
+//   - con la flechita ▾ de la derecha (abre y cierra);
+//   - al escribir (ahí sí se acorta a las opciones que contienen lo
+//     escrito, para encontrarlas rápido; si ninguna coincide, se ven todas);
+//   - con las flechas ↓ ↑ del teclado (Enter elige, Esc cierra).
+// La opción que ya está puesta se marca con ✓. El campo nunca se vacía
+// solo: solo cambia si eliges otra opción o escribes otra cosa.
 function CampoConOpciones({ id, valor, onChange, opciones = [], placeholder, maxLength, required }) {
   const [abierta, setAbierta] = useState(false);
+  // "filtrando" = la lista se abrió (o siguió abierta) porque se está
+  // escribiendo. Si se abrió con clic / flechita / foco, se ven todas.
+  const [filtrando, setFiltrando] = useState(false);
+  const [resaltada, setResaltada] = useState(-1); // opción marcada con el teclado
   const wrapperRef = useRef(null);
+  const listaRef = useRef(null);
 
-  // Cierra la lista si se hace clic fuera de este campo (en vez de usar
-  // onBlur del <input>, que se dispararía ANTES del clic en una opción y
-  // la cerraría antes de que ese clic pudiera registrarse).
+  const texto = String(valor ?? '').trim().toLowerCase();
+  const coincidencias = filtrando && texto ? opciones.filter((o) => String(o).toLowerCase().includes(texto)) : opciones;
+  // Si lo escrito no se parece a ninguna opción, se enseñan todas (mejor
+  // que una lista vacía: así se ve qué hay para elegir).
+  const visibles = coincidencias.length > 0 ? coincidencias : opciones;
+  const mostrarLista = abierta && visibles.length > 0;
+
+  function abrir(conFiltro) {
+    setFiltrando(!!conFiltro);
+    setResaltada(-1);
+    setAbierta(true);
+  }
+  function cerrar() {
+    setAbierta(false);
+    setFiltrando(false);
+    setResaltada(-1);
+  }
+
+  // Cierra la lista si se hace clic / se toca fuera de este campo (en vez
+  // de usar onBlur del <input>, que se dispararía ANTES del clic en una
+  // opción y la cerraría antes de que ese clic pudiera registrarse).
   useEffect(() => {
     if (!abierta) return undefined;
-    function alHacerClicFuera(e) {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target)) {
-        setAbierta(false);
-      }
+    function alTocarFuera(e) {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target)) cerrar();
     }
-    document.addEventListener('mousedown', alHacerClicFuera);
-    return () => document.removeEventListener('mousedown', alHacerClicFuera);
+    document.addEventListener('mousedown', alTocarFuera);
+    document.addEventListener('touchstart', alTocarFuera);
+    return () => {
+      document.removeEventListener('mousedown', alTocarFuera);
+      document.removeEventListener('touchstart', alTocarFuera);
+    };
   }, [abierta]);
+
+  // Con el teclado: que la opción marcada siempre quede a la vista.
+  useEffect(() => {
+    if (!mostrarLista || resaltada < 0 || !listaRef.current) return;
+    const el = listaRef.current.children[resaltada];
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
+  }, [resaltada, mostrarLista]);
 
   function elegirOpcion(v) {
     onChange(v);
-    setAbierta(false);
+    cerrar();
+  }
+
+  function alTeclear(e) {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      if (opciones.length === 0) return;
+      e.preventDefault();
+      if (!mostrarLista) {
+        abrir(false);
+        return;
+      }
+      const paso = e.key === 'ArrowDown' ? 1 : -1;
+      setResaltada((actual) => (actual + paso + visibles.length) % visibles.length);
+    } else if (e.key === 'Enter') {
+      // Enter solo elige si hay una opción marcada con las flechas; si no,
+      // hace lo de siempre (mandar el formulario).
+      if (mostrarLista && resaltada >= 0 && resaltada < visibles.length) {
+        e.preventDefault();
+        elegirOpcion(visibles[resaltada]);
+      }
+    } else if (e.key === 'Escape') {
+      if (mostrarLista) {
+        e.stopPropagation();
+        cerrar();
+      }
+    } else if (e.key === 'Tab') {
+      cerrar();
+    }
   }
 
   return (
-    <div className="campo-opciones" ref={wrapperRef}>
+    <div className={`campo-opciones${opciones.length > 0 ? ' campo-opciones-con-flecha' : ''}`} ref={wrapperRef}>
       <input
         id={id}
         value={valor}
-        onChange={(e) => onChange(e.target.value)}
-        onFocus={() => setAbierta(true)}
+        onChange={(e) => {
+          onChange(e.target.value);
+          abrir(true);
+        }}
+        onFocus={() => abrir(false)}
+        // "onClick" además de "onFocus": si el campo YA tiene el foco (por
+        // ejemplo, justo después de elegir una opción), un clic no dispara
+        // un foco nuevo — sin esto la lista no volvía a abrirse.
+        onClick={() => abrir(false)}
+        onKeyDown={alTeclear}
         placeholder={placeholder}
         maxLength={maxLength}
         required={required}
         autoComplete="off"
+        role={opciones.length > 0 ? 'combobox' : undefined}
+        aria-expanded={opciones.length > 0 ? mostrarLista : undefined}
+        aria-autocomplete={opciones.length > 0 ? 'list' : undefined}
       />
-      {abierta && opciones.length > 0 && (
-        <ul className="campo-opciones-lista">
-          {opciones.map((v) => (
-            <li key={v}>
-              {/* onMouseDown con preventDefault (en vez de onClick solo) para
-                  que el clic elija la opción ANTES de que el <input> pierda
-                  el foco — así no hay parpadeo ni carrera con el cierre por
-                  clic-fuera de arriba. */}
-              <button type="button" onMouseDown={(e) => { e.preventDefault(); elegirOpcion(v); }}>
-                {v}
-              </button>
-            </li>
-          ))}
+      {opciones.length > 0 && (
+        <button
+          type="button"
+          className="campo-opciones-flecha"
+          tabIndex={-1}
+          aria-label={mostrarLista ? 'Cerrar la lista de opciones' : 'Ver todas las opciones'}
+          title={mostrarLista ? 'Cerrar la lista' : 'Ver todas las opciones'}
+          // onMouseDown + preventDefault: no le quita el foco al campo.
+          onMouseDown={(e) => {
+            e.preventDefault();
+            if (mostrarLista) cerrar();
+            else abrir(false);
+          }}
+        >
+          {mostrarLista ? '▴' : '▾'}
+        </button>
+      )}
+      {mostrarLista && (
+        <ul className="campo-opciones-lista" ref={listaRef} role="listbox">
+          {visibles.map((v, i) => {
+            const esActual = String(v) === String(valor ?? '');
+            return (
+              <li key={v} role="option" aria-selected={esActual}>
+                {/* onMouseDown con preventDefault (en vez de onClick solo) para
+                    que el clic elija la opción ANTES de que el <input> pierda
+                    el foco — así no hay parpadeo ni carrera con el cierre por
+                    clic-fuera de arriba. */}
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  className={`${esActual ? 'opcion-actual' : ''}${i === resaltada ? ' opcion-resaltada' : ''}`}
+                  onMouseDown={(e) => { e.preventDefault(); elegirOpcion(v); }}
+                >
+                  <span className="opcion-palomita" aria-hidden="true">{esActual ? '✓' : ''}</span>
+                  {v}
+                </button>
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>
