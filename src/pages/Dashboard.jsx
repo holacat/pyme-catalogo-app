@@ -46,6 +46,9 @@ import {
   // están arriba en este mismo import.
   responderSolicitudReembolso,
   marcarSolicitudReembolsoVista,
+  // Catálogos por sucursal (2026-10-02).
+  actualizarCatalogoPropio,
+  actualizarCatalogoSucursal,
 } from '../api.js';
 import ImageUploader from '../components/ImageUploader.jsx';
 import ImageLightbox from '../components/ImageLightbox.jsx';
@@ -647,6 +650,10 @@ export default function Dashboard() {
   // a los demás les llega vacía. "papeleraDias" = cuántos días se guardan.
   const [papelera, setPapelera] = useState([]);
   const [papeleraDias, setPapeleraDias] = useState(30);
+  // Catálogos por sucursal (2026-10-02): la(s) sucursal(es) que esta cuenta
+  // puede ver en "🏪 Mi sucursal" — la suya si tiene "Catálogo propio"
+  // prendido; el Admin Central recibe todas. Ver SucursalTab.
+  const [sucursales, setSucursales] = useState([]);
     const [usuarios, setUsuarios] = useState([]);
   // Funcionalidad 2 (Stock personal + transferencias, 2026-09): lista
   // completa de solicitudes (para el historial de Admin/Admin Central), y
@@ -1130,6 +1137,7 @@ export default function Dashboard() {
         setBitacora(r.bitacora || []);
         setPapelera(r.papelera || []);
         if (r.papeleraDias) setPapeleraDias(r.papeleraDias);
+        setSucursales(r.sucursales || []);
         setUsuarios(r.usuarios || []);
         setTransferencias(r.transferencias || []);
         // Arreglo (2026-09-25, reportado por Claudia: el aviso de "sigue
@@ -1295,6 +1303,7 @@ export default function Dashboard() {
     setMovimientos([]);
     setBitacora([]);
     setPapelera([]);
+    setSucursales([]);
     setUsuarios([]);
     setTransferencias([]);
     setTransferenciasPendientes([]);
@@ -1538,6 +1547,15 @@ export default function Dashboard() {
     setProductoFijadoId(productoId);
     setProductoResaltadoId(productoId);
     setTimeout(() => setProductoResaltadoId(null), 4000);
+  }
+
+  // "Pedir más" desde "🏪 Mi sucursal" (2026-10-02): lleva al producto en
+  // Stock, donde ya existe el botón para pedirle piezas a quien tenga. Se
+  // quitan antes los filtros de Stock, porque con "Solo lo mío" puesto un
+  // producto del que ya no tengo piezas no aparecería.
+  function irAStockParaPedirMas(productoId) {
+    limpiarFiltrosStock();
+    irAStockYResaltar(productoId);
   }  
 
   // Solo un Administrador puede usar esto (el backend también lo revisa):
@@ -1644,6 +1662,25 @@ export default function Dashboard() {
     codigoPorProductoId[p.ID] = p.CodigoPropio || '';
     duenosPorProductoId[p.ID] = p.Duenos || [];
   });
+
+  // Catálogos por sucursal (2026-10-02): un pedido que llegó por el catálogo
+  // de una persona es SOLO de esa persona (aunque el producto tenga más
+  // dueños, y aunque a ella ya se le hayan acabado las piezas) — misma regla
+  // que aplica el servidor en "actualizarPedido". Para los pedidos del
+  // catálogo Global sigue siendo como siempre: los dueños del producto.
+  // ("cantidad" se manda como mínimo en 1 porque PedidoRow toma por dueño
+  // a quien tenga cantidad > 0.)
+  function duenosDelPedido(pedido) {
+    const delProducto = duenosPorProductoId[pedido.ProductoID] || [];
+    const sucursalId = String(pedido.Sucursal || '').trim();
+    if (!sucursalId) return delProducto;
+    const suya = delProducto.find((d) => String(d.usuarioId) === sucursalId);
+    return [{
+      usuarioId: sucursalId,
+      nombre: pedido.SucursalNombre || 'Sucursal',
+      cantidad: Math.max(1, suya ? Number(suya.cantidad) || 0 : 0),
+    }];
+  }
 
   // Bug reportado por Claudia (2026-09-30): después de guardar un pedido
   // como "Reembolsado", el cuadro de texto de "Monto a reembolsar" se
@@ -1758,7 +1795,7 @@ export default function Dashboard() {
   // cantidad asignada de verdad).
   function pedidoEsDelDueno(pedido) {
     if (!filtroPedidoDueno) return true;
-    return (duenosPorProductoId[pedido.ProductoID] || []).some(
+    return duenosDelPedido(pedido).some(
       (d) => String(d.usuarioId) === String(filtroPedidoDueno) && d.cantidad > 0
     );
   }
@@ -2139,6 +2176,9 @@ export default function Dashboard() {
           { clave: 'orden', texto: '🔀 Orden del catálogo', visible: puedeVer('orden') },
           { clave: 'nuevo', texto: '+ Agregar producto', visible: puedeVer('nuevo') },
           { clave: 'permisos', texto: '🔐 Permisos', visible: esAdminCentral },
+          // Catálogos por sucursal (2026-10-02): la ve quien tiene "Catálogo
+          // propio" prendido; el Admin Central siempre (revisa todas).
+          { clave: 'sucursal', texto: esAdminCentral ? '🏪 Sucursales' : '🏪 Mi sucursal', visible: esAdminCentral || sucursales.length > 0 },
         ].filter((p) => p.visible);
         const posicionGuardada = (clave) => {
           const i = ordenPestanas.indexOf(clave);
@@ -2223,7 +2263,7 @@ export default function Dashboard() {
         </p>
       )}
 
-      {!puedeVer(tab) && tab !== 'permisos' && (
+      {!puedeVer(tab) && tab !== 'permisos' && tab !== 'sucursal' && (
         <p className="info-msg">
           Ya no tienes acceso a esta pestaña. Elige otra de arriba, o pídele al Admin Central que revise tus permisos.
         </p>
@@ -2588,7 +2628,8 @@ export default function Dashboard() {
                     pedido={ped}
                     categoria={categoriaPorProductoId[ped.ProductoID] || '—'}
                     codigo={codigoPorProductoId[ped.ProductoID] || '—'}
-                    duenos={duenosPorProductoId[ped.ProductoID] || []}
+                    duenos={duenosDelPedido(ped)}
+                    sucursalNombre={String(ped.Sucursal || '').trim() ? (ped.SucursalNombre || 'Sucursal') : ''}
                     usuarioId={usuarioId}
                     puedeSaltarCandado={esAdminCentral || !!permisos[CLAVE_CANDADO_PEDIDOS]}
                     puedeReembolsar={puedeResponderReembolso}
@@ -2739,6 +2780,23 @@ export default function Dashboard() {
       )}
 
       {tab === 'analitica' && puedeVer('analitica') && <AnaliticaTab sesionToken={sesionToken} />}
+
+      {tab === 'sucursal' && (
+        esAdminCentral || sucursales.length > 0 ? (
+          <SucursalTab
+            sucursales={sucursales}
+            usuarioId={usuarioId}
+            esAdminCentral={esAdminCentral}
+            sesionToken={sesionToken}
+            onCambio={() => cargarTodo(sesionToken, { silencioso: true })}
+            iniciarCarga={iniciarCarga}
+            terminarCarga={terminarCarga}
+            onPedirMas={puedeVer('stock') ? irAStockParaPedirMas : null}
+          />
+        ) : (
+          <p className="info-msg">Tu cuenta ya no tiene catálogo propio. Elige otra pestaña de arriba.</p>
+        )
+      )}
 
       {tab === 'orden' && puedeVer('orden') && (
         <OrdenTab
@@ -6062,6 +6120,302 @@ function normalizarParaFiltro(texto) {
     .toUpperCase();
 }
 
+// ============================================================
+// Catálogos por sucursal (2026-10-02)
+// ============================================================
+// Pedido por Claudia: cada persona con "Catálogo propio" prendido (👤
+// Usuarios) tiene su propio catálogo con su propio link. Aquí van las
+// piezas del panel: el link (copiar/abrir) y la pestaña "🏪 Mi sucursal".
+
+// Link público del catálogo de una persona. Se arma con la dirección desde
+// la que se está viendo el panel, así sirve igual en el sitio real que en
+// uno de prueba.
+function linkDeSucursal(idUsuario) {
+  return `${window.location.origin}/?sucursal=${encodeURIComponent(idUsuario)}`;
+}
+
+function LinkSucursal({ idUsuario, compacto = false }) {
+  const [copiado, setCopiado] = useState(false);
+  const campoRef = useRef(null);
+  const link = linkDeSucursal(idUsuario);
+
+  function copiar() {
+    const listo = () => {
+      setCopiado(true);
+      setTimeout(() => setCopiado(false), 2500);
+    };
+    // Respaldo para navegadores sin portapapeles moderno: se selecciona el
+    // texto del cuadrito (queda marcado para copiarlo a mano si hiciera falta).
+    const aMano = () => {
+      const campo = campoRef.current;
+      if (!campo) return;
+      campo.focus();
+      campo.select();
+      try {
+        if (document.execCommand('copy')) listo();
+      } catch {
+        // Se queda seleccionado: se puede copiar con el teclado o el menú.
+      }
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(link).then(listo).catch(aMano);
+    } else {
+      aMano();
+    }
+  }
+
+  return (
+    <span className={`link-sucursal${compacto ? ' link-sucursal-compacto' : ''}`}>
+      <input
+        ref={campoRef}
+        type="text"
+        readOnly
+        value={link}
+        onFocus={(e) => e.target.select()}
+        aria-label="Link del catálogo de esta sucursal"
+      />
+      <button type="button" className="btn btn-secondary btn-chip" onClick={copiar}>
+        {copiado ? '✓ Copiado' : '📋 Copiar link'}
+      </button>
+      <a className="btn btn-secondary btn-chip link-sucursal-abrir" href={link} target="_blank" rel="noopener noreferrer">
+        Abrir ↗
+      </a>
+    </span>
+  );
+}
+
+// Pestaña "🏪 Mi sucursal": lo que cada quien decide de SU catálogo. No
+// mueve piezas ni toca el catálogo Global — solo qué se ve en el de esa
+// sucursal. El Admin Central puede revisar (y ayudar con) el de cualquiera.
+function SucursalTab({ sucursales, usuarioId, esAdminCentral, sesionToken, onCambio, iniciarCarga, terminarCarga, onPedirMas }) {
+  const [elegidaId, setElegidaId] = useState('');
+  const [filtro, setFiltro] = useState('todos'); // todos | catalogo | agotados | quitados
+  const [ocupadoId, setOcupadoId] = useState('');
+  const [confirmandoBorrarId, setConfirmandoBorrarId] = useState('');
+  const [mensaje, setMensaje] = useState('');
+
+  const propia = sucursales.find((s) => String(s.id) === String(usuarioId));
+  const sucursal = sucursales.find((s) => String(s.id) === String(elegidaId)) || propia || sucursales[0] || null;
+
+  if (!sucursal) {
+    return (
+      <p className="info-msg">
+        Todavía nadie tiene catálogo propio. Para darle uno a alguien, ve a 👤 Usuarios y prende su interruptor
+        "Catálogo propio".
+      </p>
+    );
+  }
+
+  const esLaMia = String(sucursal.id) === String(usuarioId);
+  // Estado de cada producto EN ESTE catálogo:
+  //   'quitado'  → la persona lo quitó (no se ve aunque tenga piezas);
+  //   'agotado'  → se ve, pero con 0 para pedir ("Agotado");
+  //   'catalogo' → se ve y se puede pedir.
+  const estadoDe = (p) => (p.quitado ? 'quitado' : p.disponible > 0 ? 'catalogo' : 'agotado');
+  const productos = (sucursal.productos || [])
+    .slice()
+    .sort((a, b) => String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es'));
+  const conteo = { catalogo: 0, agotado: 0, quitado: 0 };
+  productos.forEach((p) => { conteo[estadoDe(p)] += 1; });
+  const visibles = productos.filter((p) => {
+    if (filtro === 'todos') return true;
+    if (filtro === 'agotados') return estadoDe(p) === 'agotado';
+    if (filtro === 'quitados') return estadoDe(p) === 'quitado';
+    return estadoDe(p) === 'catalogo';
+  });
+
+  function cambiar(p, operacion) {
+    setOcupadoId(p.productoId);
+    setMensaje('');
+    iniciarCarga?.();
+    actualizarCatalogoSucursal({
+      sesionToken,
+      usuarioId: esLaMia ? undefined : sucursal.id,
+      productoId: p.productoId,
+      operacion,
+    })
+      .then(() => onCambio())
+      .catch((err) => setMensaje(`No se pudo hacer el cambio: ${err.message}`))
+      .finally(() => {
+        setOcupadoId('');
+        setConfirmandoBorrarId('');
+        terminarCarga?.();
+      });
+  }
+
+  const tus = esLaMia ? 'tus' : 'sus';
+  const filtros = [
+    { clave: 'todos', texto: 'Todos', cuantos: productos.length },
+    { clave: 'catalogo', texto: 'Se pueden pedir', cuantos: conteo.catalogo },
+    { clave: 'agotados', texto: 'Agotados', cuantos: conteo.agotado },
+    { clave: 'quitados', texto: 'Quitados', cuantos: conteo.quitado },
+  ];
+
+  return (
+    <div className="sucursal-tab">
+      {esAdminCentral && sucursales.length > 1 && (
+        <label className="sucursal-selector">
+          Ver la sucursal de:
+          <select value={sucursal.id} onChange={(e) => { setElegidaId(e.target.value); setFiltro('todos'); setMensaje(''); }}>
+            {sucursales.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.nombre}{String(s.id) === String(usuarioId) ? ' (yo)' : ''}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+
+      <div className="sucursal-tarjeta">
+        <p className="sucursal-tarjeta-titulo">
+          Catálogo de sucursal <strong>{sucursal.nombre}</strong>
+        </p>
+        <p className="muted sucursal-tarjeta-texto">
+          Este es el link {esLaMia ? 'de tu catálogo' : 'de su catálogo'}: compártelo con las clientas. Solo enseña los
+          productos de los que {esLaMia ? 'tienes' : 'tiene'} piezas a {esLaMia ? 'tu' : 'su'} nombre, y no deja pedir más
+          de las que hay.
+        </p>
+        <LinkSucursal idUsuario={sucursal.id} />
+        <p className="sucursal-tarjeta-texto">
+          {sucursal.telefonoPedidos ? (
+            <>📲 Los pedidos llegan al WhatsApp <strong>{sucursal.telefonoPedidos}</strong>.</>
+          ) : (
+            <span className="sucursal-aviso">
+              ⚠ {esLaMia ? 'No tienes' : 'No tiene'} "Teléfono de pedidos" configurado: por ahora los pedidos de este
+              catálogo llegan al WhatsApp del Admin Central. Se cambia en 👤 Usuarios → Editar.
+            </span>
+          )}
+        </p>
+      </div>
+
+      <div className="pedidos-resumen-fila sucursal-filtros">
+        {filtros.map((f) => (
+          <button
+            key={f.clave}
+            type="button"
+            className={`resumen-btn ${filtro === f.clave ? 'activo' : ''}`}
+            onClick={() => setFiltro(f.clave)}
+          >
+            <span>{f.texto}</span>
+            <strong>{f.cuantos}</strong>
+          </button>
+        ))}
+      </div>
+
+      {mensaje && <p className="info-msg error">{mensaje}</p>}
+
+      <div className="table-scroll">
+        <table className="data-table sucursal-table">
+          <thead>
+            <tr>
+              <th>Foto</th>
+              <th>Producto</th>
+              <th>Código</th>
+              <th>Categoría</th>
+              <th title="Piezas que esta persona tiene a su nombre">{esLaMia ? 'Mis piezas' : 'Sus piezas'}</th>
+              <th title="Piezas ya apartadas por pedidos de este catálogo que están En proceso">Apartadas</th>
+              <th title="Lo que una clienta puede pedir ahorita en este catálogo">Para pedir</th>
+              <th>En el catálogo</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visibles.map((p) => {
+              const estado = estadoDe(p);
+              const ocupado = ocupadoId === p.productoId;
+              const sinPiezas = Number(p.cantidad) <= 0;
+              return (
+                <tr key={p.productoId} className={estado === 'quitado' ? 'fila-oculta' : ''}>
+                  <td>
+                    {p.foto ? <img className="sucursal-foto" src={p.foto} alt="" loading="lazy" /> : <span className="muted">—</span>}
+                  </td>
+                  <td className="sucursal-celda-nombre">{p.nombre}</td>
+                  <td>{p.codigo || '—'}</td>
+                  <td>{p.categoria}</td>
+                  <td>{p.cantidad}</td>
+                  <td>{p.enProceso || 0}</td>
+                  <td><strong>{p.disponible}</strong></td>
+                  <td>
+                    {estado === 'catalogo' && <span className="sucursal-sello sucursal-sello-ok">Se ve</span>}
+                    {estado === 'agotado' && <span className="sucursal-sello sucursal-sello-agotado">Agotado</span>}
+                    {estado === 'quitado' && <span className="sucursal-sello sucursal-sello-quitado">Quitado</span>}
+                    {!p.visibleEnTienda && (
+                      <span className="campo-nota muted sucursal-nota-oculto" title="El producto (o su categoría) está oculto para todos los catálogos desde Stock u Orden del catálogo">
+                        Oculto en la tienda
+                      </span>
+                    )}
+                  </td>
+                  <td className="celda-acciones">
+                    {confirmandoBorrarId === p.productoId ? (
+                      <div className="acciones-producto">
+                        <span className="campo-nota">¿Borrarlo de {esLaMia ? 'tu' : 'su'} lista?</span>
+                        <button type="button" className="btn btn-eliminar btn-chip" disabled={ocupado} onClick={() => cambiar(p, 'borrar')}>
+                          Sí, borrar
+                        </button>
+                        <button type="button" className="btn btn-secondary btn-chip" disabled={ocupado} onClick={() => setConfirmandoBorrarId('')}>
+                          No
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="acciones-producto">
+                        {estado !== 'quitado' && onPedirMas && (
+                          <button
+                            type="button"
+                            className={`btn btn-chip ${sinPiezas ? 'btn-editar' : 'btn-secondary'}`}
+                            onClick={() => onPedirMas(p.productoId)}
+                            title="Te lleva a este producto en Stock, donde puedes pedirle piezas a quien tenga"
+                          >
+                            Pedir más
+                          </button>
+                        )}
+                        {estado === 'quitado' ? (
+                          <button type="button" className="btn btn-toggle btn-chip" disabled={ocupado} onClick={() => cambiar(p, 'poner')}>
+                            Volver a poner
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn btn-toggle btn-chip"
+                            disabled={ocupado}
+                            onClick={() => cambiar(p, 'quitar')}
+                            title={`Deja de verse en este catálogo. No se mueve ninguna pieza: siguen siendo ${tus} piezas.`}
+                          >
+                            Quitar del catálogo
+                          </button>
+                        )}
+                        {sinPiezas && (
+                          <button
+                            type="button"
+                            className="btn btn-eliminar btn-chip"
+                            disabled={ocupado}
+                            onClick={() => setConfirmandoBorrarId(p.productoId)}
+                            title="Lo borra de esta lista. Si después llegan piezas, vuelve a aparecer solo."
+                          >
+                            Borrar
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {productos.length === 0 && (
+          <p className="info-msg">
+            {esLaMia ? 'Todavía no tienes' : 'Todavía no tiene'} productos a {esLaMia ? 'tu' : 'su'} nombre. En cuanto
+            {esLaMia ? ' tengas' : ' tenga'} piezas de un producto (pestaña Stock, columna Dueño), aparece aquí y en el catálogo.
+          </p>
+        )}
+        {productos.length > 0 && visibles.length === 0 && (
+          <p className="info-msg">No hay productos en ese grupo.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 const PAPELERA_MINIMIZADA_KEY = 'pyme_papelera_minimizada';
 
 function BitacoraTab({ bitacora, papelera = [], papeleraDias = 30, esAdminCentral = false, sesionToken, onCambio, iniciarCarga, terminarCarga }) {
@@ -6594,6 +6948,21 @@ function UsuariosTab({ usuarios, sesionToken, soyAdminCentral, onCambio, iniciar
       });
   }
 
+  // Catálogos por sucursal (2026-10-02): interruptor "Catálogo propio".
+  const [cambiandoCatalogoId, setCambiandoCatalogoId] = useState('');
+  function toggleCatalogoPropio(u) {
+    setCambiandoCatalogoId(u.ID);
+    setMensaje('');
+    iniciarCarga?.();
+    actualizarCatalogoPropio({ sesionToken, usuarioId: u.ID, activo: !u.CatalogoPropio })
+      .then(() => onCambio())
+      .catch((err) => setMensaje(`Error: ${err.message}`))
+      .finally(() => {
+        setCambiandoCatalogoId('');
+        terminarCarga?.();
+      });
+  }
+
   function toggleActivo(u) {
     const activo = esActivo(u.Activo);
     setCambiandoEstadoId(u.ID);
@@ -6638,6 +7007,7 @@ function UsuariosTab({ usuarios, sesionToken, soyAdminCentral, onCambio, iniciar
               <th>Usuario</th>
               <th>Rol</th>
               <th>Tel. de pedidos</th>
+              <th title="Con el interruptor prendido, esa persona tiene su propio catálogo, con su propio link">Catálogo propio</th>
               <th>Estado</th>
               <th>Acciones</th>
             </tr>
@@ -6664,6 +7034,39 @@ function UsuariosTab({ usuarios, sesionToken, soyAdminCentral, onCambio, iniciar
                       Se muestra aquí para que sea fácil ver/confirmar de un
                       vistazo cuál tiene configurado cada quien. */}
                   <td>{u.TelefonoPedidos || <span className="muted">— sin configurar —</span>}</td>
+                  {/* Catálogos por sucursal (2026-10-02): interruptor por
+                      persona. Prendido = esa persona tiene su catálogo
+                      ("CATÁLOGO DE SUCURSAL <NOMBRE>") con su propio link. */}
+                  <td className="usuarios-celda-catalogo">
+                    <label
+                      className="interruptor"
+                      title={
+                        esFilaAdminCentral(u) && !soyAdminCentral
+                          ? 'Solo el Admin Central puede cambiar su propia cuenta'
+                          : u.CatalogoPropio
+                            ? 'Apagar su catálogo: su link deja de funcionar'
+                            : 'Prender su catálogo: tendrá su propio link'
+                      }
+                    >
+                      <input
+                        type="checkbox"
+                        checked={!!u.CatalogoPropio}
+                        disabled={cambiandoCatalogoId === u.ID || (esFilaAdminCentral(u) && !soyAdminCentral)}
+                        onChange={() => toggleCatalogoPropio(u)}
+                      />
+                      <span className="interruptor-riel" aria-hidden="true" />
+                      <span className="interruptor-texto">{u.CatalogoPropio ? 'Prendido' : 'Apagado'}</span>
+                    </label>
+                    {u.CatalogoPropio && activo && <LinkSucursal idUsuario={u.ID} compacto />}
+                    {u.CatalogoPropio && !activo && (
+                      <span className="campo-nota muted">Cuenta inhabilitada: su link no funciona.</span>
+                    )}
+                    {u.CatalogoPropio && activo && !u.TelefonoPedidos && (
+                      <span className="campo-nota sucursal-aviso">
+                        ⚠ Sin teléfono de pedidos: sus pedidos llegan al del Admin Central.
+                      </span>
+                    )}
+                  </td>
                   <td>{activo ? 'Activo' : 'Inhabilitado'}</td>
                                  <td className="celda-acciones">
                     {esFilaAdminCentral(u) && !soyAdminCentral ? (
@@ -7779,6 +8182,7 @@ function PedidoRow({
   categoria,
   codigo,
   duenos = [],
+  sucursalNombre = '',
   usuarioId,
   puedeSaltarCandado,
   puedeReembolsar,
@@ -8156,7 +8560,7 @@ function PedidoRow({
           )}
           {avisoAbierto === 'noEsTuyo' && (
             <>
-              🔒 No te pertenece este pedido.
+              🔒 No te pertenece este pedido.{sucursalNombre ? ` Llegó por el catálogo de la sucursal ${sucursalNombre}.` : ''}
               {puedeSaltarCandado ? (
                 <div className="comentario-flotante-acciones">
                   <button
@@ -8186,6 +8590,14 @@ function PedidoRow({
         </AvisoFlotante>
       </td>
       <td>
+        {/* Catálogos por sucursal (2026-10-02): sello para distinguir de un
+            vistazo los pedidos que llegaron por el catálogo de una persona
+            (son solo de ella) de los del catálogo Global. */}
+        {sucursalNombre && (
+          <span className="pedido-sucursal-sello" title="Este pedido llegó por el catálogo de esa sucursal: es solo de esa persona">
+            🏪 Sucursal
+          </span>
+        )}
         {duenos.length === 0 ? (
           <span className="muted">Sin asignar</span>
         ) : (
