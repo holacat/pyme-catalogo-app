@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import ProductCard, { obtenerInfoOferta } from '../components/ProductCard.jsx';
 import SolicitudModal from '../components/SolicitudModal.jsx';
 import CarritoModal from '../components/CarritoModal.jsx';
-import { listarProductos, crearPedido } from '../api.js';
+import { listarProductos, crearPedidoCarrito } from '../api.js';
 
 const CLIENTE_STORAGE_KEY = 'pyme_cliente_info';
 
@@ -108,6 +108,22 @@ function valoresDistintos(productos, campo) {
   return Array.from(vistos.entries())
     .map(([clave, texto]) => ({ clave, texto }))
     .sort((a, b) => a.texto.localeCompare(b.texto, 'es'));
+}
+
+// ---- Catálogos por sucursal (2026-10-02) ----
+// Pedido por Claudia: cada persona con "Catálogo propio" prendido tiene su
+// propio link, `/?sucursal=<su ID>`. Con ese link esta misma pantalla
+// enseña SOLO lo de esa persona (con SUS piezas), dice arriba "CATÁLOGO DE
+// SUCURSAL <NOMBRE>" y manda los pedidos a SU WhatsApp. Sin nada en el
+// link es el catálogo Global de siempre. (También se acepta `?vendedor=`,
+// que fue el nombre con el que se platicó la idea al principio.)
+function leerSucursalDelLink() {
+  try {
+    const parametros = new URLSearchParams(window.location.search);
+    return (parametros.get('sucursal') || parametros.get('vendedor') || '').trim();
+  } catch {
+    return '';
+  }
 }
 
 const FILTROS_VACIOS = { categoria: '', marca: '', color: '', precioMin: '', precioMax: '', soloOfertas: false };
@@ -257,6 +273,15 @@ export default function Catalog() {
   // claramente con un botón para "Reintentar" en vez de fallar callado.
   const [registrandoPedido, setRegistrandoPedido] = useState(false);
   const [errorRegistroPedido, setErrorRegistroPedido] = useState('');
+  // 'red' (se puede reintentar tal cual) | 'existencia' (ya no hay tantas
+  // piezas: se ajustó el pedido y hay que revisarlo antes de reenviar).
+  const [tipoErrorRegistro, setTipoErrorRegistro] = useState('red');
+
+  // Catálogo de sucursal: el ID viene en el link y no cambia mientras la
+  // página está abierta; el nombre lo contesta el servidor.
+  const [sucursalId] = useState(leerSucursalDelLink);
+  const [sucursal, setSucursal] = useState(null); // { id, nombre } | null
+  const [sucursalNoDisponible, setSucursalNoDisponible] = useState(false);
 
   // Teléfono de pedidos del catálogo Global (2026-09-30) — viene del
   // servidor junto con el catálogo (ver "cargarProductos" más abajo), en
@@ -294,9 +319,11 @@ export default function Catalog() {
   //    intentando solo, y agrega un botón "🔄 Actualizar" para reintentar
   //    de inmediato sin tener que refrescar la página completa a mano.
   function cargarProductos() {
-    listarProductos()
+    listarProductos(sucursalId)
       .then((data) => {
         setProductos(data.productos);
+        setSucursal(data.sucursal || null);
+        setSucursalNoDisponible(!!data.sucursalNoDisponible);
         // Arreglo (2026-09-30): si esta recarga en particular no trajera el
         // campo (por ejemplo, una respuesta vieja en caché), no borramos un
         // número que ya se había cargado bien antes — solo lo actualizamos
@@ -365,41 +392,75 @@ export default function Catalog() {
     );
   }
 
-  // Arreglo (2026-09-30): ahora se ESPERA (con Promise.all) a que TODOS los
-  // productos del carrito queden registrados en la hoja de Pedidos, y solo
+  // Arreglo (2026-09-30): se ESPERA a que TODOS los productos del carrito
+  // queden registrados en la hoja de Pedidos (desde el 2026-10-02, en una
+  // sola petición que el servidor registra todo o nada), y solo
   // si eso funciona bien se abre WhatsApp y se vacía el carrito. Antes el
   // orden era al revés (abrir WhatsApp primero, registrar "al aire"
   // después sin esperar nada) — ver la nota junto a "registrandoPedido"
   // arriba de por qué eso podía perder un pedido en silencio.
   async function registrarYAbrirWhatsAppCarrito(items, { nombre, telefono }) {
     if (registrandoPedido) return; // evita doble envío si alguien alcanza a darle "Reintentar" dos veces
+    if (items.length === 0) return;
     setErrorRegistroPedido('');
     setRegistrandoPedido(true);
     try {
-      // Cada producto queda como su propia fila en la hoja de Pedidos
-      // (mismo cliente y teléfono), para que se vean igual que los demás
-      // pedidos.
-      await Promise.all(
-        items.map(({ producto, cantidad }) =>
-          crearPedido({
-            cliente: nombre,
-            telefono,
-            producto: producto.Nombre,
-            productoId: producto.ID,
-            cantidad,
-            notas: '',
-          })
-        )
-      );
+      // El carrito completo va en UNA sola petición (2026-10-02) y el
+      // servidor lo registra todo o nada: cada producto queda como su
+      // propia fila en Pedidos (mismo cliente y teléfono), pero ya no puede
+      // pasar que unos entren y otros no. Antes se mandaba una petición por
+      // producto y, si una fallaba, "Reintentar" volvía a mandar TODAS —
+      // las que sí habían entrado quedaban repetidas.
+      await crearPedidoCarrito({
+        cliente: nombre,
+        telefono,
+        notas: '',
+        sucursal: sucursalId,
+        items: items.map(({ producto, cantidad }) => ({
+          productoId: producto.ID,
+          producto: producto.Nombre,
+          cantidad,
+        })),
+      });
       window.open(buildWhatsAppLinkCarrito(items, nombre, telefonoPedidos), '_blank', 'noopener,noreferrer');
       setCarrito([]);
     } catch (err) {
-      // El carrito NO se vacía si esto falla, para que "Reintentar" pueda
-      // volver a mandar exactamente lo mismo sin que la clienta tenga que
-      // rehacer su pedido desde cero.
-      setErrorRegistroPedido(
-        'No pudimos registrar tu pedido (puede ser tu conexión a internet). Tu pedido sigue guardado aquí — dale "Reintentar".'
-      );
+      // El carrito NO se vacía si algo falla, para que la clienta no tenga
+      // que rehacer su pedido desde cero.
+      const datos = (err && err.datos) || {};
+      if (datos.sucursalNoDisponible) {
+        // El catálogo de esta sucursal se apagó mientras la clienta pedía.
+        setSucursalNoDisponible(true);
+        setTipoErrorRegistro('existencia');
+        setErrorRegistroPedido('Este catálogo ya no está disponible, así que no se pudo registrar tu pedido.');
+      } else if (datos.sinExistencia) {
+        // Catálogo de sucursal: alguien más se llevó piezas mientras tanto.
+        // No se registró nada. Se ajusta el pedido a lo que de verdad queda
+        // (o se quita el producto si ya no queda nada) y se le pide
+        // revisarlo antes de volver a enviarlo.
+        const faltantes = Array.isArray(datos.faltantes) && datos.faltantes.length > 0
+          ? datos.faltantes
+          : [{ productoId: datos.productoId, disponible: datos.disponible }];
+        const queda = {};
+        faltantes.forEach((f) => { queda[String(f.productoId)] = Number(f.disponible) || 0; });
+        setCarrito((prev) =>
+          prev
+            .map((it) => {
+              const id = String(it.producto.ID);
+              if (!(id in queda)) return it;
+              return { producto: { ...it.producto, Stock: queda[id] }, cantidad: Math.min(it.cantidad, queda[id]) };
+            })
+            .filter((it) => it.cantidad > 0)
+        );
+        setTipoErrorRegistro('existencia');
+        setErrorRegistroPedido(`${err.message} Ya ajustamos tu pedido a lo que queda — revísalo y vuelve a enviarlo.`);
+        cargarProductos();
+      } else {
+        setTipoErrorRegistro('red');
+        setErrorRegistroPedido(
+          'No pudimos registrar tu pedido (puede ser tu conexión a internet). Tu pedido sigue guardado aquí — dale "Reintentar".'
+        );
+      }
     } finally {
       setRegistrandoPedido(false);
     }
@@ -439,6 +500,15 @@ export default function Catalog() {
     setClienteGuardado(null);
   }
 
+  // Letrero del catálogo de una sucursal (pedido por Claudia: "CATÁLOGO DE
+  // SUCURSAL GRISELDA"). En el catálogo Global no se dibuja nada.
+  const letreroSucursal = sucursal ? (
+    <div className="sucursal-letrero" role="heading" aria-level="1">
+      <span className="sucursal-letrero-fijo">Catálogo de sucursal</span>{' '}
+      <strong className="sucursal-letrero-nombre">{sucursal.nombre}</strong>
+    </div>
+  ) : null;
+
   if (estado === 'cargando') return <p className="info-msg">Cargando catálogo…</p>;
   if (estado === 'error') {
     return (
@@ -453,7 +523,29 @@ export default function Catalog() {
       </div>
     );
   }
-  if (productos.length === 0) return <p className="info-msg">Aún no hay productos disponibles.</p>;
+  // El link es de una sucursal que ya no existe, está inhabilitada o tiene
+  // su catálogo apagado: se dice claro, en vez de enseñar otro catálogo.
+  if (sucursalNoDisponible) {
+    return (
+      <div className="catalogo-error-carga">
+        <p className="info-msg aviso">
+          {errorRegistroPedido || 'Este catálogo ya no está disponible.'} Pídele el link nuevo a quien te lo compartió, o
+          entra al catálogo general.
+        </p>
+        <a className="btn btn-secondary" href="/">Ver el catálogo general</a>
+      </div>
+    );
+  }
+  if (productos.length === 0) {
+    return (
+      <>
+        {letreroSucursal}
+        <p className="info-msg">
+          {sucursal ? 'Esta sucursal aún no tiene productos disponibles.' : 'Aún no hay productos disponibles.'}
+        </p>
+      </>
+    );
+  }
 
   const totalProductosEnCarrito = carrito.length;
   const grupos = agruparPorCategoria(productos);
@@ -563,6 +655,8 @@ export default function Catalog() {
 
   return (
     <>
+      {letreroSucursal}
+
       {clienteGuardado && (
         <p className="cliente-actual">
           Vas a pedir como <strong>{clienteGuardado.nombre}</strong> ({clienteGuardado.telefono}).{' '}
@@ -584,9 +678,17 @@ export default function Catalog() {
       {errorRegistroPedido && (
         <div className="catalogo-error-carga">
           <p className="info-msg error">{errorRegistroPedido}</p>
-          <button type="button" className="btn btn-secondary" onClick={handleReintentarRegistroPedido}>
-            🔄 Reintentar
-          </button>
+          {tipoErrorRegistro === 'existencia' ? (
+            carrito.length > 0 && (
+              <button type="button" className="btn btn-secondary" onClick={() => setCarritoAbierto(true)}>
+                🛒 Revisar mi pedido
+              </button>
+            )
+          ) : (
+            <button type="button" className="btn btn-secondary" onClick={handleReintentarRegistroPedido}>
+              🔄 Reintentar
+            </button>
+          )}
         </div>
       )}
 
