@@ -3669,3 +3669,53 @@ body.orden-arrastrando-tactil {
 .pedidos-table tbody tr.fila-sin-guardar td {
   background-color: #fff7e0;
 }
+
+/* ==== Campos con opciones (Agregar / Editar producto), 2026-10-02 ====
+   Claudia: "al darle clic debería seguir viendo cuáles otras hay... sin que
+   se limpie el campo hasta que seleccione otra". La lista ahora se abre con
+   cada clic y también con la flechita ▾ de la derecha; la opción que ya
+   está puesta se marca con ✓. */
+/* El campo ocupa todo el ancho de su casilla (así la flechita queda siempre
+   DENTRO del campo, pegada a su orilla derecha). */
+.campo-opciones input { width: 100%; }
+.campo-opciones-con-flecha input { padding-right: 2.2rem; }
+.campo-opciones-flecha {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  bottom: 1px;
+  width: 1.9rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  border-left: 1px solid var(--border);
+  border-radius: 0 6px 6px 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  cursor: pointer;
+  padding: 0;
+}
+.campo-opciones-flecha:hover { background: #f3f4f6; color: var(--text); }
+.campo-opciones-lista button {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.campo-opciones-lista .opcion-palomita {
+  flex: 0 0 1em;
+  color: var(--brand);
+  font-weight: 700;
+}
+.campo-opciones-lista button.opcion-actual {
+  background: #e4f3ea;
+  font-weight: 600;
+  color: var(--brand-dark);
+}
+.campo-opciones-lista button.opcion-resaltada,
+.campo-opciones-lista button.opcion-actual.opcion-resaltada {
+  background: #e8f1fc;
+  outline: 1px solid #6f9fd8;
+  outline-offset: -1px;
+}
