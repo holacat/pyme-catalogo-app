@@ -14,6 +14,10 @@ const PUBLIC_KEY = import.meta.env.VITE_PUBLIC_KEY;
 function errorDelServidor_(data) {
   const err = new Error(data.error || 'Error desconocido del servidor');
   if (data.sesionInvalida) err.sesionInvalida = true;
+  // Catálogos por sucursal (2026-10-02): se guarda la respuesta completa del
+  // servidor en el error, para que el catálogo pueda saber POR QUÉ se
+  // rechazó un pedido (por ejemplo "sinExistencia" y cuántas piezas quedan).
+  err.datos = data;
   return err;
 }
 
@@ -41,12 +45,43 @@ async function post(body) {
 }
 
 // ---- Catálogo público ----
-export function listarProductos() {
-  return get('listarProductos');
+// "sucursal" (2026-10-02, catálogos por sucursal): opcional — el ID de la
+// persona dueña del catálogo, tal como viene en el link (`/?sucursal=...`).
+// Sin él, todo funciona como siempre (catálogo Global).
+export function listarProductos(sucursal) {
+  return get('listarProductos', sucursal ? { sucursal } : {});
 }
 
-export function crearPedido({ cliente, telefono, producto, productoId, cantidad, notas }) {
-  return post({ action: 'crearPedido', cliente, telefono, producto, productoId, cantidad, notas });
+export function crearPedido({ cliente, telefono, producto, productoId, cantidad, notas, sucursal }) {
+  return post({
+    action: 'crearPedido', cliente, telefono, producto, productoId, cantidad, notas,
+    ...(sucursal ? { sucursal } : {}),
+  });
+}
+
+// Carrito completo en UNA sola petición (2026-10-02): el servidor revisa
+// todo y lo registra todo o nada — así un pedido nunca queda anotado "a
+// medias" si uno de sus productos se rechaza. "items" es una lista de
+// { productoId, producto, cantidad }.
+// Respaldo: si el servidor todavía es una versión de antes de este cambio
+// (no conoce la acción), se manda como siempre, un producto por petición,
+// para que el catálogo nunca se quede sin poder registrar pedidos.
+export async function crearPedidoCarrito({ cliente, telefono, items, notas = '', sucursal }) {
+  try {
+    return await post({
+      action: 'crearPedidoCarrito', cliente, telefono, notas, items,
+      ...(sucursal ? { sucursal } : {}),
+    });
+  } catch (err) {
+    const servidorViejo = err && err.datos && err.datos.error === 'Acción no reconocida';
+    if (!servidorViejo) throw err;
+    await Promise.all(
+      items.map((it) =>
+        crearPedido({ cliente, telefono, producto: it.producto, productoId: it.productoId, cantidad: it.cantidad, notas, sucursal })
+      )
+    );
+    return { ok: true };
+  }
 }
 
 // ---- Inicio de sesión del Dashboard ----
@@ -421,4 +456,19 @@ export function marcarSolicitudReembolsoVista({ sesionToken, solicitudId }) {
 // ventana de confirmación antes de restaurar de verdad.
 export function restaurarCambio({ sesionToken, papeleraId, soloRevisar }) {
   return post({ action: 'restaurarCambio', sesionToken, papeleraId, soloRevisar: !!soloRevisar });
+}
+
+// ---- Catálogos por sucursal (2026-10-02) ----
+// Prende o apaga el interruptor "Catálogo propio" de una persona (pestaña
+// 👤 Usuarios). El backend revisa quién puede.
+export function actualizarCatalogoPropio({ sesionToken, usuarioId, activo }) {
+  return post({ action: 'actualizarCatalogoPropio', sesionToken, usuarioId, activo: !!activo });
+}
+
+// Cambia un producto del catálogo de una sucursal (pestaña "🏪 Mi
+// sucursal"). "operacion": 'quitar' | 'poner' | 'borrar'. Sin "usuarioId"
+// es el catálogo de quien tiene la sesión; el Admin Central puede mandar el
+// de otra persona.
+export function actualizarCatalogoSucursal({ sesionToken, usuarioId, productoId, operacion }) {
+  return post({ action: 'actualizarCatalogoSucursal', sesionToken, productoId, operacion, ...(usuarioId ? { usuarioId } : {}) });
 }
