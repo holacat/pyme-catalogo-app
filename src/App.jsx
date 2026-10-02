@@ -17,12 +17,17 @@ import { Outlet, Link, useLocation } from 'react-router-dom';
 export default function App() {
   const location = useLocation();
   const enCatalogo = location.pathname === '/';
+  // Catálogos por sucursal (2026-10-02): si la clienta está viendo el
+  // catálogo de una sucursal (`/?sucursal=...`), el logo y "Catálogo" la
+  // dejan EN ESA MISMA sucursal — antes la mandaban a "/" a secas, o sea,
+  // al catálogo Global.
+  const destinoCatalogo = { pathname: '/', search: location.search };
 
   return (
     <div className="app-shell">
       <header className="app-header">
         {enCatalogo ? (
-          <Link to="/" className="brand">🛍️ Mi Comercio</Link>
+          <Link to={destinoCatalogo} className="brand">🛍️ Mi Comercio</Link>
         ) : (
           <a href="/" target="_blank" rel="noopener noreferrer" className="brand" title="Abre el catálogo público en otra pestaña">
             🛍️ Mi Comercio
@@ -30,7 +35,7 @@ export default function App() {
         )}
         <nav>
           {enCatalogo ? (
-            <Link to="/" className="active">Catálogo</Link>
+            <Link to={destinoCatalogo} className="active">Catálogo</Link>
           ) : (
             <a href="/" target="_blank" rel="noopener noreferrer" title="Abre el catálogo público en otra pestaña">
               Ver catálogo ↗
