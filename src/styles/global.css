@@ -3719,3 +3719,84 @@ body.orden-arrastrando-tactil {
   outline: 1px solid #6f9fd8;
   outline-offset: -1px;
 }
+
+/* ==== Papelera de la Bitácora (P1, 2026-10-02) ====
+   Claudia: "que haya una opción de restaurar cualquier cambio de la
+   bitácora, como una tipo papelera… con sus respectivos avisos… solo en el
+   Admin Central". */
+/* Franja de explicación arriba de la tabla (solo la ve el Admin Central). */
+.papelera-barra {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1.2rem;
+  margin: 0 0 0.7rem;
+  padding: 0.55rem 0.8rem;
+  background: #eef3fb;
+  border: 1px solid #b9cdf0;
+  border-radius: 8px;
+  font-size: 0.85rem;
+}
+.papelera-filtro {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.papelera-listo {
+  margin: 0 0 0.7rem;
+  padding: 0.5rem 0.8rem;
+  background: #e4f3ea;
+  border: 1px solid #b9dcc8;
+  border-radius: 8px;
+  color: var(--brand-dark);
+  font-size: 0.85rem;
+}
+/* Columna "Restaurar" de la tabla. */
+.bitacora-table .papelera-celda { text-align: center; white-space: nowrap; }
+.papelera-btn { white-space: nowrap; }
+.papelera-restaurado {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--brand-dark);
+  white-space: normal;
+  max-width: 11rem;
+}
+/* Ventana de confirmación. */
+.modal-box-papelera {
+  max-width: 560px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.papelera-cambio {
+  background: #f3f4f6;
+  border-radius: 8px;
+  padding: 0.55rem 0.75rem;
+  margin: 0.6rem 0;
+  font-size: 0.85rem;
+}
+.papelera-cambio p { margin: 0; }
+.papelera-cambio-detalle {
+  margin-top: 0.25rem !important;
+  overflow-wrap: anywhere;
+  max-height: 6.5em;
+  overflow-y: auto;
+}
+.papelera-subtitulo { margin: 0.8rem 0 0.3rem; font-weight: 700; font-size: 0.9rem; }
+.papelera-lineas {
+  margin: 0 0 0.8rem;
+  padding: 0.55rem 0.75rem 0.55rem 1.7rem;
+  background: #e4f3ea;
+  border: 1px solid #b9dcc8;
+  border-radius: 8px;
+  font-size: 0.87rem;
+  max-height: 14em;
+  overflow-y: auto;
+}
+.papelera-lineas li { margin: 0.2rem 0; overflow-wrap: anywhere; }
+.papelera-avisos { margin: 0.35rem 0 0.5rem; padding-left: 1.2rem; }
+.papelera-avisos li { margin: 0.25rem 0; }
