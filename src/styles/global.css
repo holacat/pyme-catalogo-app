@@ -3939,8 +3939,30 @@ body.orden-arrastrando-tactil {
 .sucursal-aviso { color: #92650c; }
 .sucursal-filtros { margin-bottom: 0.7rem; }
 .sucursal-table th, .sucursal-table td { text-align: center; vertical-align: middle; }
-.sucursal-table td.sucursal-celda-nombre { text-align: left; overflow-wrap: anywhere; min-width: 9rem; }
-.sucursal-table .acciones-producto { align-items: stretch; min-width: 8.5rem; }
+/* Ajuste (2026-10-02, Claudia con captura): "el nombre del producto se ve
+   desproporcionado, el tamaño de la fila, no recorta, es demasiado espacio
+   y no está alineada la info en el centro abajo de su encabezado".
+   - El nombre (y código/categoría) ya no pueden estirar su columna: tienen
+     un ancho máximo y lo que no cabe se recorta con "…" (clic para verlo
+     completo), igual que en Stock.
+   - Todo va centrado debajo de su encabezado, también el nombre.
+   - El ancho que sobra en pantallas grandes se reparte entre todas las
+     columnas, en vez de irse completo a "Producto".
+   - Los botones van uno junto al otro, para que el renglón no quede tan
+     alto (en celular siguen uno debajo del otro, ver más abajo). */
+.sucursal-table td.sucursal-celda-nombre { max-width: 240px; }
+.sucursal-table th:nth-child(3), .sucursal-table td:nth-child(3) { max-width: 150px; }
+.sucursal-table th:nth-child(4), .sucursal-table td:nth-child(4) { max-width: 150px; }
+.sucursal-table th, .sucursal-table td { padding-top: 0.4rem; padding-bottom: 0.4rem; }
+.sucursal-table .acciones-producto {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+.sucursal-table .acciones-producto .btn-chip { width: auto; white-space: nowrap; }
 .sucursal-foto {
   width: 44px;
   height: 44px;
@@ -3988,8 +4010,9 @@ body.orden-arrastrando-tactil {
   .sucursal-table th:nth-child(6), .sucursal-table td:nth-child(6) { display: none; }
   .sucursal-table th, .sucursal-table td { padding: 0.45rem 0.3rem; font-size: 0.8rem; }
   .sucursal-table th { white-space: normal; font-size: 0.66rem; letter-spacing: 0; line-height: 1.15; }
-  .sucursal-table td.sucursal-celda-nombre { min-width: 0; }
-  .sucursal-table .acciones-producto { min-width: 6.4rem; }
+  .sucursal-table td.sucursal-celda-nombre { max-width: 110px; }
+  .sucursal-table .acciones-producto { flex-direction: column; flex-wrap: nowrap; align-items: stretch; min-width: 6.4rem; }
+  .sucursal-table .acciones-producto .btn-chip { width: 100%; }
   .sucursal-table .btn-chip { padding: 0.3rem 0.35rem; font-size: 0.72rem; }
   .sucursal-sello { padding: 0.12rem 0.4rem; font-size: 0.7rem; }
 }
