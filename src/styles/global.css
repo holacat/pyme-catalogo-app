@@ -3823,3 +3823,173 @@ body.orden-arrastrando-tactil {
 .papelera-lineas li { margin: 0.2rem 0; overflow-wrap: anywhere; }
 .papelera-avisos { margin: 0.35rem 0 0.5rem; padding-left: 1.2rem; }
 .papelera-avisos li { margin: 0.25rem 0; }
+
+/* ==== Catálogos por sucursal (2026-10-02) ====
+   Claudia: cada persona con "Catálogo propio" prendido tiene su catálogo,
+   con su link, y arriba dice "CATÁLOGO DE SUCURSAL <NOMBRE>". */
+
+/* Letrero de arriba del catálogo público de una sucursal. */
+.sucursal-letrero {
+  margin: 0 0 1rem;
+  padding: 0.7rem 1rem;
+  background: #e4f3ea;
+  border-left: 5px solid var(--brand);
+  border-radius: 8px;
+  color: var(--brand-dark);
+  font-size: 1.05rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+.sucursal-letrero-fijo { font-weight: 500; }
+.sucursal-letrero-nombre { font-weight: 800; }
+
+/* Interruptor (👤 Usuarios → "Catálogo propio"). */
+.interruptor {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  cursor: pointer;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+.interruptor input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+.interruptor-riel {
+  position: relative;
+  flex: 0 0 auto;
+  width: 2.3rem;
+  height: 1.25rem;
+  border-radius: 999px;
+  background: #c9ced6;
+  transition: background 0.15s;
+}
+.interruptor-riel::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: calc(1.25rem - 4px);
+  height: calc(1.25rem - 4px);
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: transform 0.15s;
+}
+.interruptor input:checked + .interruptor-riel { background: var(--brand); }
+.interruptor input:checked + .interruptor-riel::after { transform: translateX(1.05rem); }
+.interruptor input:focus-visible + .interruptor-riel { outline: 2px solid #6f9fd8; outline-offset: 2px; }
+.interruptor input:disabled + .interruptor-riel { opacity: 0.5; }
+.interruptor input:disabled ~ .interruptor-texto { color: var(--muted); }
+.usuarios-celda-catalogo { min-width: 11rem; }
+.usuarios-celda-catalogo > * { display: flex; margin-bottom: 0.3rem; }
+.usuarios-celda-catalogo > *:last-child { margin-bottom: 0; }
+
+/* Link del catálogo de una sucursal: cuadrito + "Copiar" + "Abrir". */
+.link-sucursal {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+.link-sucursal input {
+  flex: 1 1 14rem;
+  min-width: 0;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #f9fafb;
+  color: var(--text);
+  font-size: 0.8rem;
+}
+.link-sucursal .btn-chip { width: auto; white-space: nowrap; }
+.link-sucursal-compacto input { flex: 1 1 100%; font-size: 0.72rem; padding: 0.25rem 0.4rem; }
+.link-sucursal-compacto .btn-chip { padding: 0.25rem 0.45rem; font-size: 0.72rem; }
+
+/* Pestaña "🏪 Mi sucursal". */
+.sucursal-selector {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.8rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.sucursal-selector select { padding: 0.35rem 0.5rem; border: 1px solid var(--border); border-radius: 6px; font: inherit; font-weight: 400; }
+.sucursal-tarjeta {
+  margin-bottom: 0.9rem;
+  padding: 0.8rem 1rem;
+  background: #e4f3ea;
+  border-left: 5px solid var(--brand);
+  border-radius: 8px;
+}
+.sucursal-tarjeta-titulo {
+  margin: 0 0 0.3rem;
+  color: var(--brand-dark);
+  font-size: 1rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+.sucursal-tarjeta-texto { margin: 0.45rem 0; font-size: 0.85rem; }
+.sucursal-aviso { color: #92650c; }
+.sucursal-filtros { margin-bottom: 0.7rem; }
+.sucursal-table th, .sucursal-table td { text-align: center; vertical-align: middle; }
+.sucursal-table td.sucursal-celda-nombre { text-align: left; overflow-wrap: anywhere; min-width: 9rem; }
+.sucursal-table .acciones-producto { align-items: stretch; min-width: 8.5rem; }
+.sucursal-foto {
+  width: 44px;
+  height: 44px;
+  object-fit: cover;
+  border-radius: 6px;
+  display: block;
+  margin: 0 auto;
+  background: #f3f4f6;
+}
+.sucursal-sello {
+  display: inline-block;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.sucursal-sello-ok { background: #e4f3ea; color: var(--brand-dark); }
+.sucursal-sello-agotado { background: #fde8e8; color: #9b1c1c; }
+.sucursal-sello-quitado { background: #eceff3; color: #4b5563; }
+.sucursal-nota-oculto { display: block; margin-top: 0.2rem; }
+
+/* Sello de "este pedido llegó por el catálogo de una sucursal" (Pedidos). */
+.pedido-sucursal-sello {
+  display: inline-block;
+  margin-bottom: 0.2rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  background: #e4f3ea;
+  color: var(--brand-dark);
+  font-size: 0.7rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.link-sucursal-compacto input { max-width: 16rem; }
+
+/* En celular la tabla de "Mi sucursal" se queda con lo esencial (producto,
+   cuántas se pueden pedir, cómo está y sus botones) para que los botones
+   queden a la vista sin tener que deslizar hacia un lado. */
+@media (max-width: 640px) {
+  .sucursal-table th:nth-child(1), .sucursal-table td:nth-child(1),
+  .sucursal-table th:nth-child(3), .sucursal-table td:nth-child(3),
+  .sucursal-table th:nth-child(4), .sucursal-table td:nth-child(4),
+  .sucursal-table th:nth-child(5), .sucursal-table td:nth-child(5),
+  .sucursal-table th:nth-child(6), .sucursal-table td:nth-child(6) { display: none; }
+  .sucursal-table th, .sucursal-table td { padding: 0.45rem 0.3rem; font-size: 0.8rem; }
+  .sucursal-table th { white-space: normal; font-size: 0.66rem; letter-spacing: 0; line-height: 1.15; }
+  .sucursal-table td.sucursal-celda-nombre { min-width: 0; }
+  .sucursal-table .acciones-producto { min-width: 6.4rem; }
+  .sucursal-table .btn-chip { padding: 0.3rem 0.35rem; font-size: 0.72rem; }
+  .sucursal-sello { padding: 0.12rem 0.4rem; font-size: 0.7rem; }
+}
