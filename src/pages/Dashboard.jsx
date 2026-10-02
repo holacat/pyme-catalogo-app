@@ -6062,6 +6062,8 @@ function normalizarParaFiltro(texto) {
     .toUpperCase();
 }
 
+const PAPELERA_MINIMIZADA_KEY = 'pyme_papelera_minimizada';
+
 function BitacoraTab({ bitacora, papelera = [], papeleraDias = 30, esAdminCentral = false, sesionToken, onCambio, iniciarCarga, terminarCarga }) {
   const [desde, setDesde] = useState('');
   const [hasta, setHasta] = useState('');
@@ -6077,6 +6079,27 @@ function BitacoraTab({ bitacora, papelera = [], papeleraDias = 30, esAdminCentra
   papelera.forEach((p) => { papeleraPorId[String(p.ID)] = p; });
   const hayPapelera = esAdminCentral;
   const [soloRestaurables, setSoloRestaurables] = useState(false);
+  // Claudia (2026-10-02): "que el mensaje se pueda minimizar, está muy largo
+  // el de la papelera". La explicación se puede encoger a una pastillita
+  // ("🗑️ Papelera · N") y se recuerda en este navegador.
+  const [papeleraMinimizada, setPapeleraMinimizada] = useState(() => {
+    try {
+      return localStorage.getItem(PAPELERA_MINIMIZADA_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+  function alternarPapeleraMinimizada() {
+    setPapeleraMinimizada((antes) => {
+      const ahora = !antes;
+      try {
+        localStorage.setItem(PAPELERA_MINIMIZADA_KEY, ahora ? '1' : '0');
+      } catch {
+        // Sin almacenamiento: solo no se recuerda; minimizar sigue funcionando.
+      }
+      return ahora;
+    });
+  }
   // { renglon, cargando, plan: { sePuede, motivo, lineas, avisos } | null, error }
   const [restaurando, setRestaurando] = useState(null);
   const [confirmoRestaurar, setConfirmoRestaurar] = useState(false);
@@ -6228,16 +6251,39 @@ function BitacoraTab({ bitacora, papelera = [], papeleraDias = 30, esAdminCentra
 
       {/* Papelera: explicación corta + filtro, solo para el Admin Central. */}
       {hayPapelera && (
-        <div className="papelera-barra">
-          <span>
-            🗑️ <strong>Papelera:</strong> puedes deshacer los cambios de productos, stock y catálogo de los últimos{' '}
-            {papeleraDias} días con el botón <strong>↩ Restaurar</strong> de su renglón. Hoy hay{' '}
-            <strong>{cuantosRestaurables}</strong> que se pueden restaurar.
-          </span>
+        <div className={`papelera-barra${papeleraMinimizada ? ' papelera-barra-mini' : ''}`}>
+          {papeleraMinimizada ? (
+            <button
+              type="button"
+              className="papelera-pastilla"
+              onClick={alternarPapeleraMinimizada}
+              aria-expanded="false"
+              title="Ver la explicación de la papelera"
+            >
+              🗑️ Papelera · <strong>{cuantosRestaurables}</strong> ▾
+            </button>
+          ) : (
+            <span className="papelera-texto">
+              🗑️ <strong>Papelera:</strong> puedes deshacer los cambios de productos, stock y catálogo de los últimos{' '}
+              {papeleraDias} días con el botón <strong>↩ Restaurar</strong> de su renglón. Hoy hay{' '}
+              <strong>{cuantosRestaurables}</strong> que se pueden restaurar.
+            </span>
+          )}
           <label className="papelera-filtro">
             <input type="checkbox" checked={soloRestaurables} onChange={(e) => setSoloRestaurables(e.target.checked)} />
-            Ver solo lo que se puede restaurar
+            {papeleraMinimizada ? 'Solo lo restaurable' : 'Ver solo lo que se puede restaurar'}
           </label>
+          {!papeleraMinimizada && (
+            <button
+              type="button"
+              className="papelera-minimizar"
+              onClick={alternarPapeleraMinimizada}
+              aria-expanded="true"
+              title="Minimizar este mensaje"
+            >
+              ▴ Minimizar
+            </button>
+          )}
         </div>
       )}
       {avisoRestaurado && <p className="papelera-listo" role="status">✅ {avisoRestaurado}</p>}
