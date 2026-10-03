@@ -6184,15 +6184,82 @@ function LinkSucursal({ idUsuario, compacto = false }) {
   );
 }
 
+// "Comentarios" tipo Word (la misma burbuja de AvisoFlotante) para explicar
+// algo sin llenar la pantalla de texto — Claudia, 2026-10-03: "que tenga un
+// comentario haciéndole hover over o click", "que tenga su comentario
+// avisando qué hace para que no se asusten".
+//
+// <TextoConComentario>: un texto (por ejemplo el título de una columna) con
+// rayita punteada; el comentario sale al pasar el mouse Y al darle clic o
+// tocarlo (para el celular, donde no hay "pasar el mouse").
+function TextoConComentario({ children, comentario }) {
+  const anclaRef = useRef(null);
+  const [abierto, setAbierto] = useState(null); // null | 'hover' | 'clic'
+  return (
+    <>
+      <button
+        type="button"
+        ref={anclaRef}
+        className="texto-con-comentario"
+        onMouseEnter={() => setAbierto((v) => v || 'hover')}
+        onMouseLeave={() => setAbierto((v) => (v === 'hover' ? null : v))}
+        onClick={() => setAbierto((v) => (v === 'clic' ? null : 'clic'))}
+      >
+        {children}
+      </button>
+      <AvisoFlotante
+        anclaRef={anclaRef}
+        abierto={abierto !== null}
+        onCerrar={() => setAbierto(null)}
+        autoCerrarMs={abierto === 'clic' ? 9000 : 0}
+      >
+        {comentario}
+      </AvisoFlotante>
+    </>
+  );
+}
+
+// <BotonConComentario>: un botón normal que, al pasarle el mouse por encima,
+// enseña en un comentario QUÉ va a hacer (antes de darle clic). El clic hace
+// lo de siempre.
+function BotonConComentario({ comentario, onClick, children, ...resto }) {
+  const anclaRef = useRef(null);
+  const [abierto, setAbierto] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        ref={anclaRef}
+        {...resto}
+        onMouseEnter={() => setAbierto(true)}
+        onMouseLeave={() => setAbierto(false)}
+        onClick={(e) => {
+          setAbierto(false);
+          onClick?.(e);
+        }}
+      >
+        {children}
+      </button>
+      <AvisoFlotante anclaRef={anclaRef} abierto={abierto} onCerrar={() => setAbierto(false)}>
+        {comentario}
+      </AvisoFlotante>
+    </>
+  );
+}
+
 // Pestaña "🏪 Mi sucursal": lo que cada quien decide de SU catálogo. No
 // mueve piezas ni toca el catálogo Global — solo qué se ve en el de esa
 // sucursal. El Admin Central puede revisar (y ayudar con) el de cualquiera.
 function SucursalTab({ sucursales, usuarioId, esAdminCentral, sesionToken, onCambio, iniciarCarga, terminarCarga, onPedirMas }) {
   const [elegidaId, setElegidaId] = useState('');
-  const [filtro, setFiltro] = useState('todos'); // todos | catalogo | agotados | quitados
+  const [filtro, setFiltro] = useState('todos'); // todos | catalogo | agotados | ocultos
   const [ocupadoId, setOcupadoId] = useState('');
   const [confirmandoBorrarId, setConfirmandoBorrarId] = useState('');
   const [mensaje, setMensaje] = useState('');
+  // Aviso verde de "listo, y esto fue lo que pasó" después de un cambio —
+  // para que quede claro (también en el celular, donde no hay comentario
+  // al pasar el mouse) que quitar algo del catálogo no borra nada.
+  const [mensajeListo, setMensajeListo] = useState('');
 
   const propia = sucursales.find((s) => String(s.id) === String(usuarioId));
   const sucursal = sucursales.find((s) => String(s.id) === String(elegidaId)) || propia || sucursales[0] || null;
@@ -6207,34 +6274,53 @@ function SucursalTab({ sucursales, usuarioId, esAdminCentral, sesionToken, onCam
   }
 
   const esLaMia = String(sucursal.id) === String(usuarioId);
-  // Estado de cada producto EN ESTE catálogo:
-  //   'quitado'  → la persona lo quitó (no se ve aunque tenga piezas);
-  //   'agotado'  → se ve, pero con 0 para pedir ("Agotado");
-  //   'catalogo' → se ve y se puede pedir.
-  const estadoDe = (p) => (p.quitado ? 'quitado' : p.disponible > 0 ? 'catalogo' : 'agotado');
+  // Estado de cada producto EN ESTE catálogo (columna "En el catálogo"):
+  //   'quitado'      → "Oculto": la persona lo quitó de su catálogo (no se
+  //                    ve aunque tenga piezas);
+  //   'ocultoTienda' → "Oculto": el producto (o su categoría) está oculto en
+  //                    toda la tienda, así que tampoco se ve aquí;
+  //   'agotado'      → "Agotado": se ve, pero con 0 para pedir;
+  //   'catalogo'     → "Visible": se ve y se puede pedir.
+  const estadoDe = (p) => {
+    if (p.quitado) return 'quitado';
+    if (!p.visibleEnTienda) return 'ocultoTienda';
+    return p.disponible > 0 ? 'catalogo' : 'agotado';
+  };
   const productos = (sucursal.productos || [])
     .slice()
     .sort((a, b) => String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es'));
-  const conteo = { catalogo: 0, agotado: 0, quitado: 0 };
+  const conteo = { catalogo: 0, agotado: 0, quitado: 0, ocultoTienda: 0 };
   productos.forEach((p) => { conteo[estadoDe(p)] += 1; });
+  const estaOculto = (p) => estadoDe(p) === 'quitado' || estadoDe(p) === 'ocultoTienda';
   const visibles = productos.filter((p) => {
     if (filtro === 'todos') return true;
     if (filtro === 'agotados') return estadoDe(p) === 'agotado';
-    if (filtro === 'quitados') return estadoDe(p) === 'quitado';
+    if (filtro === 'ocultos') return estaOculto(p);
     return estadoDe(p) === 'catalogo';
   });
 
   function cambiar(p, operacion) {
     setOcupadoId(p.productoId);
     setMensaje('');
+    setMensajeListo('');
     iniciarCarga?.();
+    const elCatalogo = esLaMia ? 'tu catálogo' : `el catálogo de ${sucursal.nombre}`;
+    const lasPiezas = esLaMia ? 'tus piezas' : 'sus piezas';
+    const hecho = {
+      quitar: `"${p.nombre}" ya no se ve en ${elCatalogo}. No se borró el producto ni se movieron ${lasPiezas}; para regresarlo usa "Volver a poner".`,
+      poner: `"${p.nombre}" ya se ve otra vez en ${elCatalogo}.`,
+      borrar: `"${p.nombre}" se borró de esta lista. El producto sigue existiendo: si llegan piezas, vuelve a aparecer aquí solo.`,
+    }[operacion];
     actualizarCatalogoSucursal({
       sesionToken,
       usuarioId: esLaMia ? undefined : sucursal.id,
       productoId: p.productoId,
       operacion,
     })
-      .then(() => onCambio())
+      .then(() => {
+        setMensajeListo(hecho || '');
+        return onCambio();
+      })
       .catch((err) => setMensaje(`No se pudo hacer el cambio: ${err.message}`))
       .finally(() => {
         setOcupadoId('');
@@ -6248,7 +6334,7 @@ function SucursalTab({ sucursales, usuarioId, esAdminCentral, sesionToken, onCam
     { clave: 'todos', texto: 'Todos', cuantos: productos.length },
     { clave: 'catalogo', texto: 'Se pueden pedir', cuantos: conteo.catalogo },
     { clave: 'agotados', texto: 'Agotados', cuantos: conteo.agotado },
-    { clave: 'quitados', texto: 'Quitados', cuantos: conteo.quitado },
+    { clave: 'ocultos', texto: 'Ocultos', cuantos: conteo.quitado + conteo.ocultoTienda },
   ];
 
   return (
@@ -6256,7 +6342,7 @@ function SucursalTab({ sucursales, usuarioId, esAdminCentral, sesionToken, onCam
       {esAdminCentral && sucursales.length > 1 && (
         <label className="sucursal-selector">
           Ver la sucursal de:
-          <select value={sucursal.id} onChange={(e) => { setElegidaId(e.target.value); setFiltro('todos'); setMensaje(''); }}>
+          <select value={sucursal.id} onChange={(e) => { setElegidaId(e.target.value); setFiltro('todos'); setMensaje(''); setMensajeListo(''); }}>
             {sucursales.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.nombre}{String(s.id) === String(usuarioId) ? ' (yo)' : ''}
@@ -6303,61 +6389,112 @@ function SucursalTab({ sucursales, usuarioId, esAdminCentral, sesionToken, onCam
       </div>
 
       {mensaje && <p className="info-msg error">{mensaje}</p>}
+      {mensajeListo && <p className="papelera-listo" role="status">✅ {mensajeListo}</p>}
 
       <div className="table-scroll">
         <table className="data-table sucursal-table">
           <thead>
             <tr>
-              <th>Foto</th>
               <th>Producto</th>
               <th>Código</th>
               <th>Categoría</th>
-              <th title="Piezas que esta persona tiene a su nombre">{esLaMia ? 'Mis piezas' : 'Sus piezas'}</th>
-              {/* Claudia (2026-10-02): "en lugar de que digan Apartadas que
-                  digan En proceso, y que tengan de comentario que están
-                  apartadas". El comentario sale al pasar el mouse. */}
-              <th
-                className="th-con-comentario"
-                title="Piezas APARTADAS: son de pedidos de este catálogo que ya están En proceso (reservadas para una clienta, todavía sin pagar). Ya no se ofrecen a nadie más."
-              >
-                En proceso
+              <th>
+                <TextoConComentario
+                  comentario={<>Piezas que {esLaMia ? 'tienes a tu nombre' : 'esta persona tiene a su nombre'} ahorita (las mismas de la columna Dueño en Stock).</>}
+                >
+                  {esLaMia ? 'Mis piezas' : 'Sus piezas'}
+                </TextoConComentario>
               </th>
-              <th title="Lo que una clienta puede pedir ahorita en este catálogo">Para pedir</th>
-              <th>En el catálogo</th>
+              {/* Claudia (2026-10-02/03): "en lugar de que digan Apartadas
+                  que digan En proceso y que tenga un comentario haciéndole
+                  hover over o click que diga que están apartadas
+                  temporalmente en lo que se pagan o cancelan". */}
+              <th>
+                <TextoConComentario
+                  comentario={
+                    <>
+                      <strong>Piezas apartadas temporalmente.</strong> Son de pedidos de este catálogo que ya están
+                      "En proceso", en lo que se pagan o se cancelan. Mientras tanto no se ofrecen a nadie más. Si el
+                      pedido se paga, se descuentan; si se cancela, quedan libres otra vez.
+                    </>
+                  }
+                >
+                  En proceso
+                </TextoConComentario>
+              </th>
+              <th>
+                <TextoConComentario
+                  comentario={<>Lo que una clienta puede pedir ahorita en este catálogo: {esLaMia ? 'tus' : 'sus'} piezas menos las que están En proceso.</>}
+                >
+                  Para pedir
+                </TextoConComentario>
+              </th>
+              <th>
+                <TextoConComentario
+                  comentario={
+                    <>
+                      <strong>Visible:</strong> las clientas lo ven y lo pueden pedir. <strong>Agotado:</strong> lo ven,
+                      pero sin piezas para pedir. <strong>Oculto:</strong> no sale en este catálogo.
+                    </>
+                  }
+                >
+                  En el catálogo
+                </TextoConComentario>
+              </th>
               <th>Acciones</th>
             </tr>
           </thead>
-          <tbody>
+          {/* Renglón azul al tocarlo, igual que en Stock y Pedidos (Claudia,
+              2026-10-03: "aquí falta la línea azul al presionar algo"). */}
+          <tbody onClickCapture={marcarFilaActiva} onFocusCapture={marcarFilaActiva}>
             {visibles.map((p) => {
               const estado = estadoDe(p);
+              const oculto = estaOculto(p);
               const ocupado = ocupadoId === p.productoId;
               const sinPiezas = Number(p.cantidad) <= 0;
               return (
-                <tr key={p.productoId} className={estado === 'quitado' ? 'fila-oculta' : ''}>
-                  <td>
-                    {p.foto ? <img className="sucursal-foto" src={p.foto} alt="" loading="lazy" /> : <span className="muted">—</span>}
+                <tr key={p.productoId} className={oculto ? 'fila-oculta' : ''}>
+                  {/* Foto y nombre juntos y a la izquierda, igual que en
+                      Stock; un nombre largo se recorta con "…" (clic para
+                      verlo completo). */}
+                  <td className="sucursal-celda-nombre">
+                    <div className="stock-nombre-con-foto">
+                      {p.foto ? (
+                        <img src={p.foto} alt="" className="stock-thumb" loading="lazy" />
+                      ) : (
+                        <div className="stock-thumb stock-thumb-vacia">Sin foto</div>
+                      )}
+                      <span className="stock-nombre-texto">
+                        <CeldaTruncada texto={p.nombre} />
+                      </span>
+                    </div>
                   </td>
-                  {/* Nombre, código y categoría largos se recortan con "…"
-                      (clic para verlos completos), igual que en Stock —
-                      Claudia, 2026-10-02: "el nombre del producto se ve
-                      desproporcionado… no recorta". */}
-                  <td className="sucursal-celda-nombre"><CeldaTruncada texto={p.nombre} /></td>
                   <td>{p.codigo ? <CeldaTruncada texto={p.codigo} /> : '—'}</td>
                   <td><CeldaTruncada texto={p.categoria} /></td>
                   <td>{p.cantidad}</td>
-                  <td title={p.enProceso > 0 ? `${p.enProceso} pieza(s) apartada(s): en pedidos En proceso, todavía sin pagar` : undefined}>
+                  <td title={p.enProceso > 0 ? `${p.enProceso} pieza(s) apartada(s) temporalmente: en pedidos En proceso, en lo que se pagan o se cancelan` : undefined}>
                     {p.enProceso || 0}
                   </td>
                   <td><strong>{p.disponible}</strong></td>
                   <td>
-                    {estado === 'catalogo' && <span className="sucursal-sello sucursal-sello-ok">Se ve</span>}
-                    {estado === 'agotado' && <span className="sucursal-sello sucursal-sello-agotado">Agotado</span>}
-                    {estado === 'quitado' && <span className="sucursal-sello sucursal-sello-quitado">Quitado</span>}
-                    {!p.visibleEnTienda && (
-                      <span className="campo-nota muted sucursal-nota-oculto" title="El producto (o su categoría) está oculto para todos los catálogos desde Stock u Orden del catálogo">
-                        Oculto en la tienda
+                    {estado === 'catalogo' && (
+                      <span className="sucursal-sello sucursal-sello-ok" title="Las clientas lo ven y lo pueden pedir">Visible</span>
+                    )}
+                    {estado === 'agotado' && (
+                      <span className="sucursal-sello sucursal-sello-agotado" title="Las clientas lo ven, pero sale como Agotado: no hay piezas para pedir">Agotado</span>
+                    )}
+                    {estado === 'quitado' && (
+                      <span className="sucursal-sello sucursal-sello-quitado" title={`${esLaMia ? 'Lo quitaste de tu catálogo' : 'Se quitó de su catálogo'}: no sale ahí hasta darle "Volver a poner"`}>Oculto</span>
+                    )}
+                    {estado === 'ocultoTienda' && (
+                      <span
+                        className="sucursal-sello sucursal-sello-quitado"
+                        title="El producto (o su categoría) está oculto en toda la tienda, desde Stock u Orden del catálogo: no sale en ningún catálogo"
+                      >
+                        Oculto
                       </span>
                     )}
+                    {estado === 'ocultoTienda' && <span className="campo-nota muted sucursal-nota-oculto">en toda la tienda</span>}
                   </td>
                   <td className="celda-acciones">
                     {confirmandoBorrarId === p.productoId ? (
@@ -6373,40 +6510,53 @@ function SucursalTab({ sucursales, usuarioId, esAdminCentral, sesionToken, onCam
                     ) : (
                       <div className="acciones-producto">
                         {estado !== 'quitado' && onPedirMas && (
-                          <button
-                            type="button"
+                          <BotonConComentario
                             className={`btn btn-chip ${sinPiezas ? 'btn-editar' : 'btn-secondary'}`}
                             onClick={() => onPedirMas(p.productoId)}
-                            title="Te lleva a este producto en Stock, donde puedes pedirle piezas a quien tenga"
+                            comentario={<>Te lleva a este producto en <strong>Stock</strong>, donde puedes pedirle piezas a quien tenga. Aquí no cambia nada.</>}
                           >
                             Pedir más
-                          </button>
+                          </BotonConComentario>
                         )}
                         {estado === 'quitado' ? (
-                          <button type="button" className="btn btn-toggle btn-chip" disabled={ocupado} onClick={() => cambiar(p, 'poner')}>
+                          <BotonConComentario
+                            className="btn btn-toggle btn-chip"
+                            disabled={ocupado}
+                            onClick={() => cambiar(p, 'poner')}
+                            comentario={<>Vuelve a verse en {esLaMia ? 'tu' : 'su'} catálogo, tal como estaba.</>}
+                          >
                             Volver a poner
-                          </button>
+                          </BotonConComentario>
                         ) : (
-                          <button
-                            type="button"
+                          <BotonConComentario
                             className="btn btn-toggle btn-chip"
                             disabled={ocupado}
                             onClick={() => cambiar(p, 'quitar')}
-                            title={`Deja de verse en este catálogo. No se mueve ninguna pieza: siguen siendo ${tus} piezas.`}
+                            comentario={
+                              <>
+                                <strong>Solo lo oculta de {esLaMia ? 'tu' : 'su'} catálogo.</strong> No borra el producto ni
+                                mueve {tus} piezas, y en los demás catálogos sigue igual. Se regresa cuando quieras con
+                                "Volver a poner".
+                              </>
+                            }
                           >
                             Quitar del catálogo
-                          </button>
+                          </BotonConComentario>
                         )}
                         {sinPiezas && (
-                          <button
-                            type="button"
+                          <BotonConComentario
                             className="btn btn-eliminar btn-chip"
                             disabled={ocupado}
                             onClick={() => setConfirmandoBorrarId(p.productoId)}
-                            title="Lo borra de esta lista. Si después llegan piezas, vuelve a aparecer solo."
+                            comentario={
+                              <>
+                                Lo borra de <strong>esta lista</strong> porque ya no hay piezas. El producto sigue existiendo
+                                en Stock; si después llegan piezas, vuelve a aparecer aquí solo.
+                              </>
+                            }
                           >
                             Borrar
-                          </button>
+                          </BotonConComentario>
                         )}
                       </div>
                     )}
@@ -6672,7 +6822,7 @@ function BitacoraTab({ bitacora, papelera = [], papeleraDias = 30, esAdminCentra
               {hayPapelera && <th>Restaurar</th>}
             </tr>
           </thead>
-          <tbody>
+          <tbody onClickCapture={marcarFilaActiva} onFocusCapture={marcarFilaActiva}>
             {bitacoraVisible.map((b) => (
               <tr key={b.ID}>
                 <td>{formatearFechaHora(b.Fecha)}</td>
