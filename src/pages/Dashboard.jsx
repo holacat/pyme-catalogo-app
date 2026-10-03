@@ -6313,7 +6313,15 @@ function SucursalTab({ sucursales, usuarioId, esAdminCentral, sesionToken, onCam
               <th>Código</th>
               <th>Categoría</th>
               <th title="Piezas que esta persona tiene a su nombre">{esLaMia ? 'Mis piezas' : 'Sus piezas'}</th>
-              <th title="Piezas ya apartadas por pedidos de este catálogo que están En proceso">Apartadas</th>
+              {/* Claudia (2026-10-02): "en lugar de que digan Apartadas que
+                  digan En proceso, y que tengan de comentario que están
+                  apartadas". El comentario sale al pasar el mouse. */}
+              <th
+                className="th-con-comentario"
+                title="Piezas APARTADAS: son de pedidos de este catálogo que ya están En proceso (reservadas para una clienta, todavía sin pagar). Ya no se ofrecen a nadie más."
+              >
+                En proceso
+              </th>
               <th title="Lo que una clienta puede pedir ahorita en este catálogo">Para pedir</th>
               <th>En el catálogo</th>
               <th>Acciones</th>
@@ -6337,7 +6345,9 @@ function SucursalTab({ sucursales, usuarioId, esAdminCentral, sesionToken, onCam
                   <td>{p.codigo ? <CeldaTruncada texto={p.codigo} /> : '—'}</td>
                   <td><CeldaTruncada texto={p.categoria} /></td>
                   <td>{p.cantidad}</td>
-                  <td>{p.enProceso || 0}</td>
+                  <td title={p.enProceso > 0 ? `${p.enProceso} pieza(s) apartada(s): en pedidos En proceso, todavía sin pagar` : undefined}>
+                    {p.enProceso || 0}
+                  </td>
                   <td><strong>{p.disponible}</strong></td>
                   <td>
                     {estado === 'catalogo' && <span className="sucursal-sello sucursal-sello-ok">Se ve</span>}
