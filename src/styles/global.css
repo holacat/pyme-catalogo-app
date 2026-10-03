@@ -3950,6 +3950,9 @@ body.orden-arrastrando-tactil {
      columnas, en vez de irse completo a "Producto".
    - Los botones van uno junto al otro, para que el renglón no quede tan
      alto (en celular siguen uno debajo del otro, ver más abajo). */
+/* Encabezado con "comentario" (sale al pasar el mouse): rayita punteada y
+   cursor de ayuda para que se note que tiene explicación. */
+.th-con-comentario { cursor: help; text-decoration: underline dotted; text-underline-offset: 3px; }
 .sucursal-table td.sucursal-celda-nombre { max-width: 240px; }
 .sucursal-table th:nth-child(3), .sucursal-table td:nth-child(3) { max-width: 150px; }
 .sucursal-table th:nth-child(4), .sucursal-table td:nth-child(4) { max-width: 150px; }
