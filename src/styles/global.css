@@ -3648,6 +3648,9 @@ body.orden-arrastrando-tactil {
   .ver-mas-btn { display: none !important; }
 }
 
+/* (2026-10-03: también en "Mi sucursal" y en la Bitácora — Claudia: "aquí
+   falta la línea azul al presionar algo y ver qué fila presiono, en la
+   Bitácora igual falta".) */
 /* ==== Renglón "en uso" en Stock y Pedidos (2026-10-01, Claudia: "cuando
    toque una fila que se ponga en un azul leve que combine con el sistema,
    para así ubicar la fila que estamos editando") ====
@@ -3657,11 +3660,15 @@ body.orden-arrastrando-tactil {
    azules del panel. Si el renglón tiene un cambio SIN GUARDAR manda el
    amarillo de siempre (es el aviso más importante). */
 .stock-table tbody tr[data-fila-activa]:not(.fila-sin-guardar) td,
-.pedidos-table tbody tr[data-fila-activa]:not(.fila-sin-guardar) td {
+.pedidos-table tbody tr[data-fila-activa]:not(.fila-sin-guardar) td,
+.sucursal-table tbody tr[data-fila-activa] td,
+.bitacora-table tbody tr[data-fila-activa] td {
   background-color: #e8f1fc;
 }
 .stock-table tbody tr[data-fila-activa]:not(.fila-sin-guardar) td:first-child,
-.pedidos-table tbody tr[data-fila-activa]:not(.fila-sin-guardar) td:first-child {
+.pedidos-table tbody tr[data-fila-activa]:not(.fila-sin-guardar) td:first-child,
+.sucursal-table tbody tr[data-fila-activa] td:first-child,
+.bitacora-table tbody tr[data-fila-activa] td:first-child {
   box-shadow: inset 4px 0 0 #6f9fd8;
 }
 /* Arreglo de paso: en un renglón con cambios sin guardar, la columna fija
@@ -3939,24 +3946,41 @@ body.orden-arrastrando-tactil {
 .sucursal-aviso { color: #92650c; }
 .sucursal-filtros { margin-bottom: 0.7rem; }
 .sucursal-table th, .sucursal-table td { text-align: center; vertical-align: middle; }
-/* Ajuste (2026-10-02, Claudia con captura): "el nombre del producto se ve
-   desproporcionado, el tamaño de la fila, no recorta, es demasiado espacio
-   y no está alineada la info en el centro abajo de su encabezado".
-   - El nombre (y código/categoría) ya no pueden estirar su columna: tienen
-     un ancho máximo y lo que no cabe se recorta con "…" (clic para verlo
-     completo), igual que en Stock.
-   - Todo va centrado debajo de su encabezado, también el nombre.
-   - El ancho que sobra en pantallas grandes se reparte entre todas las
-     columnas, en vez de irse completo a "Producto".
-   - Los botones van uno junto al otro, para que el renglón no quede tan
-     alto (en celular siguen uno debajo del otro, ver más abajo). */
-/* Encabezado con "comentario" (sale al pasar el mouse): rayita punteada y
-   cursor de ayuda para que se note que tiene explicación. */
-.th-con-comentario { cursor: help; text-decoration: underline dotted; text-underline-offset: 3px; }
-.sucursal-table td.sucursal-celda-nombre { max-width: 240px; }
-.sucursal-table th:nth-child(3), .sucursal-table td:nth-child(3) { max-width: 150px; }
-.sucursal-table th:nth-child(4), .sucursal-table td:nth-child(4) { max-width: 150px; }
-.sucursal-table th, .sucursal-table td { padding-top: 0.4rem; padding-bottom: 0.4rem; }
+/* Texto con "comentario" (burbuja tipo Word al pasar el mouse o al darle
+   clic): rayita punteada y cursor de ayuda para que se note que explica
+   algo. Es un botón sin aspecto de botón, por eso hereda letra y mayúsculas. */
+.texto-con-comentario {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  cursor: help;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+/* Ajuste (2026-10-03, Claudia): "mantén a la izquierda los nombres de los
+   productos como en Stock y un poco más estrecho… sigue estando muy larga
+   la fila". La foto va junto al nombre (como en Stock, ya no en su propia
+   columna), el nombre a la izquierda, y cada columna tiene un ancho fijo
+   para que "Producto" no se lleve el espacio: lo que no cabe se recorta
+   con "…" (clic para verlo completo). */
+.sucursal-table { table-layout: fixed; min-width: 880px; }
+.sucursal-table th:nth-child(1), .sucursal-table td:nth-child(1) { width: 15%; }
+.sucursal-table th:nth-child(2), .sucursal-table td:nth-child(2) { width: 11%; }
+.sucursal-table th:nth-child(3), .sucursal-table td:nth-child(3) { width: 11%; }
+.sucursal-table th:nth-child(4), .sucursal-table td:nth-child(4) { width: 9%; }
+.sucursal-table th:nth-child(5), .sucursal-table td:nth-child(5) { width: 9%; }
+.sucursal-table th:nth-child(6), .sucursal-table td:nth-child(6) { width: 9%; }
+.sucursal-table th:nth-child(7), .sucursal-table td:nth-child(7) { width: 12%; }
+.sucursal-table th:nth-child(8), .sucursal-table td:nth-child(8) { width: 24%; }
+.sucursal-table td.sucursal-celda-nombre { text-align: left; }
+.sucursal-table .stock-thumb { cursor: default; }
+.sucursal-table th, .sucursal-table td { padding-top: 0.35rem; padding-bottom: 0.35rem; }
 .sucursal-table .acciones-producto {
   flex-direction: row;
   flex-wrap: wrap;
@@ -3966,15 +3990,6 @@ body.orden-arrastrando-tactil {
   min-width: 0;
 }
 .sucursal-table .acciones-producto .btn-chip { width: auto; white-space: nowrap; }
-.sucursal-foto {
-  width: 44px;
-  height: 44px;
-  object-fit: cover;
-  border-radius: 6px;
-  display: block;
-  margin: 0 auto;
-  background: #f3f4f6;
-}
 .sucursal-sello {
   display: inline-block;
   padding: 0.15rem 0.55rem;
@@ -4006,14 +4021,19 @@ body.orden-arrastrando-tactil {
    cuántas se pueden pedir, cómo está y sus botones) para que los botones
    queden a la vista sin tener que deslizar hacia un lado. */
 @media (max-width: 640px) {
-  .sucursal-table th:nth-child(1), .sucursal-table td:nth-child(1),
+  /* En celular se quedan 4 columnas: Producto, Para pedir, En el catálogo
+     y Acciones (se esconden Código, Categoría, Mis piezas y En proceso). */
+  .sucursal-table { table-layout: auto; min-width: 0; }
+  .sucursal-table th:nth-child(n), .sucursal-table td:nth-child(n) { width: auto; }
+  .sucursal-table th:nth-child(2), .sucursal-table td:nth-child(2),
   .sucursal-table th:nth-child(3), .sucursal-table td:nth-child(3),
   .sucursal-table th:nth-child(4), .sucursal-table td:nth-child(4),
-  .sucursal-table th:nth-child(5), .sucursal-table td:nth-child(5),
-  .sucursal-table th:nth-child(6), .sucursal-table td:nth-child(6) { display: none; }
+  .sucursal-table th:nth-child(5), .sucursal-table td:nth-child(5) { display: none; }
+  .sucursal-table .stock-thumb { width: 24px; height: 24px; }
+  .sucursal-table .stock-nombre-con-foto { gap: 0.3rem; }
   .sucursal-table th, .sucursal-table td { padding: 0.45rem 0.3rem; font-size: 0.8rem; }
   .sucursal-table th { white-space: normal; font-size: 0.66rem; letter-spacing: 0; line-height: 1.15; }
-  .sucursal-table td.sucursal-celda-nombre { max-width: 110px; }
+  .sucursal-table td.sucursal-celda-nombre { max-width: 125px; }
   .sucursal-table .acciones-producto { flex-direction: column; flex-wrap: nowrap; align-items: stretch; min-width: 6.4rem; }
   .sucursal-table .acciones-producto .btn-chip { width: 100%; }
   .sucursal-table .btn-chip { padding: 0.3rem 0.35rem; font-size: 0.72rem; }
