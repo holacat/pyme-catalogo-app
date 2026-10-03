@@ -207,6 +207,12 @@ export default function ProductCard({ producto, onAgregarCarrito }) {
         {enOferta && <span className="oferta-badge">🔥 Oferta</span>}
         {fotos.length > 0 ? (
           <>
+            {/* Fondo de la foto (2026-10-03): una copia de la MISMA foto,
+                que global.css solo enseña (muy difuminada, hasta que queda
+                nada más su color) en el estilo "según la foto". En los
+                otros estilos está escondida. No se puede tocar ni la leen
+                los lectores de pantalla. */}
+            <img className="product-photo-fondo" src={fotos[indice]} alt="" aria-hidden="true" />
             <img
               src={fotos[indice]}
               alt={producto.Nombre}
