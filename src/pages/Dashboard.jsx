@@ -6339,6 +6339,16 @@ function SucursalTab({ sucursales, usuarioId, esAdminCentral, sesionToken, onCam
 
   return (
     <div className="sucursal-tab">
+      {/* Explicación de para qué es esta pestaña, como en las demás
+          (Claudia, 2026-10-03: "que se me especifique igual que a las demás
+          qué hace, para que no se confundan las que lo usen"). */}
+      <p className="muted sucursal-explicacion">
+        Aquí ves y decides qué sale en el catálogo de {esLaMia ? 'tu sucursal' : `la sucursal ${sucursal.nombre}`}: el que
+        se abre con el link de abajo. Solo aparecen los productos de los que {esLaMia ? 'tienes' : 'tiene'} piezas a{' '}
+        {esLaMia ? 'tu' : 'su'} nombre. Nada de lo que hagas aquí mueve piezas ni cambia el catálogo general: <strong>Quitar del catálogo</strong> solo lo esconde de este catálogo,{' '}
+        <strong>Volver a poner</strong> lo regresa, <strong>Pedir más</strong> te lleva a Stock para pedirle piezas a quien
+        tenga, y <strong>Borrar</strong> quita de la lista un producto del que ya no hay piezas.
+      </p>
       {esAdminCentral && sucursales.length > 1 && (
         <label className="sucursal-selector">
           Ver la sucursal de:
