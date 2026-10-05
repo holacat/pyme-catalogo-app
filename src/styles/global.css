@@ -4127,10 +4127,15 @@ body.orden-arrastrando-tactil {
 
   /* ---- Catálogo: se ven dos productos por renglón (y asoma el tercero,
      para que se note que se puede deslizar). Antes cabía uno solo. ---- */
-  .categoria-carrusel .product-card { flex: 0 0 45%; max-width: none; }
-  .categoria-carrusel .product-body { padding: 0.7rem 0.6rem 0.8rem; }
+  /* 2026-10-05: de 45% a 40% (Claudia: "quedó bien, tal vez un poco más
+     parecido a la versión de sitio para computadoras"): ahora se ven dos
+     tarjetas y media. Para volver a como estaba, regresar el 40% a 45%. */
+  .categoria-carrusel .product-card { flex: 0 0 40%; max-width: none; }
+  .categoria-carrusel .product-body { padding: 0.7rem 0.45rem 0.8rem; }
   .categoria-carrusel .product-body h3 { font-size: 1rem; }
-  .categoria-carrusel .product-actions .btn { font-size: 0.82rem; padding: 0.6rem 0.3rem; }
+  /* Apretado lo justo para que "🛒 Agregar al pedido" siga en un renglón
+     también en celulares angostos (360 px). */
+  .categoria-carrusel .product-actions .btn { font-size: 0.78rem; padding: 0.6rem 0.1rem; }
   /* Botones + y −: más grandes que antes, para el dedo. */
   .cantidad-selector button { width: 30px; height: 30px; min-width: 30px; font-size: 1.15rem; }
   .catalog-grid .cantidad-selector button { width: 24px; height: 24px; min-width: 24px; font-size: 1rem; }
@@ -4207,4 +4212,66 @@ body.orden-arrastrando-tactil {
 @keyframes avisoEnvioGiro { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
   .aviso-envio-rueda { animation-duration: 2.4s; }
+}
+
+/* ==== Orden rápido en "Orden del catálogo" (2026-10-05) ====
+   Botones "Orden por Nuevo–Viejo" y "Orden A–Z": un par general (junto a
+   "Contraer todas") y un par en cada categoría (junto a "Renombrar"). */
+.orden-rapido-general {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.45rem;
+  border: 1px dashed #b7c9be;
+  border-radius: 10px;
+  background: #f4faf6;
+}
+.orden-rapido-general-titulo { font-size: 0.8rem; font-weight: 600; color: var(--brand-dark); }
+.orden-rapido-general .btn { padding: 0.4rem 0.7rem; font-size: 0.85rem; white-space: nowrap; }
+/* Los de cada categoría: mismo tamaño que "Renombrar", pero en claro, para
+   que se distingan de los botones que cambian la categoría. */
+.orden-categoria-botones .btn-orden-rapido {
+  background: #ffffff;
+  color: var(--brand-dark);
+  border: 1px solid #a9c4b4;
+  white-space: nowrap;
+}
+.orden-ofertas-box .orden-categoria-botones .btn-orden-rapido { color: #7f1d1d; border-color: #e3b4b4; }
+.orden-categoria-botones .btn-orden-rapido:disabled,
+.orden-rapido-general .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.orden-aviso-listo {
+  margin: 0.6rem 0;
+  padding: 0.6rem 0.8rem;
+  border-radius: 8px;
+  background: #ecfdf5;
+  border: 1px solid #a7e3c4;
+  color: var(--brand-dark);
+  font-weight: 600;
+}
+.orden-rapido-pregunta { max-width: 440px; }
+.orden-rapido-pregunta p { margin: 0 0 0.7rem; line-height: 1.45; }
+
+/* ==== Stock: filtro por dueño (2026-10-05) ==== */
+.stock-filtro-dueno select {
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: white;
+  max-width: 260px;
+}
+.stock-dueno-resumen {
+  font-size: 0.9rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: 8px;
+  background: #ecfdf5;
+  color: var(--brand-dark);
+}
+/* La fila de "Todo el stock / Mi stock personal / Ver stock de" puede
+   ocupar dos renglones en pantallas angostas. */
+.stock-personal-toggle { flex-wrap: wrap; align-items: center; }
+/* En celular, los botones de orden de cada categoría se quedan con lo
+   esencial ("🕒 Nuevo–Viejo", "🔤 A–Z") para que quepan junto a los demás. */
+@media (max-width: 520px) {
+  .orden-categoria-botones .orden-rapido-prefijo { display: none; }
 }
