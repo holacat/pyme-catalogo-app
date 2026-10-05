@@ -23,6 +23,7 @@ import {
   renombrarZonaOfertas,
   quitarTodasLasOfertas,
   restaurarCambio,
+  listarEntradasSalidas,
   renombrarCategoria,
   eliminarCategoria,
   crearUsuario,
@@ -52,6 +53,8 @@ import {
 } from '../api.js';
 import ImageUploader from '../components/ImageUploader.jsx';
 import ImageLightbox from '../components/ImageLightbox.jsx';
+// Descargas en Excel y PDF (2026-10-05). Archivo nuevo: src/exportar.js
+import { descargarExcel, descargarPDF, fechaParaArchivo } from '../exportar.js';
 
 // Un producto puede tener Disponible guardado como booleano real (true/false)
 // o como texto ("TRUE"/"SI") si alguien lo escribió a mano en el Sheet. Esta
@@ -508,7 +511,7 @@ const PESTANAS_TODAS_PERMITIDAS = {
 // puede ver ninguna, de todos modos cae en "stock" (el panel se lo va a
 // negar y mostrará el aviso correspondiente, ver más abajo).
 const ORDEN_PESTANAS_INICIALES = [
-  'stock', 'pedidos', 'alertas', 'orden', 'nuevo', 'cuenta', 'bitacora', 'usuarios', 'analitica',
+  'stock', 'pedidos', 'alertas', 'orden', 'nuevo', 'cuenta', 'bitacora', 'usuarios', 'analitica', 'inventario',
 ];
 
 function primeraPestanaVisible(permisosCalculados) {
@@ -1148,6 +1151,20 @@ export default function Dashboard() {
         setSucursales(r.sucursales || []);
         setUsuarios(r.usuarios || []);
         setTransferencias(r.transferencias || []);
+        // Permisos al día (2026-10-05): antes solo llegaban al iniciar
+        // sesión, así que una pestaña nueva (como "Entradas y salidas") o un
+        // cambio hecho en 🔐 Permisos no se veía hasta cerrar sesión y volver
+        // a entrar. Ahora el servidor los manda en cada carga del panel. Un
+        // servidor de antes no los manda: se quedan los que ya había.
+        if (r.permisos && typeof r.permisos === 'object') {
+          const textoPermisos = JSON.stringify(r.permisos);
+          setPermisos((antes) => (JSON.stringify(antes) === textoPermisos ? antes : r.permisos));
+          try {
+            localStorage.setItem(PERMISOS_KEY, textoPermisos);
+          } catch {
+            // Sin almacenamiento: los permisos valen mientras la pestaña esté abierta.
+          }
+        }
         // Arreglo (2026-09-25, reportado por Claudia: el aviso de "sigue
         // cargando" se quedó pegado en pantalla para siempre, ni el
         // refresco automático de cada 6s lo quitaba). Antes esta línea
@@ -1803,6 +1820,145 @@ export default function Dashboard() {
           ? productosOrdenadosPorColumna.filter((p) => piezasDe(p, filtroDuenoStock) > 0)
           : productosOrdenadosPorColumna;
 
+  // ---- Descargar el inventario en Excel o PDF (2026-10-05) ----
+  // Pedido por Claudia: "una opción de descargar en formato PDF y Excel el
+  // inventario". Baja lo MISMO que se está viendo en la tabla: con los
+  // filtros y el orden que estén puestos, pero TODOS los renglones (no solo
+  // los primeros 50). En el archivo, "Yo" sale con el nombre de la persona.
+  function nombreDeDuenoParaArchivo(d) {
+    return String(d.usuarioId) === String(usuarioId) ? nombreSesion || d.nombre || 'Yo' : d.nombre || 'Sin nombre';
+  }
+  function descargarInventario(formato) {
+    const lista = productosFiltrados;
+    const duenosCon = (p) => (p.Duenos || []).filter((d) => d.cantidad > 0);
+    const precioOferta = (p) => {
+      const normal = Number(p.Precio) || 0;
+      const oferta = Number(p.PrecioOferta) || 0;
+      return oferta > 0 && oferta < normal ? oferta : '';
+    };
+    const textoDuenos = (p) => duenosCon(p).map((d) => `${nombreDeDuenoParaArchivo(d)}: ${d.cantidad}`).join(' · ') || 'Sin dueño';
+    const totalPiezas = lista.reduce((suma, p) => suma + (Number(p.Stock) || 0), 0);
+    const conPocas = lista.filter((p) => (Number(p.Stock) || 0) <= (Number(p.StockMinimo) || 0)).length;
+
+    // Qué filtros estaban puestos, para que el archivo lo diga.
+    const filtros = [];
+    if (filtroStockPersonal === 'mio') filtros.push(`Stock de ${nombreSesion || 'mi cuenta'}`);
+    else if (filtroDuenoStock === FILTRO_SIN_DUENO) filtros.push('Productos sin dueño');
+    else if (duenoElegido) filtros.push(`Stock de ${duenoElegido.nombre}`);
+    if (filtroCategoriaStock) filtros.push(`Categoría ${filtroCategoriaStock}`);
+    if (busquedaStock.trim()) filtros.push(`Buscar "${busquedaStock.trim()}"`);
+    if (filtroDesde || filtroHasta) filtros.push(`Agregados: ${textoRangoFechas(filtroDesde, filtroHasta).toLowerCase()}`);
+    const ahora = new Date();
+    const descargado = `Descargado el ${formatearFechaHora(ahora)}${nombreSesion ? ` por ${nombreSesion}` : ''}`;
+    const cuantos = `${lista.length} producto${lista.length === 1 ? '' : 's'} · ${totalPiezas.toLocaleString('es-MX')} pieza${totalPiezas === 1 ? '' : 's'}`;
+    const lineaFiltros = filtros.length > 0 ? `Filtros: ${filtros.join(' · ')}` : 'Sin filtros: todo el inventario';
+    const nombreArchivo = `inventario-${fechaParaArchivo(ahora)}`;
+
+    // Si algo falla al armar el archivo, el error lo enseña el propio botón
+    // (ver "BotonesDescarga").
+    {
+      if (formato === 'excel') {
+        const filasPorDueno = [];
+        lista.forEach((p) => {
+          const duenos = duenosCon(p);
+          if (duenos.length === 0) {
+            filasPorDueno.push([p.Nombre || '', p.CodigoPropio || '', categoriaDeProducto(p), 'Sin dueño', Number(p.Stock) || 0]);
+            return;
+          }
+          duenos.forEach((d) => {
+            filasPorDueno.push([p.Nombre || '', p.CodigoPropio || '', categoriaDeProducto(p), nombreDeDuenoParaArchivo(d), Number(d.cantidad) || 0]);
+          });
+        });
+        descargarExcel(nombreArchivo, [
+          {
+            nombre: 'Inventario',
+            titulo: 'Inventario (Stock)',
+            subtitulo: `${descargado} · ${cuantos} · ${lineaFiltros}`,
+            columnas: [
+              { titulo: 'Fecha agregado', tipo: 'fechaHora', ancho: 17 },
+              { titulo: 'Producto', ancho: 38 },
+              { titulo: 'Categoría', ancho: 16 },
+              { titulo: 'Código', ancho: 18 },
+              { titulo: 'Marca', ancho: 14 },
+              { titulo: 'Talla', ancho: 10 },
+              { titulo: 'Color', ancho: 14 },
+              { titulo: 'Precio', tipo: 'dinero', ancho: 12 },
+              { titulo: 'Precio de oferta', tipo: 'dinero', ancho: 12 },
+              { titulo: 'Stock', tipo: 'entero', ancho: 9 },
+              { titulo: 'Mínimo', tipo: 'entero', ancho: 9 },
+              { titulo: 'Dueños', ancho: 42 },
+              { titulo: 'En el catálogo', ancho: 13 },
+            ],
+            filas: lista.map((p) => [
+              p.FechaCreacion || '',
+              p.Nombre || '',
+              categoriaDeProducto(p),
+              p.CodigoPropio || '',
+              p.Marca || '',
+              p.Talla || '',
+              p.Color || '',
+              Number(p.Precio) || 0,
+              precioOferta(p),
+              Number(p.Stock) || 0,
+              Number(p.StockMinimo) || 0,
+              textoDuenos(p),
+              esProductoVisible(p) ? 'Visible' : 'Oculto',
+            ]),
+          },
+          {
+            nombre: 'Por dueño',
+            titulo: 'Inventario por dueño',
+            subtitulo: `${descargado} · un renglón por cada persona que tiene piezas de cada producto`,
+            columnas: [
+              { titulo: 'Producto', ancho: 38 },
+              { titulo: 'Código', ancho: 18 },
+              { titulo: 'Categoría', ancho: 16 },
+              { titulo: 'Dueño', ancho: 26 },
+              { titulo: 'Piezas', tipo: 'entero', ancho: 10 },
+            ],
+            filas: filasPorDueno,
+          },
+        ]);
+      } else {
+        descargarPDF(nombreArchivo, {
+          titulo: 'Inventario (Stock)',
+          subtitulo: [descargado, lineaFiltros],
+          autor: nombreSesion,
+          resumen: [
+            { etiqueta: 'Productos', valor: lista.length.toLocaleString('es-MX') },
+            { etiqueta: 'Piezas en total', valor: totalPiezas.toLocaleString('es-MX') },
+            { etiqueta: 'En su mínimo o menos', valor: conPocas.toLocaleString('es-MX') },
+          ],
+          notaPie: 'Inventario (Stock)',
+          columnas: [
+            { titulo: 'Fecha agregado', tipo: 'fechaHora', peso: 1.35 },
+            { titulo: 'Producto', peso: 3.1 },
+            { titulo: 'Categoría', peso: 1.3 },
+            { titulo: 'Código', peso: 1.4 },
+            { titulo: 'Precio', tipo: 'dinero', peso: 0.95 },
+            { titulo: 'Precio de oferta', tipo: 'dinero', peso: 0.95 },
+            { titulo: 'Stock', tipo: 'entero', peso: 0.65 },
+            { titulo: 'Mínimo', tipo: 'entero', peso: 0.7 },
+            { titulo: 'Dueños', peso: 2.7 },
+            { titulo: 'En el catálogo', peso: 0.9 },
+          ],
+          filas: lista.map((p) => [
+            p.FechaCreacion || '',
+            p.Nombre || '',
+            categoriaDeProducto(p),
+            p.CodigoPropio || '',
+            Number(p.Precio) || 0,
+            precioOferta(p),
+            Number(p.Stock) || 0,
+            Number(p.StockMinimo) || 0,
+            textoDuenos(p),
+            esProductoVisible(p) ? 'Visible' : 'Oculto',
+          ]),
+        });
+      }
+    }
+  }
+
   // P14: de todos los productos que pasan los filtros, cuáles se dibujan
   // (los primeros 50 / 100 / todos). El buscador y los filtros siguen
   // buscando en TODOS, no solo en los que se ven.
@@ -2236,6 +2392,10 @@ export default function Dashboard() {
           { clave: 'alertas', texto: `Alertas (${conteoAlertasPestana})`, visible: puedeVer('alertas') },
           { clave: 'cuenta', texto: '📄 Estado de cuenta', visible: puedeVer('cuenta') },
           { clave: 'bitacora', texto: '🗒️ Bitácora', visible: puedeVer('bitacora') },
+          // 2026-10-05: historial de entradas y salidas de piezas. Solo sale
+          // si el servidor ya la conoce (manda su permiso); se prende o apaga
+          // por Rol o por persona desde 🔐 Permisos.
+          { clave: 'inventario', texto: '📥 Entradas y salidas', visible: puedeVer('inventario') },
           { clave: 'usuarios', texto: '👤 Usuarios', visible: puedeVer('usuarios') },
           { clave: 'analitica', texto: '📈 Analítica de ventas', visible: puedeVer('analitica') },
           { clave: 'orden', texto: '🔀 Orden del catálogo', visible: puedeVer('orden') },
@@ -2424,6 +2584,12 @@ export default function Dashboard() {
             <span className="stock-conteo-total">
               📦 <strong>{productos.length}</strong> producto{productos.length === 1 ? '' : 's'} en total
             </span>
+            <BotonesDescarga
+              que="el inventario"
+              onExcel={() => descargarInventario('excel')}
+              onPDF={() => descargarInventario('pdf')}
+              cuantos={productosFiltrados.length}
+            />
             {hayFiltrosStockActivos && (
               <button
                 type="button"
@@ -2862,6 +3028,15 @@ export default function Dashboard() {
         />
       )}
 
+      {tab === 'inventario' && puedeVer('inventario') && (
+        <InventarioTab
+          sesionToken={sesionToken}
+          productos={productos}
+          nombreSesion={nombreSesion}
+          onCambio={() => cargarTodo(sesionToken, { silencioso: true })}
+        />
+      )}
+
       {tab === 'usuarios' && puedeVer('usuarios') && (
         <UsuariosTab
           usuarios={usuarios}
@@ -2911,6 +3086,7 @@ export default function Dashboard() {
           opciones={opciones}
           setOpciones={setOpciones}
           usuarios={usuarios}
+          productos={productos}
           esAdministrador={esAdministrador}
           usuarioId={usuarioId}
           nombreSesion={nombreSesion}
@@ -2961,6 +3137,7 @@ export default function Dashboard() {
               opciones={opciones}
               setOpciones={setOpciones}
               usuarioId={usuarioId}
+              productos={productos}
               onOpcionesActualizadas={() => cargarTodo(sesionToken, { silencioso: true })}
               productoExistente={productoEditando}
               iniciarCarga={iniciarCarga}
@@ -3249,7 +3426,7 @@ function CampoConOpciones({ id, valor, onChange, opciones = [], placeholder, max
 // Sirve tanto para dar de alta un producto nuevo como para editar uno que
 // ya existe: si le pasas `productoExistente`, precarga sus datos y guarda
 // con "actualizarProducto" en vez de "crearProducto".
-function ProductoForm({ sesionToken, opciones = {}, setOpciones, usuarios = [], esAdministrador = false, usuarioId = '', nombreSesion = '', productoExistente, onGuardado, onOpcionesActualizadas, onCancelar, formExterno, setFormExterno, fotosExterno, setFotosExterno, iniciarCarga, terminarCarga }) {
+function ProductoForm({ sesionToken, opciones = {}, setOpciones, usuarios = [], productos = [], esAdministrador = false, usuarioId = '', nombreSesion = '', productoExistente, onGuardado, onOpcionesActualizadas, onCancelar, formExterno, setFormExterno, fotosExterno, setFotosExterno, iniciarCarga, terminarCarga }) {
   const esEdicion = !!productoExistente;
   // Arreglo (2026-09-23, pedido por Claudia): en la pestaña "+ Agregar
   // producto" (nunca en el modal de "Editar"), el Dashboard manda su PROPIO
@@ -3562,6 +3739,23 @@ function ProductoForm({ sesionToken, opciones = {}, setOpciones, usuarios = [], 
             placeholder="Ej. PLY-001"
             maxLength={MAX_CARACTERES_CODIGO}
           />
+          {/* Aviso de código repetido (2026-10-05, catálogo de claves): solo
+              informa, no impide guardar — en esta tienda un mismo código a
+              veces se usa en varios productos a propósito. */}
+          {(() => {
+            const codigo = normalizarParaFiltro(form.codigoPropio);
+            if (!codigo) return null;
+            const otros = productos.filter(
+              (p) => normalizarParaFiltro(p.CodigoPropio) === codigo && (!productoExistente || String(p.ID) !== String(productoExistente.ID))
+            );
+            if (otros.length === 0) return null;
+            return (
+              <span className="form-nota-codigo" role="status">
+                ℹ️ Este código ya lo tiene{otros.length === 1 ? '' : 'n'}: {otros.slice(0, 3).map((p) => p.Nombre).join(', ')}
+                {otros.length > 3 ? ` y ${otros.length - 3} más` : ''}. Puedes repetirlo si así lo usas.
+              </span>
+            );
+          })()}
         </label>
         <label>
           <span className="form-label-fila">
@@ -5701,6 +5895,554 @@ function BarraFilas({ total, visibles, limite, onCambiar, nombre }) {
           </button>
         ))}
       </span>
+    </div>
+  );
+}
+
+// ---- Botones "Descargar: Excel / PDF" (2026-10-05) ----
+// Los usan Stock y "Entradas y salidas". "onExcel" / "onPDF" arman y bajan
+// el archivo (ver src/exportar.js); si algo truena, el aviso sale aquí
+// mismo, junto a los botones.
+function BotonesDescarga({ que, onExcel, onPDF, cuantos }) {
+  const [aviso, setAviso] = useState(null); // { tipo: 'ok' | 'error', texto }
+  useEffect(() => {
+    if (!aviso) return undefined;
+    const t = setTimeout(() => setAviso(null), aviso.tipo === 'ok' ? 6000 : 12000);
+    return () => clearTimeout(t);
+  }, [aviso]);
+  function bajar(armar, formato) {
+    try {
+      armar();
+      setAviso({ tipo: 'ok', texto: `✓ Se descargó ${que} en ${formato}. Búscalo en tus Descargas.` });
+    } catch (err) {
+      setAviso({ tipo: 'error', texto: `No se pudo armar la descarga: ${err.message}` });
+    }
+  }
+  const detalle = `${cuantos} renglón${cuantos === 1 ? '' : 'es'}, tal como se ve ahora (con los filtros que tengas puestos)`;
+  return (
+    <span className="descargas" role="group" aria-label={`Descargar ${que}`}>
+      <span className="descargas-titulo">Descargar:</span>
+      <button
+        type="button"
+        className="btn btn-secondary btn-small btn-descarga"
+        data-descarga="excel"
+        onClick={() => bajar(onExcel, 'Excel')}
+        title={`Baja ${que} como archivo de Excel (.xlsx): ${detalle}`}
+      >
+        📊 Excel
+      </button>
+      <button
+        type="button"
+        className="btn btn-secondary btn-small btn-descarga"
+        data-descarga="pdf"
+        onClick={() => bajar(onPDF, 'PDF')}
+        title={`Baja ${que} como PDF: ${detalle}`}
+      >
+        📄 PDF
+      </button>
+      {aviso && (
+        <span className={`descargas-aviso descargas-aviso-${aviso.tipo}`} role="status">
+          {aviso.texto}
+        </span>
+      )}
+    </span>
+  );
+}
+
+// ---- Pestaña "📥 Entradas y salidas" (2026-10-05) ----
+// Pedido de Claudia: un registro "por si un día ocupo ver o buscar un
+// producto que vendí en un mes pasado… aunque tal vez ya no lo tenga", y
+// poder descargarlo en PDF y Excel.
+// Los datos viven en la hoja "EntradasSalidas" (ver Code.gs, sección
+// "ENTRADAS Y SALIDAS"): el servidor anota solo cada entrada y cada salida
+// de piezas, y aquí nada más se consulta. Nunca se borra ni se edita.
+// Tiene dos vistas:
+//   - Movimientos: la lista, con buscador, fechas y filtros.
+//   - Claves: el "catálogo de claves" — cada código con su producto (también
+//     los que ya se eliminaron), para saber qué clave era de qué.
+const MOTIVO_INVENTARIO_INICIAL = 'Inventario inicial';
+
+function InventarioTab({ sesionToken, productos, nombreSesion, onCambio }) {
+  const [movimientos, setMovimientos] = useState(null); // null = todavía cargando
+  const [error, setError] = useState('');
+  const [cargando, setCargando] = useState(false);
+  const [vista, setVista] = useState('movimientos'); // 'movimientos' | 'claves'
+  const [buscar, setBuscar] = useState('');
+  const [filtroTipo, setFiltroTipo] = useState('');
+  const [filtroMotivo, setFiltroMotivo] = useState('');
+  const [filtroPersona, setFiltroPersona] = useState('');
+  const [desde, setDesde] = useState('');
+  const [hasta, setHasta] = useState('');
+  const [filtroClaves, setFiltroClaves] = useState(''); // '' | 'activos' | 'eliminados' | 'repetidos' | 'sinCodigo'
+  const [limiteFilas, setLimiteFilas] = useLimiteFilas('inventario');
+  const [limiteClaves, setLimiteClaves] = useLimiteFilas('claves');
+
+  function cargar() {
+    setCargando(true);
+    setError('');
+    // De paso se refresca la lista de productos del panel: el catálogo de
+    // claves la usa para saber cuáles siguen activos, y si alguien más
+    // eliminó o agregó un producto desde otro aparato, aquí se vería viejo.
+    if (onCambio) {
+      try {
+        Promise.resolve(onCambio()).catch(() => {});
+      } catch (err) {
+        // Si falla, la pestaña sigue funcionando con lo que ya tenía.
+      }
+    }
+    listarEntradasSalidas(sesionToken)
+      .then((res) => setMovimientos(Array.isArray(res.movimientos) ? res.movimientos : []))
+      .catch((err) => {
+        setError(err.message);
+        setMovimientos((antes) => antes || []);
+      })
+      .finally(() => setCargando(false));
+  }
+  // Se consulta cada vez que se abre la pestaña.
+  useEffect(() => {
+    cargar();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const lista = movimientos || [];
+  const tiempoDe = (m) => {
+    const t = new Date(m.Fecha).getTime();
+    return Number.isNaN(t) ? 0 : t;
+  };
+  // Lo más reciente arriba (a igual fecha, lo que se anotó después va primero).
+  const ordenados = lista
+    .map((m, i) => ({ m, i }))
+    .sort((a, b) => tiempoDe(b.m) - tiempoDe(a.m) || b.i - a.i)
+    .map((x) => x.m);
+
+  const unicos = (campo) =>
+    Array.from(new Set(lista.map((m) => String(m[campo] || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
+  const opcionesMotivo = unicos('Motivo');
+  const opcionesPersona = unicos('Usuario');
+
+  const textoBuscado = normalizarParaFiltro(buscar);
+  const inicio = desde ? new Date(`${desde}T00:00:00`).getTime() : null;
+  const fin = hasta ? new Date(`${hasta}T23:59:59`).getTime() : null;
+  const filtrados = ordenados.filter((m) => {
+    if (filtroTipo && m.Tipo !== filtroTipo) return false;
+    if (filtroMotivo && String(m.Motivo || '').trim() !== filtroMotivo) return false;
+    if (filtroPersona && String(m.Usuario || '').trim() !== filtroPersona) return false;
+    const t = tiempoDe(m);
+    if (inicio !== null && t < inicio) return false;
+    if (fin !== null && t > fin) return false;
+    if (textoBuscado) {
+      const donde = normalizarParaFiltro([m.Producto, m.Codigo, m.Categoria, m.Cliente, m.Motivo, m.Detalle].join(' '));
+      if (!donde.includes(textoBuscado)) return false;
+    }
+    return true;
+  });
+  const visibles = recortarFilas(filtrados, limiteFilas);
+  const hayFiltros = !!(buscar.trim() || filtroTipo || filtroMotivo || filtroPersona || desde || hasta);
+  function quitarFiltros() {
+    setBuscar('');
+    setFiltroTipo('');
+    setFiltroMotivo('');
+    setFiltroPersona('');
+    setDesde('');
+    setHasta('');
+  }
+
+  const piezas = (m) => Number(m.Cantidad) || 0;
+  const totalEntradas = filtrados.filter((m) => m.Tipo === 'Entrada').reduce((suma, m) => suma + piezas(m), 0);
+  const totalSalidas = filtrados.filter((m) => m.Tipo === 'Salida').reduce((suma, m) => suma + piezas(m), 0);
+
+  // ---- Catálogo de claves ----
+  // Sale de los productos que hay hoy + los que solo quedan en el historial
+  // (ya eliminados). Un mismo código puede estar en varios productos (así
+  // se usa en esta tienda): se marca "Repetido" solo como aviso.
+  const claves = (() => {
+    const porProducto = new Map();
+    productos.forEach((p) => {
+      porProducto.set(String(p.ID), {
+        id: String(p.ID),
+        codigo: String(p.CodigoPropio || '').trim(),
+        nombre: String(p.Nombre || ''),
+        categoria: categoriaDeProducto(p),
+        estado: esProductoVisible(p) ? 'Activo' : 'Activo (oculto del catálogo)',
+        eliminado: false,
+        existencia: Number(p.Stock) || 0,
+        ultimo: 0,
+      });
+    });
+    // Del más viejo al más nuevo, para quedarse con el último nombre/código.
+    lista
+      .map((m, i) => ({ m, i }))
+      .sort((a, b) => tiempoDe(a.m) - tiempoDe(b.m) || a.i - b.i)
+      .forEach(({ m }) => {
+        const id = String(m.ProductoID || '').trim();
+        if (!id) return;
+        let ficha = porProducto.get(id);
+        if (!ficha) {
+          ficha = { id, codigo: '', nombre: '', categoria: '', estado: 'Eliminado', eliminado: true, existencia: 0, ultimo: 0 };
+          porProducto.set(id, ficha);
+        }
+        if (ficha.eliminado) {
+          ficha.codigo = String(m.Codigo || '').trim() || ficha.codigo;
+          ficha.nombre = String(m.Producto || '') || ficha.nombre;
+          ficha.categoria = String(m.Categoria || '') || ficha.categoria;
+        }
+        ficha.ultimo = Math.max(ficha.ultimo, tiempoDe(m));
+      });
+    const fichas = Array.from(porProducto.values());
+    const cuantosPorCodigo = {};
+    fichas.forEach((f) => {
+      if (!f.codigo || f.eliminado) return;
+      const k = normalizarParaFiltro(f.codigo);
+      cuantosPorCodigo[k] = (cuantosPorCodigo[k] || 0) + 1;
+    });
+    fichas.forEach((f) => {
+      f.repetido = !!f.codigo && !f.eliminado && cuantosPorCodigo[normalizarParaFiltro(f.codigo)] > 1;
+    });
+    // Con código primero (en orden), luego los que no tienen.
+    return fichas.sort((a, b) => {
+      if (!!a.codigo !== !!b.codigo) return a.codigo ? -1 : 1;
+      return (
+        a.codigo.localeCompare(b.codigo, 'es', { numeric: true, sensitivity: 'base' }) ||
+        a.nombre.localeCompare(b.nombre, 'es', { numeric: true, sensitivity: 'base' })
+      );
+    });
+  })();
+  const clavesFiltradas = claves.filter((f) => {
+    if (filtroClaves === 'activos' && f.eliminado) return false;
+    if (filtroClaves === 'eliminados' && !f.eliminado) return false;
+    if (filtroClaves === 'repetidos' && !f.repetido) return false;
+    if (filtroClaves === 'sinCodigo' && f.codigo) return false;
+    if (textoBuscado && !normalizarParaFiltro([f.codigo, f.nombre, f.categoria].join(' ')).includes(textoBuscado)) return false;
+    return true;
+  });
+  const clavesVisibles = recortarFilas(clavesFiltradas, limiteClaves);
+
+  // ---- Descargas ----
+  const ahoraTexto = () => `Descargado el ${formatearFechaHora(new Date())}${nombreSesion ? ` por ${nombreSesion}` : ''}`;
+  function textoDeFiltros() {
+    const partes = [];
+    if (desde || hasta) partes.push(textoRangoFechas(desde, hasta));
+    if (filtroTipo) partes.push(filtroTipo === 'Entrada' ? 'Solo entradas' : 'Solo salidas');
+    if (filtroMotivo) partes.push(`Motivo: ${filtroMotivo}`);
+    if (filtroPersona) partes.push(`Quién: ${filtroPersona}`);
+    if (buscar.trim()) partes.push(`Buscar "${buscar.trim()}"`);
+    return partes.length > 0 ? `Filtros: ${partes.join(' · ')}` : 'Sin filtros: todos los movimientos';
+  }
+  function descargarMovimientos(formato) {
+    const nombreArchivo = `entradas-y-salidas-${fechaParaArchivo()}`;
+    const resumenTexto = `${filtrados.length} movimiento${filtrados.length === 1 ? '' : 's'} · entraron ${totalEntradas.toLocaleString('es-MX')} piezas · salieron ${totalSalidas.toLocaleString('es-MX')} piezas`;
+    if (formato === 'excel') {
+      descargarExcel(nombreArchivo, [
+        {
+          nombre: 'Entradas y salidas',
+          titulo: 'Entradas y salidas',
+          subtitulo: `${ahoraTexto()} · ${resumenTexto} · ${textoDeFiltros()}`,
+          columnas: [
+            { titulo: 'Fecha y hora', tipo: 'fechaHora', ancho: 17 },
+            { titulo: 'Tipo', ancho: 10 },
+            { titulo: 'Motivo', ancho: 34 },
+            { titulo: 'Producto', ancho: 36 },
+            { titulo: 'Código', ancho: 18 },
+            { titulo: 'Categoría', ancho: 16 },
+            { titulo: 'Piezas', tipo: 'entero', ancho: 9 },
+            { titulo: 'Quedaron', tipo: 'entero', ancho: 10 },
+            { titulo: 'Precio', tipo: 'dinero', ancho: 12 },
+            { titulo: 'Quién', ancho: 20 },
+            { titulo: 'Clienta', ancho: 22 },
+            { titulo: 'Detalle', ancho: 44 },
+          ],
+          filas: filtrados.map((m) => [
+            m.Fecha || '', m.Tipo || '', m.Motivo || '', m.Producto || '', m.Codigo === undefined ? '' : String(m.Codigo),
+            m.Categoria || '', piezas(m), m.Existencia === '' || m.Existencia === undefined ? '' : Number(m.Existencia),
+            m.Precio === '' || m.Precio === undefined ? '' : Number(m.Precio), m.Usuario || '', m.Cliente || '', m.Detalle || '',
+          ]),
+        },
+      ]);
+      return;
+    }
+    descargarPDF(nombreArchivo, {
+      titulo: 'Entradas y salidas',
+      subtitulo: [ahoraTexto(), textoDeFiltros()],
+      autor: nombreSesion,
+      resumen: [
+        { etiqueta: 'Movimientos', valor: filtrados.length.toLocaleString('es-MX') },
+        { etiqueta: 'Piezas que entraron', valor: totalEntradas.toLocaleString('es-MX') },
+        { etiqueta: 'Piezas que salieron', valor: totalSalidas.toLocaleString('es-MX') },
+      ],
+      notaPie: 'Entradas y salidas',
+      columnas: [
+        { titulo: 'Fecha y hora', tipo: 'fechaHora', peso: 1.55 },
+        { titulo: 'Tipo', peso: 0.8 },
+        { titulo: 'Motivo', peso: 1.85 },
+        { titulo: 'Producto', peso: 2.45 },
+        { titulo: 'Código', peso: 1.15 },
+        { titulo: 'Piezas', tipo: 'entero', peso: 0.7 },
+        { titulo: 'Quedaron', tipo: 'entero', peso: 1 },
+        { titulo: 'Precio', tipo: 'dinero', peso: 0.9 },
+        { titulo: 'Quién', peso: 1.25 },
+        { titulo: 'Clienta', peso: 1.25 },
+        { titulo: 'Detalle', peso: 2.1 },
+      ],
+      filas: filtrados.map((m) => [
+        m.Fecha || '', m.Tipo || '', m.Motivo || '', m.Producto || '', m.Codigo === undefined ? '' : String(m.Codigo), piezas(m),
+        m.Existencia === '' || m.Existencia === undefined ? '' : Number(m.Existencia),
+        m.Precio === '' || m.Precio === undefined ? '' : Number(m.Precio), m.Usuario || '', m.Cliente || '', m.Detalle || '',
+      ]),
+    });
+  }
+  function descargarClaves(formato) {
+    const nombreArchivo = `catalogo-de-claves-${fechaParaArchivo()}`;
+    const filas = clavesFiltradas.map((f) => [
+      f.codigo || '(sin código)', f.nombre, f.categoria, f.repetido ? `${f.estado} · código repetido` : f.estado,
+      f.eliminado ? '' : f.existencia, f.ultimo ? new Date(f.ultimo) : '',
+    ]);
+    const columnas = [
+      { titulo: 'Código', ancho: 22, peso: 1.5 },
+      { titulo: 'Producto', ancho: 40, peso: 3 },
+      { titulo: 'Categoría', ancho: 18, peso: 1.4 },
+      { titulo: 'Estado', ancho: 30, peso: 2 },
+      { titulo: 'Piezas hoy', tipo: 'entero', ancho: 11, peso: 0.8 },
+      { titulo: 'Último movimiento', tipo: 'fechaHora', ancho: 18, peso: 1.4 },
+    ];
+    const cuantas = `${clavesFiltradas.length} producto${clavesFiltradas.length === 1 ? '' : 's'}`;
+    if (formato === 'excel') {
+      descargarExcel(nombreArchivo, [{ nombre: 'Catálogo de claves', titulo: 'Catálogo de claves', subtitulo: `${ahoraTexto()} · ${cuantas}`, columnas, filas }]);
+      return;
+    }
+    descargarPDF(nombreArchivo, {
+      titulo: 'Catálogo de claves', subtitulo: [ahoraTexto(), cuantas], autor: nombreSesion, horizontal: false, notaPie: 'Catálogo de claves', columnas, filas,
+    });
+  }
+
+  const soloInicial = lista.length > 0 && lista.every((m) => m.Motivo === MOTIVO_INVENTARIO_INICIAL || /anterior al historial/.test(String(m.Motivo || '')));
+
+  return (
+    <div className="inventario-tab">
+      <p className="muted">
+        Aquí queda anotada cada <strong>entrada</strong> (producto nuevo, piezas que se agregan, reembolsos) y cada{' '}
+        <strong>salida</strong> (ventas pagadas, piezas que se bajan a mano, productos eliminados). Se anota solo y{' '}
+        <strong>nunca se borra</strong>: un producto sigue saliendo aquí aunque ya no lo tengas o lo hayas eliminado.
+        Las piezas de un pedido "En proceso" solo están apartadas: la salida se anota hasta que se paga.
+        "Quedaron" son las piezas disponibles en Stock justo después de ese movimiento.
+      </p>
+
+      <div className="stock-personal-toggle">
+        <button type="button" className={`resumen-btn ${vista === 'movimientos' ? 'activo' : ''}`} onClick={() => setVista('movimientos')}>
+          Movimientos
+        </button>
+        <button type="button" className={`resumen-btn ${vista === 'claves' ? 'activo' : ''}`} onClick={() => setVista('claves')}>
+          Catálogo de claves
+        </button>
+        <button type="button" className="btn btn-secondary btn-small" onClick={cargar} disabled={cargando}>
+          {cargando ? 'Actualizando…' : '🔄 Actualizar'}
+        </button>
+      </div>
+
+      {error && <p className="info-msg error">No se pudieron cargar las entradas y salidas: {error}</p>}
+      {movimientos === null && !error && <p className="info-msg">Cargando entradas y salidas…</p>}
+
+      {movimientos !== null && vista === 'movimientos' && (
+        <>
+          <div className="filtro-fechas">
+            <label>
+              Buscar
+              <input type="text" value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Producto, código, clienta…" />
+            </label>
+            <label>
+              Desde
+              <input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} />
+            </label>
+            <label>
+              Hasta
+              <input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} />
+            </label>
+            <label>
+              Tipo
+              <select value={filtroTipo} onChange={(e) => setFiltroTipo(e.target.value)}>
+                <option value="">Entradas y salidas</option>
+                <option value="Entrada">Solo entradas</option>
+                <option value="Salida">Solo salidas</option>
+              </select>
+            </label>
+            <label>
+              Motivo
+              <select value={filtroMotivo} onChange={(e) => setFiltroMotivo(e.target.value)}>
+                <option value="">Todos</option>
+                {opcionesMotivo.map((o) => (
+                  <option key={o} value={o}>{o}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Quién
+              <select value={filtroPersona} onChange={(e) => setFiltroPersona(e.target.value)}>
+                <option value="">Todos</option>
+                {opcionesPersona.map((o) => (
+                  <option key={o} value={o}>{o}</option>
+                ))}
+              </select>
+            </label>
+            {hayFiltros && (
+              <button type="button" className="btn btn-secondary btn-small" onClick={quitarFiltros}>
+                Quitar filtros
+              </button>
+            )}
+            <BotonesDescarga
+              que="las entradas y salidas"
+              onExcel={() => descargarMovimientos('excel')}
+              onPDF={() => descargarMovimientos('pdf')}
+              cuantos={filtrados.length}
+            />
+          </div>
+
+          <div className="inventario-resumen">
+            <span className="inventario-dato">
+              <strong>{filtrados.length.toLocaleString('es-MX')}</strong> movimiento{filtrados.length === 1 ? '' : 's'}
+              {hayFiltros ? ` de ${lista.length.toLocaleString('es-MX')}` : ''}
+            </span>
+            <span className="inventario-dato inventario-dato-entrada">
+              ▲ Entraron <strong>{totalEntradas.toLocaleString('es-MX')}</strong> piezas
+            </span>
+            <span className="inventario-dato inventario-dato-salida">
+              ▼ Salieron <strong>{totalSalidas.toLocaleString('es-MX')}</strong> piezas
+            </span>
+          </div>
+          {soloInicial && (
+            <p className="info-msg aviso inventario-nota-inicio">
+              El historial se acaba de activar: por ahora solo trae el "Inventario inicial" (lo que había ese día) y lo que
+              ya se había vendido antes. De aquí en adelante se anota solo cada movimiento.
+            </p>
+          )}
+
+          <div className="table-scroll">
+            <table className="data-table inventario-table">
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Hora</th>
+                  <th>Tipo</th>
+                  <th>Motivo</th>
+                  <th>Producto</th>
+                  <th>Código</th>
+                  <th>Categoría</th>
+                  <th>Piezas</th>
+                  <th title="Piezas disponibles en Stock justo después de este movimiento (sin contar las apartadas en pedidos En proceso)">Quedaron</th>
+                  <th>Precio</th>
+                  <th>Quién</th>
+                  <th>Clienta</th>
+                  <th>Detalle</th>
+                </tr>
+              </thead>
+              <tbody onClickCapture={marcarFilaActiva} onFocusCapture={marcarFilaActiva}>
+                {visibles.map((m, i) => {
+                  const esEntrada = m.Tipo === 'Entrada';
+                  return (
+                    <tr key={m.ID || i}>
+                      <td>{formatearFechaSolo(m.Fecha)}</td>
+                      <td>{formatearHoraSolo(m.Fecha)}</td>
+                      <td>
+                        <span className={`mov-tipo ${esEntrada ? 'mov-entrada' : 'mov-salida'}`}>{esEntrada ? '▲ Entrada' : '▼ Salida'}</span>
+                      </td>
+                      <td><CeldaTruncada texto={m.Motivo || '—'} /></td>
+                      <td><CeldaTruncada texto={m.Producto || '—'} /></td>
+                      <td><CeldaTruncada texto={m.Codigo === '' || m.Codigo === undefined ? '—' : String(m.Codigo)} /></td>
+                      <td><CeldaTruncada texto={m.Categoria || '—'} /></td>
+                      <td className={`mov-piezas ${esEntrada ? 'mov-entrada' : 'mov-salida'}`}>
+                        {esEntrada ? '+' : '−'}{piezas(m).toLocaleString('es-MX')}
+                      </td>
+                      <td className="mov-numero">{m.Existencia === '' || m.Existencia === undefined ? '—' : Number(m.Existencia).toLocaleString('es-MX')}</td>
+                      <td className="mov-numero">{m.Precio === '' || m.Precio === undefined ? '—' : formatearMoneda(Number(m.Precio) || 0)}</td>
+                      <td><CeldaTruncada texto={m.Usuario || '—'} /></td>
+                      <td><CeldaTruncada texto={m.Cliente || '—'} /></td>
+                      <td><CeldaTruncada texto={m.Detalle || '—'} /></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {filtrados.length === 0 && (
+              <p className="info-msg">
+                {lista.length === 0 ? 'Todavía no hay ningún movimiento anotado.' : 'No hay movimientos con los filtros de arriba.'}
+              </p>
+            )}
+          </div>
+          <BarraFilas total={filtrados.length} visibles={visibles.length} limite={limiteFilas} onCambiar={setLimiteFilas} nombre="movimientos" />
+        </>
+      )}
+
+      {movimientos !== null && vista === 'claves' && (
+        <>
+          <p className="muted">
+            Cada código con el producto al que pertenece. También salen los productos que ya eliminaste, para que puedas
+            saber de qué era una clave vieja. "Repetido" solo avisa que ese código lo tienen varios productos.
+          </p>
+          <div className="filtro-fechas">
+            <label>
+              Buscar
+              <input type="text" value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Código, producto o categoría…" />
+            </label>
+            <label>
+              Ver
+              <select value={filtroClaves} onChange={(e) => setFiltroClaves(e.target.value)}>
+                <option value="">Todos</option>
+                <option value="activos">Solo los que tengo hoy</option>
+                <option value="eliminados">Solo los eliminados</option>
+                <option value="repetidos">Códigos repetidos</option>
+                <option value="sinCodigo">Sin código</option>
+              </select>
+            </label>
+            {(buscar.trim() || filtroClaves) && (
+              <button
+                type="button"
+                className="btn btn-secondary btn-small"
+                onClick={() => {
+                  setBuscar('');
+                  setFiltroClaves('');
+                }}
+              >
+                Quitar filtros
+              </button>
+            )}
+            <BotonesDescarga
+              que="el catálogo de claves"
+              onExcel={() => descargarClaves('excel')}
+              onPDF={() => descargarClaves('pdf')}
+              cuantos={clavesFiltradas.length}
+            />
+          </div>
+          <div className="table-scroll">
+            <table className="data-table inventario-table claves-table">
+              <thead>
+                <tr>
+                  <th>Código</th>
+                  <th>Producto</th>
+                  <th>Categoría</th>
+                  <th>Estado</th>
+                  <th>Piezas hoy</th>
+                  <th>Último movimiento</th>
+                </tr>
+              </thead>
+              <tbody onClickCapture={marcarFilaActiva} onFocusCapture={marcarFilaActiva}>
+                {clavesVisibles.map((f) => (
+                  <tr key={f.id} className={f.eliminado ? 'clave-eliminada' : ''}>
+                    <td><CeldaTruncada texto={f.codigo || '— sin código —'} /></td>
+                    <td><CeldaTruncada texto={f.nombre || '—'} /></td>
+                    <td><CeldaTruncada texto={f.categoria || '—'} /></td>
+                    <td>
+                      <span className={`mov-tipo ${f.eliminado ? 'mov-salida' : 'mov-entrada'}`}>{f.estado}</span>
+                      {f.repetido && <span className="clave-repetida" title="Este código lo tienen varios productos">Repetido</span>}
+                    </td>
+                    <td className="mov-numero">{f.eliminado ? '—' : f.existencia.toLocaleString('es-MX')}</td>
+                    <td>{f.ultimo ? formatearFechaHora(new Date(f.ultimo)) : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {clavesFiltradas.length === 0 && <p className="info-msg">No hay productos con los filtros de arriba.</p>}
+          </div>
+          <BarraFilas total={clavesFiltradas.length} visibles={clavesVisibles.length} limite={limiteClaves} onCambiar={setLimiteClaves} nombre="productos" />
+        </>
+      )}
     </div>
   );
 }
