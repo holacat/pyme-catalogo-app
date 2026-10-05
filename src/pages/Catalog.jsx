@@ -126,38 +126,6 @@ function leerSucursalDelLink() {
   }
 }
 
-// ---- Prueba de estilos para el fondo de las fotos (TEMPORAL, 2026-10-03) ----
-// Claudia: "hazme un botón en el catálogo que me ayude a cambiar los 3
-// estilos y ver con cuál me quedo; ya cuando me decida te digo, quitas el
-// botón y dejas el estilo que escoja".
-// - La barrita para cambiar de estilo SOLO sale en un navegador que tiene la
-//   sesión del panel abierta (o sea, a Claudia y su equipo): las clientas
-//   nunca la ven y siguen viendo el estilo "blanco".
-// - Lo que se elige se guarda nada más en ese navegador (no en el servidor).
-// PARA QUITARLO cuando se decida: borrar este bloque, "fondoFoto" y la
-// barrita de más abajo, y dejar fijo el estilo elegido en global.css.
-const FONDO_FOTO_KEY = 'pyme_prueba_fondo_foto';
-const ESTILOS_FONDO_FOTO = [
-  { clave: 'blanco', texto: '1 · Blanco' },
-  { clave: 'verde', texto: '2 · Verde' },
-  { clave: 'dinamico', texto: '3 · Según la foto' },
-];
-function hayPanelAbiertoEnEsteNavegador() {
-  try {
-    return !!localStorage.getItem('pyme_sesion_token');
-  } catch {
-    return false;
-  }
-}
-function leerFondoFotoGuardado() {
-  try {
-    const guardado = localStorage.getItem(FONDO_FOTO_KEY);
-    return ESTILOS_FONDO_FOTO.some((e) => e.clave === guardado) ? guardado : 'blanco';
-  } catch {
-    return 'blanco';
-  }
-}
-
 const FILTROS_VACIOS = { categoria: '', marca: '', color: '', precioMin: '', precioMax: '', soloOfertas: false };
 
 function agruparPorCategoria(productos) {
@@ -308,42 +276,6 @@ export default function Catalog() {
   // 'red' (se puede reintentar tal cual) | 'existencia' (ya no hay tantas
   // piezas: se ajustó el pedido y hay que revisarlo antes de reenviar).
   const [tipoErrorRegistro, setTipoErrorRegistro] = useState('red');
-
-  // Prueba de estilos del fondo de las fotos (temporal, ver arriba).
-  const [puedeProbarEstilos] = useState(hayPanelAbiertoEnEsteNavegador);
-  const [fondoFoto, setFondoFoto] = useState(() => (hayPanelAbiertoEnEsteNavegador() ? leerFondoFotoGuardado() : 'blanco'));
-  useEffect(() => {
-    // global.css lee este dato de la etiqueta <html> para pintar el fondo.
-    document.documentElement.dataset.fondoFoto = fondoFoto;
-    return () => {
-      delete document.documentElement.dataset.fondoFoto;
-    };
-  }, [fondoFoto]);
-  function elegirFondoFoto(clave) {
-    setFondoFoto(clave);
-    try {
-      localStorage.setItem(FONDO_FOTO_KEY, clave);
-    } catch {
-      // Sin almacenamiento: el estilo dura hasta recargar la página.
-    }
-  }
-  const barraEstilos = puedeProbarEstilos ? (
-    <div className="prueba-estilos" role="group" aria-label="Prueba de estilos para el fondo de las fotos">
-      <span className="prueba-estilos-titulo">🎨 Fondo de las fotos</span>
-      {ESTILOS_FONDO_FOTO.map((e) => (
-        <button
-          key={e.clave}
-          type="button"
-          className={`prueba-estilos-btn${fondoFoto === e.clave ? ' activo' : ''}`}
-          aria-pressed={fondoFoto === e.clave}
-          onClick={() => elegirFondoFoto(e.clave)}
-        >
-          {e.texto}
-        </button>
-      ))}
-      <span className="prueba-estilos-nota">Prueba: solo la ves tú (tienes el panel abierto en este navegador).</span>
-    </div>
-  ) : null;
 
   // Catálogo de sucursal: el ID viene en el link y no cambia mientras la
   // página está abierta; el nombre lo contesta el servidor.
@@ -724,7 +656,6 @@ export default function Catalog() {
   return (
     <>
       {letreroSucursal}
-      {barraEstilos}
 
       {clienteGuardado && (
         <p className="cliente-actual">
