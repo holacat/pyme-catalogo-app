@@ -30,14 +30,32 @@ async function get(action, extraParams = {}) {
   return data;
 }
 
-async function post(body) {
-  const res = await fetch(API_URL, {
-    method: 'POST',
-    // "text/plain" evita que el navegador dispare un preflight OPTIONS,
-    // que Apps Script no maneja bien. El script igual lee el JSON del body.
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ key: PUBLIC_KEY, ...body }),
-  });
+// "opciones.sigueAunqueSalgas" (2026-10-05): para los pedidos del catálogo.
+// Le pide al navegador que TERMINE de mandar la petición aunque la clienta
+// se salga de la página en ese instante (justo lo que pasa en celular: al
+// tocar "Continuar" se abre la app de WhatsApp y el navegador se queda
+// atrás). Es la opción "keepalive" del navegador; uno viejo que no la
+// conozca simplemente la ignora.
+// "opciones.limiteMs": si el servidor no contesta en ese tiempo, la
+// petición se corta y falla como una falla de conexión cualquiera (quien
+// la pidió decide si reintenta). Sin este dato, espera lo que haga falta.
+async function post(body, opciones = {}) {
+  const corte = opciones.limiteMs > 0 && typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const reloj = corte ? setTimeout(() => corte.abort(), opciones.limiteMs) : null;
+  let res;
+  try {
+    res = await fetch(API_URL, {
+      method: 'POST',
+      // "text/plain" evita que el navegador dispare un preflight OPTIONS,
+      // que Apps Script no maneja bien. El script igual lee el JSON del body.
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ key: PUBLIC_KEY, ...body }),
+      ...(opciones.sigueAunqueSalgas ? { keepalive: true } : {}),
+      ...(corte ? { signal: corte.signal } : {}),
+    });
+  } finally {
+    if (reloj) clearTimeout(reloj);
+  }
   if (!res.ok) throw new Error(`Error de red: ${res.status}`);
   const data = await res.json();
   if (!data.ok) throw errorDelServidor_(data);
@@ -52,11 +70,12 @@ export function listarProductos(sucursal) {
   return get('listarProductos', sucursal ? { sucursal } : {});
 }
 
-export function crearPedido({ cliente, telefono, producto, productoId, cantidad, notas, sucursal }) {
+export function crearPedido({ cliente, telefono, producto, productoId, cantidad, notas, sucursal, idEnvio }) {
   return post({
     action: 'crearPedido', cliente, telefono, producto, productoId, cantidad, notas,
     ...(sucursal ? { sucursal } : {}),
-  });
+    ...(idEnvio ? { idEnvio } : {}),
+  }, { sigueAunqueSalgas: true });
 }
 
 // Carrito completo en UNA sola petición (2026-10-02): el servidor revisa
@@ -66,18 +85,28 @@ export function crearPedido({ cliente, telefono, producto, productoId, cantidad,
 // Respaldo: si el servidor todavía es una versión de antes de este cambio
 // (no conoce la acción), se manda como siempre, un producto por petición,
 // para que el catálogo nunca se quede sin poder registrar pedidos.
-export async function crearPedidoCarrito({ cliente, telefono, items, notas = '', sucursal }) {
+//
+// "idEnvio" (2026-10-05): un número único que el catálogo le pone a cada
+// envío. Si la misma petición se tiene que repetir (falla de internet, o
+// el celular se fue a WhatsApp y nunca recibió la respuesta), se manda con
+// el MISMO número y el servidor contesta lo de la primera vez sin volver a
+// anotar nada — así un reintento nunca deja el pedido duplicado.
+export async function crearPedidoCarrito({ cliente, telefono, items, notas = '', sucursal, idEnvio, limiteMs = 0 }) {
   try {
     return await post({
       action: 'crearPedidoCarrito', cliente, telefono, notas, items,
       ...(sucursal ? { sucursal } : {}),
-    });
+      ...(idEnvio ? { idEnvio } : {}),
+    }, { sigueAunqueSalgas: true, limiteMs });
   } catch (err) {
     const servidorViejo = err && err.datos && err.datos.error === 'Acción no reconocida';
     if (!servidorViejo) throw err;
     await Promise.all(
-      items.map((it) =>
-        crearPedido({ cliente, telefono, producto: it.producto, productoId: it.productoId, cantidad: it.cantidad, notas, sucursal })
+      items.map((it, i) =>
+        crearPedido({
+          cliente, telefono, producto: it.producto, productoId: it.productoId, cantidad: it.cantidad, notas, sucursal,
+          ...(idEnvio ? { idEnvio: `${idEnvio}-${i}` } : {}),
+        })
       )
     );
     return { ok: true };
