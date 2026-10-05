@@ -126,6 +126,83 @@ function leerSucursalDelLink() {
   }
 }
 
+// ---- Envío del pedido a WhatsApp (2026-10-05) ----
+// Claudia, probando en vivo: "ya no redirecciona bien así como antes, lo
+// hacía más rápido y directo; el navegador ahora dice 'bloqueando ventana
+// emergente'… y en teléfono me lleva a WhatsApp en el navegador, me debe
+// llevar directo a la app como antes".
+// Por qué pasaba: desde el 2026-09-30 primero se ESPERABA la respuesta del
+// servidor y hasta después se abría WhatsApp. Un navegador solo deja abrir
+// otra ventana (y un celular solo salta directo a la app) si eso pasa EN
+// EL MISMO TOQUE de la persona; unos segundos después ya lo trata como
+// ventana emergente y lo bloquea, o lo abre como página web.
+// Cómo queda: en el mismo toque (1) sale la petición para anotar el pedido
+// y (2) se abre WhatsApp. La petición lleva "keepalive" (ver api.js) para
+// que termine aunque el navegador se quede atrás, y un "idEnvio" para que
+// reintentarla nunca duplique el pedido (ver Code.gs).
+
+// Cuánto se espera la respuesta del servidor antes de cortar y reintentar
+// (Apps Script suele contestar en 2 a 8 segundos).
+const LIMITE_ESPERA_PEDIDO_MS = 60000;
+// El servidor recuerda cada envío 6 horas. Pasadas 5, el catálogo ya no
+// reintenta solo: no podría saber si el pedido había quedado anotado.
+const LIMITE_REINTENTO_SOLO_MS = 5 * 60 * 60 * 1000;
+
+// Número único de un envío. Se repite tal cual en los reintentos.
+function nuevoIdEnvio() {
+  try {
+    if (window.crypto && typeof window.crypto.randomUUID === 'function') return window.crypto.randomUUID();
+  } catch {
+    // Sin esa función se arma uno con la hora y un número al azar.
+  }
+  return `e${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`;
+}
+
+// "Huella" de un pedido: si el carrito y la clienta no cambiaron, un nuevo
+// intento es el MISMO pedido (y usa el mismo idEnvio).
+function huellaDelPedido(items, cliente, sucursalId) {
+  return JSON.stringify([
+    sucursalId || '',
+    cliente.nombre || '',
+    cliente.telefono || '',
+    items.map(({ producto, cantidad }) => [String(producto.ID), cantidad]),
+  ]);
+}
+
+function abrirWhatsApp(url) {
+  try {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  } catch {
+    // Si el navegador no deja, el aviso central trae un botón para abrirlo.
+  }
+}
+
+function pausa(ms) {
+  return new Promise((resolver) => setTimeout(resolver, ms));
+}
+
+// En celular, mientras la clienta está en WhatsApp, el navegador puede
+// tener la página "dormida": un reintento ahí fallaría otra vez. Se espera
+// a que la página vuelva a estar a la vista.
+function esperarPaginaALaVista() {
+  if (typeof document === 'undefined' || !document.hidden) return Promise.resolve();
+  return new Promise((resolver) => {
+    const revisar = () => {
+      if (document.hidden) return;
+      document.removeEventListener('visibilitychange', revisar);
+      resolver();
+    };
+    document.addEventListener('visibilitychange', revisar);
+  });
+}
+
+// Una falla SIN respuesta del servidor (se cayó el internet, o el celular
+// cortó la conexión): no se sabe si el pedido llegó o no. Cuando el
+// servidor sí contestó con un rechazo, el error trae "datos".
+function esFallaDeConexion(err) {
+  return !(err && err.datos);
+}
+
 const FILTROS_VACIOS = { categoria: '', marca: '', color: '', precioMin: '', precioMax: '', soloOfertas: false };
 
 function agruparPorCategoria(productos) {
@@ -257,25 +334,31 @@ export default function Catalog() {
 
   const [clienteGuardado, setClienteGuardado] = useState(() => leerClienteGuardado());
 
-  // Bug reportado por Claudia (2026-09-30): pidió un producto de prueba y
-  // NO apareció solo en la pestaña Pedidos del Dashboard — hasta que le dio
-  // manualmente "Actualizar" ahí sí apareció. Causa real: "crearPedido" se
-  // mandaba "al aire" (sin esperar su respuesta) justo DESPUÉS de abrir
-  // WhatsApp, y si esa petición fallaba, el único aviso era un
-  // "console.warn" que nadie ve (ni la clienta ni Claudia) — el pedido se
-  // podía perder en silencio total. Además, en celular, saltar a la app de
-  // WhatsApp puede hacer que el navegador quede en segundo plano justo
-  // cuando esas peticiones apenas iban a mandarse, lo que también puede
-  // retrasarlas o interrumpirlas sin ningún aviso. Con estos dos estados
-  // nuevos, ahora SÍ se espera a que el pedido quede registrado en el
-  // servidor ANTES de mandar a la clienta a WhatsApp (ver
-  // "registrarYAbrirWhatsAppCarrito" más abajo), y si algo falla se avisa
-  // claramente con un botón para "Reintentar" en vez de fallar callado.
+  // Estado del envío del pedido (ver "enviarPedidoPorWhatsApp" más abajo).
+  // Historia: el 2026-09-30 Claudia reportó que un pedido de prueba no
+  // apareció solo en la pestaña Pedidos; en ese entonces el pedido se
+  // mandaba "al aire" después de abrir WhatsApp y, si fallaba, nadie se
+  // enteraba. Desde entonces el catálogo SIEMPRE revisa la respuesta del
+  // servidor y, si algo falla, lo avisa con un botón para "Reintentar".
   const [registrandoPedido, setRegistrandoPedido] = useState(false);
   const [errorRegistroPedido, setErrorRegistroPedido] = useState('');
   // 'red' (se puede reintentar tal cual) | 'existencia' (ya no hay tantas
-  // piezas: se ajustó el pedido y hay que revisarlo antes de reenviar).
+  // piezas: se ajustó el pedido y hay que revisarlo antes de reenviar) |
+  // 'cerrado' (el catálogo de esa sucursal se apagó: no hay nada que reintentar).
   const [tipoErrorRegistro, setTipoErrorRegistro] = useState('red');
+  // Aviso central del envío (2026-10-05, pedido por Claudia: "avisar en
+  // medio que se está enviando el pedido a WhatsApp, no solo arriba; debe
+  // ser tipo modal central"). null = cerrado;
+  // { fase: 'enviando' | 'listo' | 'error', url } — "url" es el link de
+  // WhatsApp de ESE pedido, para el botón "Abrir WhatsApp" del aviso.
+  const [envioPedido, setEnvioPedido] = useState(null);
+  // El envío que está en curso o que falló: { id, huella }. Se suelta
+  // cuando el pedido queda anotado.
+  const envioRef = useRef(null);
+  const enviandoRef = useRef(false);
+  // ¿El servidor ya reconoce pedidos repetidos por su "idEnvio"? Lo avisa
+  // junto con el catálogo. Solo entonces se reintenta solo.
+  const servidorAceptaIdEnvioRef = useRef(false);
 
   // Catálogo de sucursal: el ID viene en el link y no cambia mientras la
   // página está abierta; el nombre lo contesta el servidor.
@@ -332,6 +415,7 @@ export default function Catalog() {
         if (data.ofertasOculta !== undefined) setOfertasOculta(!!data.ofertasOculta);
         if (Array.isArray(data.ofertasOrden)) setOfertasOrden(data.ofertasOrden.map(String));
         if (data.ofertasTitulo !== undefined) setOfertasTitulo(String(data.ofertasTitulo || ''));
+        if (data.aceptaIdEnvio !== undefined) servidorAceptaIdEnvioRef.current = !!data.aceptaIdEnvio;
         setEstado('listo');
       })
       .catch((err) => {
@@ -392,47 +476,123 @@ export default function Catalog() {
     );
   }
 
-  // Arreglo (2026-09-30): se ESPERA a que TODOS los productos del carrito
-  // queden registrados en la hoja de Pedidos (desde el 2026-10-02, en una
-  // sola petición que el servidor registra todo o nada), y solo
-  // si eso funciona bien se abre WhatsApp y se vacía el carrito. Antes el
-  // orden era al revés (abrir WhatsApp primero, registrar "al aire"
-  // después sin esperar nada) — ver la nota junto a "registrandoPedido"
-  // arriba de por qué eso podía perder un pedido en silencio.
-  async function registrarYAbrirWhatsAppCarrito(items, { nombre, telefono }) {
-    if (registrandoPedido) return; // evita doble envío si alguien alcanza a darle "Reintentar" dos veces
+  // Manda el pedido: lo anota en la tienda y abre WhatsApp, las dos cosas
+  // EN EL MISMO TOQUE (ver la nota "Envío del pedido a WhatsApp" arriba).
+  // Historia: hasta el 2026-09-30 se abría WhatsApp y el pedido se mandaba
+  // "al aire" sin revisar si llegó; del 2026-09-30 al 2026-10-05 se
+  // esperaba al servidor y luego se abría WhatsApp (seguro, pero el
+  // navegador lo bloqueaba como ventana emergente y en celular ya no
+  // saltaba a la app). Ahora salen juntos y el aviso central dice cómo
+  // terminó: si no se pudo anotar, la clienta lo ve y puede reintentar.
+  // El carrito se manda en UNA sola petición que el servidor registra todo
+  // o nada, y solo se quita del carrito cuando el pedido quedó anotado.
+  //
+  // Reglas:
+  // - Cada pedido (misma clienta + mismo carrito) abre WhatsApp UNA vez.
+  //   "Reintentar" el mismo pedido solo lo vuelve a anotar; si el carrito
+  //   cambió, es otro pedido y sí se abre WhatsApp con el mensaje nuevo.
+  // - Si el servidor todavía es uno "de antes" (no reconoce pedidos
+  //   repetidos), se conserva el orden viejo: primero anotar y luego
+  //   WhatsApp. Así nunca se arriesga un pedido duplicado por subir el
+  //   catálogo antes que Code.gs.
+  async function enviarPedidoPorWhatsApp(items, { nombre, telefono }) {
+    // Evita el doble envío (dos toques seguidos, o "Reintentar" dos veces).
+    // Se usa una marca inmediata además del estado, porque el estado tarda
+    // un instante en cambiar y ahora WhatsApp se abre al momento.
+    if (registrandoPedido || enviandoRef.current) return;
     if (items.length === 0) return;
-    setErrorRegistroPedido('');
-    setRegistrandoPedido(true);
+    enviandoRef.current = true;
+    let url = '';
+    let envio = null;
     try {
-      // El carrito completo va en UNA sola petición (2026-10-02) y el
-      // servidor lo registra todo o nada: cada producto queda como su
-      // propia fila en Pedidos (mismo cliente y teléfono), pero ya no puede
-      // pasar que unos entren y otros no. Antes se mandaba una petición por
-      // producto y, si una fallaba, "Reintentar" volvía a mandar TODAS —
-      // las que sí habían entrado quedaban repetidas.
-      await crearPedidoCarrito({
+      url = buildWhatsAppLinkCarrito(items, nombre, telefonoPedidos);
+      const huella = huellaDelPedido(items, { nombre, telefono }, sucursalId);
+      if (!envioRef.current || envioRef.current.huella !== huella) {
+        envioRef.current = { id: nuevoIdEnvio(), huella, desde: Date.now(), whatsAppAbierto: false };
+      }
+      envio = envioRef.current;
+      const servidorNuevo = servidorAceptaIdEnvioRef.current;
+      const pedido = {
         cliente: nombre,
         telefono,
         notas: '',
         sucursal: sucursalId,
+        idEnvio: envio.id,
+        // Con un servidor que reconoce repetidos se puede poner un límite
+        // de espera: si se cuelga, se corta y se reintenta sin riesgo.
+        limiteMs: servidorNuevo ? LIMITE_ESPERA_PEDIDO_MS : 0,
         items: items.map(({ producto, cantidad }) => ({
           productoId: producto.ID,
           producto: producto.Nombre,
           cantidad,
         })),
-      });
-      window.open(buildWhatsAppLinkCarrito(items, nombre, telefonoPedidos), '_blank', 'noopener,noreferrer');
-      setCarrito([]);
+      };
+      setErrorRegistroPedido('');
+      setRegistrandoPedido(true);
+      setEnvioPedido({ fase: 'enviando', url });
+
+      // 1) Sale la petición para anotar el pedido…
+      let registro = crearPedidoCarrito(pedido);
+      // 2) …y en este mismo toque se abre WhatsApp.
+      if (servidorNuevo && !envio.whatsAppAbierto) {
+        envio.whatsAppAbierto = true;
+        abrirWhatsApp(url);
+      }
+
+      // Si falla por conexión (sin respuesta del servidor) se reintenta
+      // solo, con el MISMO idEnvio: si el pedido sí había llegado, el
+      // servidor contesta "ya lo tengo" y no lo duplica. El primer
+      // reintento sale aunque la página esté atrás (la clienta en
+      // WhatsApp); los demás esperan a que vuelva a la página.
+      let reintentos = 0;
+      for (;;) {
+        try {
+          await registro;
+          break;
+        } catch (err) {
+          const aTiempo = () => Date.now() - envio.desde < LIMITE_REINTENTO_SOLO_MS;
+          if (!esFallaDeConexion(err) || !servidorNuevo || reintentos >= 3 || !aTiempo()) throw err;
+          reintentos += 1;
+          if (reintentos > 1) await esperarPaginaALaVista();
+          await pausa(1500 * reintentos);
+          if (!aTiempo()) throw err; // la página durmió horas: ya no es seguro repetir solo
+          registro = crearPedidoCarrito(pedido);
+        }
+      }
+      envioRef.current = null;
+      // Se quita del carrito SOLO lo que se envió (si mientras tanto la
+      // clienta agregó algo más, eso se queda).
+      const enviado = {};
+      items.forEach(({ producto, cantidad }) => { enviado[String(producto.ID)] = cantidad; });
+      setCarrito((prev) =>
+        prev
+          .map((it) => {
+            const cuanto = enviado[String(it.producto.ID)];
+            return cuanto ? { ...it, cantidad: it.cantidad - cuanto } : it;
+          })
+          .filter((it) => it.cantidad > 0)
+      );
+      // Servidor "de antes": WhatsApp se abre hasta ahora, ya con el
+      // pedido anotado (si el navegador lo bloquea, el aviso trae el botón).
+      if (!envio.whatsAppAbierto) {
+        envio.whatsAppAbierto = true;
+        abrirWhatsApp(url);
+      }
+      // Si la clienta ya cerró el aviso, no se le vuelve a abrir.
+      setEnvioPedido((previo) => (previo ? { ...previo, fase: 'listo' } : previo));
     } catch (err) {
-      // El carrito NO se vacía si algo falla, para que la clienta no tenga
+      // El carrito NO se toca si algo falla, para que la clienta no tenga
       // que rehacer su pedido desde cero.
       const datos = (err && err.datos) || {};
+      const yaSalioWhatsApp = !!(envio && envio.whatsAppAbierto);
       if (datos.sucursalNoDisponible) {
         // El catálogo de esta sucursal se apagó mientras la clienta pedía.
         setSucursalNoDisponible(true);
-        setTipoErrorRegistro('existencia');
-        setErrorRegistroPedido('Este catálogo ya no está disponible, así que no se pudo registrar tu pedido.');
+        setTipoErrorRegistro('cerrado');
+        setErrorRegistroPedido(
+          'Este catálogo ya no está disponible, así que tu pedido no quedó anotado.' +
+            (yaSalioWhatsApp ? ' Si ya mandaste el mensaje de WhatsApp, ponte de acuerdo ahí mismo con quien te atiende.' : '')
+        );
       } else if (datos.sinExistencia) {
         // Catálogo de sucursal: alguien más se llevó piezas mientras tanto.
         // No se registró nada. Se ajusta el pedido a lo que de verdad queda
@@ -453,15 +613,21 @@ export default function Catalog() {
             .filter((it) => it.cantidad > 0)
         );
         setTipoErrorRegistro('existencia');
-        setErrorRegistroPedido(`${err.message} Ya ajustamos tu pedido a lo que queda — revísalo y vuelve a enviarlo.`);
+        setErrorRegistroPedido(
+          `${err.message} Ya ajustamos tu pedido a lo que queda: revísalo y vuelve a enviarlo.` +
+            (yaSalioWhatsApp ? ' Se abrirá WhatsApp con el pedido corregido; el mensaje anterior ya no cuenta.' : '')
+        );
         cargarProductos();
       } else {
         setTipoErrorRegistro('red');
         setErrorRegistroPedido(
-          'No pudimos registrar tu pedido (puede ser tu conexión a internet). Tu pedido sigue guardado aquí — dale "Reintentar".'
+          'No pudimos anotar tu pedido en la tienda (puede ser tu conexión a internet). Tu pedido sigue guardado aquí: dale "Reintentar".' +
+            (yaSalioWhatsApp ? ' No hace falta volver a mandar el WhatsApp.' : '')
         );
       }
+      setEnvioPedido({ fase: 'error', url });
     } finally {
+      enviandoRef.current = false;
       setRegistrandoPedido(false);
     }
   }
@@ -470,7 +636,7 @@ export default function Catalog() {
   function handleContinuarCarrito() {
     setCarritoAbierto(false);
     if (clienteGuardado) {
-      registrarYAbrirWhatsAppCarrito(carrito, clienteGuardado);
+      enviarPedidoPorWhatsApp(carrito, clienteGuardado);
     } else {
       setPidiendoDatosCarrito(true);
     }
@@ -484,15 +650,22 @@ export default function Catalog() {
     guardarCliente({ nombre, telefono });
     setClienteGuardado({ nombre, telefono });
 
-    registrarYAbrirWhatsAppCarrito(carrito, { nombre, telefono });
+    enviarPedidoPorWhatsApp(carrito, { nombre, telefono });
   }
 
   // Botón "Reintentar" del aviso de error: usa el carrito y los datos del
   // cliente tal como se quedaron (ninguno de los dos se borra si falla el
-  // registro), así que reintentar es simplemente volver a llamar a la
-  // misma función con lo que ya se tenía.
+  // registro), así que reintentar es volver a llamar a la misma función
+  // con lo que ya se tenía. Si es el mismo pedido, WhatsApp no se abre
+  // otra vez (ya se abrió; solo faltó anotarlo).
   function handleReintentarRegistroPedido() {
-    if (clienteGuardado) registrarYAbrirWhatsAppCarrito(carrito, clienteGuardado);
+    if (clienteGuardado) enviarPedidoPorWhatsApp(carrito, clienteGuardado);
+  }
+
+  // "Revisar mi pedido" del aviso central: lo cierra y abre el carrito.
+  function handleRevisarPedidoTrasError() {
+    setEnvioPedido(null);
+    setCarritoAbierto(true);
   }
 
   function handleCambiarDatos() {
@@ -506,6 +679,86 @@ export default function Catalog() {
     <div className="sucursal-letrero" role="heading" aria-level="1">
       <span className="sucursal-letrero-fijo">Catálogo de sucursal</span>{' '}
       <strong className="sucursal-letrero-nombre">{sucursal.nombre}</strong>
+    </div>
+  ) : null;
+
+  // ---- Aviso central del envío a WhatsApp (2026-10-05) ----
+  // Pedido por Claudia: "avisar en medio que se está enviando el pedido a
+  // WhatsApp, no solo arriba; tipo modal central". Tres momentos:
+  // enviando → listo, o error. Siempre trae un botón para abrir WhatsApp a
+  // mano, por si el navegador de la clienta no lo abrió solo. Va en una
+  // constante porque se dibuja en todas las salidas de esta pantalla
+  // (también si el catálogo se quedó sin productos o se apagó a medio envío).
+  const avisoEnvio = envioPedido ? (
+    <div
+      className="modal-overlay"
+      onClick={envioPedido.fase === 'enviando' ? undefined : () => setEnvioPedido(null)}
+    >
+      <div
+        className={`modal-box aviso-envio aviso-envio-fase-${envioPedido.fase}`}
+        role="dialog"
+        aria-modal="true"
+        aria-live="polite"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {envioPedido.fase === 'enviando' && (
+          <>
+            <div className="aviso-envio-rueda" aria-hidden="true" />
+            <h3>Enviando tu pedido a WhatsApp…</h3>
+            <p>
+              Se va a abrir WhatsApp con tu pedido ya escrito. Ahí solo dale <strong>Enviar</strong>.
+            </p>
+            <p className="aviso-envio-nota">Estamos anotando tu pedido en la tienda…</p>
+            <a className="link-button aviso-envio-link" href={envioPedido.url} target="_blank" rel="noopener noreferrer">
+              ¿No se abrió WhatsApp? Tócalo aquí
+            </a>
+            <button type="button" className="link-button aviso-envio-cerrar" onClick={() => setEnvioPedido(null)}>
+              Cerrar este aviso
+            </button>
+          </>
+        )}
+
+        {envioPedido.fase === 'listo' && (
+          <>
+            <p className="modal-check" aria-hidden="true">✅</p>
+            <h3>¡Tu pedido quedó anotado!</h3>
+            <p>
+              Si todavía no lo haces, dale <strong>Enviar</strong> al mensaje en WhatsApp para que te atiendan.
+            </p>
+            <div className="aviso-envio-botones">
+              <a className="btn btn-whatsapp" href={envioPedido.url} target="_blank" rel="noopener noreferrer">
+                📲 Abrir WhatsApp
+              </a>
+              <button type="button" className="btn btn-secondary" onClick={() => setEnvioPedido(null)}>
+                Seguir viendo el catálogo
+              </button>
+            </div>
+          </>
+        )}
+
+        {envioPedido.fase === 'error' && (
+          <>
+            <p className="modal-check" aria-hidden="true">⚠️</p>
+            <h3>Tu pedido todavía no queda anotado</h3>
+            <p className="aviso-envio-error">{errorRegistroPedido}</p>
+            <div className="aviso-envio-botones">
+              {tipoErrorRegistro === 'existencia' && carrito.length > 0 && (
+                <button type="button" className="btn btn-primary" onClick={handleRevisarPedidoTrasError}>
+                  🛒 Revisar mi pedido
+                </button>
+              )}
+              {tipoErrorRegistro === 'red' && (
+                <button type="button" className="btn btn-primary" onClick={handleReintentarRegistroPedido}>
+                  🔄 Reintentar
+                </button>
+              )}
+              <button type="button" className="btn btn-secondary" onClick={() => setEnvioPedido(null)}>
+                Cerrar
+              </button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   ) : null;
 
@@ -527,18 +780,22 @@ export default function Catalog() {
   // su catálogo apagado: se dice claro, en vez de enseñar otro catálogo.
   if (sucursalNoDisponible) {
     return (
-      <div className="catalogo-error-carga">
-        <p className="info-msg aviso">
-          {errorRegistroPedido || 'Este catálogo ya no está disponible.'} Pídele el link nuevo a quien te lo compartió, o
-          entra al catálogo general.
-        </p>
-        <a className="btn btn-secondary" href="/">Ver el catálogo general</a>
-      </div>
+      <>
+        {avisoEnvio}
+        <div className="catalogo-error-carga">
+          <p className="info-msg aviso">
+            {errorRegistroPedido || 'Este catálogo ya no está disponible.'} Pídele el link nuevo a quien te lo compartió, o
+            entra al catálogo general.
+          </p>
+          <a className="btn btn-secondary" href="/">Ver el catálogo general</a>
+        </div>
+      </>
     );
   }
   if (productos.length === 0) {
     return (
       <>
+        {avisoEnvio}
         {letreroSucursal}
         <p className="info-msg">
           {sucursal ? 'Esta sucursal aún no tiene productos disponibles.' : 'Aún no hay productos disponibles.'}
@@ -666,28 +923,24 @@ export default function Catalog() {
         </p>
       )}
 
-      {/* Aviso mientras se registra el pedido en el servidor (2026-09-30) —
-          se muestra justo antes de saltar a WhatsApp, para que la clienta
-          sepa que hay que esperar un momento en vez de pensar que la app se
-          congeló. */}
-      {registrandoPedido && <p className="info-msg aviso">Registrando tu pedido…</p>}
-
       {/* Si el registro falla, se avisa claramente y se ofrece reintentar
           con el mismo carrito (que NO se borra en ese caso) en vez de
-          fallar en silencio (que era el bug original). */}
-      {errorRegistroPedido && (
+          fallar en silencio. Mientras el aviso central está abierto, el
+          error se ve AHÍ; este de arriba queda como recordatorio si la
+          clienta cierra el aviso sin resolverlo. */}
+      {errorRegistroPedido && !envioPedido && (
         <div className="catalogo-error-carga">
           <p className="info-msg error">{errorRegistroPedido}</p>
-          {tipoErrorRegistro === 'existencia' ? (
+          {tipoErrorRegistro === 'red' ? (
+            <button type="button" className="btn btn-secondary" onClick={handleReintentarRegistroPedido}>
+              🔄 Reintentar
+            </button>
+          ) : (
             carrito.length > 0 && (
               <button type="button" className="btn btn-secondary" onClick={() => setCarritoAbierto(true)}>
                 🛒 Revisar mi pedido
               </button>
             )
-          ) : (
-            <button type="button" className="btn btn-secondary" onClick={handleReintentarRegistroPedido}>
-              🔄 Reintentar
-            </button>
           )}
         </div>
       )}
@@ -891,7 +1144,11 @@ export default function Catalog() {
           carrito modal ya se cerró en ese momento, así que no hay nada que
           "reabrir" — y evita que alguien le dé doble clic por accidente
           mientras espera. */}
-      {totalProductosEnCarrito > 0 && !registrandoPedido && (
+      {avisoEnvio}
+
+      {/* El botón del carrito se esconde mientras se envía y mientras el
+          aviso central está abierto (flota por encima de todo y estorbaba). */}
+      {totalProductosEnCarrito > 0 && !registrandoPedido && !envioPedido && (
         <button type="button" className="carrito-flotante" onClick={() => setCarritoAbierto(true)}>
           🛒 {totalProductosEnCarrito} producto{totalProductosEnCarrito === 1 ? '' : 's'} — Ver pedido
         </button>
