@@ -172,7 +172,15 @@ export default function ProductCard({ producto, onAgregarCarrito }) {
   // en celular, porque hay información extra oculta que revelar (sin
   // importar qué tan larga sea); en escritorio, porque algún texto de los
   // que ya se ven SÍ se recortó por ser más largo de lo normal.
-  const hayInfoExtra = !!(categoriaCompleta || descripcionCompleta || colorCompleto || tallaCompleta);
+  //
+  // Arreglo (2026-10-05, reportado por Claudia con captura del producto
+  // "P D" en celular: "quita info y no hay opción para ver su info, no está
+  // el Ver más… no debería pasar que se quite info sin posibilidad de
+  // verla"). "Disponible: N" también se esconde en celular, pero no contaba
+  // como "información extra": un producto con piezas y SIN categoría,
+  // descripción, talla ni color se quedaba sin botón "Ver más", y su
+  // "Disponible" no se podía ver de ninguna forma. Ahora también cuenta.
+  const hayInfoExtra = !!(categoriaCompleta || descripcionCompleta || colorCompleto || tallaCompleta || !sinStock);
   const hayTextoRecortado = nombreEsLargo || descripcionEsLarga || colorEsLargo || tallaEsLarga;
   const hayAlgoQueExpandir = esEscritorio ? hayTextoRecortado : (nombreEsLargo || hayInfoExtra);
 
