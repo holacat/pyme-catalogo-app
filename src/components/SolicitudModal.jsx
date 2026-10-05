@@ -22,14 +22,21 @@ function limitarTelefono(valorTexto) {
 // mensaje ("3 x Bolsa de mano" o "3 productos") sin que el resto del
 // código tenga que preocuparse por eso.
 //
-// Flujo: 1) el cliente llena el formulario, 2) ve un mensaje de
-// confirmación aquí mismo por un momento, 3) recién ahí lo mandamos a
-// WhatsApp. Así siempre alcanza a ver la confirmación antes de que el
-// navegador cambie de pestaña.
+// Flujo (2026-10-05): el cliente llena el formulario y, EN EL MISMO TOQUE
+// de "Continuar a WhatsApp", se avisa al catálogo (onConfirm) para que
+// abra WhatsApp y anote el pedido.
+// Antes este modal enseñaba primero un "¡Listo! Te estamos redirigiendo a
+// WhatsApp…" y esperaba 1.1 segundos antes de avisar. Esa pausa era el
+// problema: un navegador solo deja abrir otra ventana (y un celular solo
+// salta directo a la app) dentro del toque de la persona; pasada la pausa,
+// algunos (sobre todo el iPhone) lo bloquean como ventana emergente. La
+// confirmación ya no hace falta aquí: ahora el catálogo enseña su aviso
+// central ("Enviando tu pedido a WhatsApp…" → "¡Tu pedido quedó anotado!").
+// De paso, ese mensaje viejo decía "Registramos tu solicitud" cuando el
+// pedido todavía ni se había mandado a anotar.
 export default function SolicitudModal({ producto, items, cantidad = 1, onClose, onConfirm }) {
   const [nombre, setNombre] = useState('');
   const [telefono, setTelefono] = useState('');
-  const [confirmado, setConfirmado] = useState(false);
 
   // Si nos pasaron "items" (carrito) lo usamos tal cual; si no, armamos
   // una lista de un solo elemento a partir de "producto" + "cantidad"
@@ -46,27 +53,8 @@ export default function SolicitudModal({ producto, items, cantidad = 1, onClose,
   function handleSubmit(e) {
     e.preventDefault();
     if (!nombre.trim() || !telefono.trim()) return;
-    setConfirmado(true);
-    // Pequeña pausa para que la persona alcance a leer el mensaje de
-    // confirmación antes de que se abra la pestaña de WhatsApp.
-    setTimeout(() => {
-      onConfirm({ nombre: nombre.trim(), telefono: telefono.trim() });
-    }, 1100);
-  }
-
-  if (confirmado) {
-    return (
-      <div className="modal-overlay">
-        <div className="modal-box modal-confirmacion">
-          <p className="modal-check">✅</p>
-          <h3>¡Listo, {nombre.trim()}!</h3>
-          <p className="muted">
-            Registramos tu solicitud de <strong>{resumenTexto}</strong>.
-            Te estamos redirigiendo a WhatsApp…
-          </p>
-        </div>
-      </div>
-    );
+    // Sin pausas: tiene que pasar dentro de este mismo toque (ver arriba).
+    onConfirm({ nombre: nombre.trim(), telefono: telefono.trim() });
   }
 
   return (
