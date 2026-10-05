@@ -319,6 +319,9 @@ const INTERVALO_REFRESCO_MS = 6000;
 //     aviso apenas un refresco de fondo sí funciona).
 const TIEMPO_MAXIMO_ESPERA_MS = 25000;
 const TIEMPO_MAXIMO_CARGA_INICIAL_MS = 45000;
+// El aviso amarillo de la "red de seguridad" del círculo de carga.
+const AVISO_ESPERA_CANCELADA =
+  'Una acción está tardando más de lo normal. Es posible que sí se haya guardado del lado del servidor — revisa antes de repetirla. En cuanto termine, este aviso se quita solo.';
 
 // Ajuste (2026-09-29, reportado por Claudia): la primera vez que movió el
 // Estado de un pedido a "En proceso" tardó mucho y salió el aviso de "tardó
@@ -916,11 +919,30 @@ export default function Dashboard() {
   // `terminarCarga` se pasan hacia abajo a los componentes que lo
   // necesiten (ver `onCargando`/`onCargaLista` en ProductoForm).
   const [cargasEnCurso, setCargasEnCurso] = useState(0);
+  // Cuántas acciones siguen DE VERDAD sin terminar (2026-10-06). El contador
+  // de arriba es el del círculo, y la "red de seguridad" de más abajo lo
+  // regresa a 0 cuando algo tarda demasiado; este no se toca ahí, así se
+  // sabe cuándo esa acción lenta por fin terminó.
+  const cargasRealesRef = useRef(0);
+  // true mientras está en pantalla el aviso amarillo de "tardó demasiado".
+  const avisoDeEsperaRef = useRef(false);
   function iniciarCarga() {
+    cargasRealesRef.current += 1;
     setCargasEnCurso((n) => n + 1);
   }
   function terminarCarga() {
+    cargasRealesRef.current = Math.max(0, cargasRealesRef.current - 1);
     setCargasEnCurso((n) => Math.max(0, n - 1));
+    // Reportado por Claudia (2026-10-06): el aviso amarillo de "una acción
+    // tardó demasiado… revisa antes de repetirla" se quedaba pegado aunque
+    // el cambio sí se había hecho. Ese aviso sale cuando se deja de esperar,
+    // pero la acción sigue su camino; en cuanto termina (ya no queda
+    // ninguna pendiente) el aviso deja de tener sentido y se quita solo. Si
+    // la acción terminó mal, su propio mensaje de error es el que queda.
+    if (cargasRealesRef.current === 0 && avisoDeEsperaRef.current) {
+      avisoDeEsperaRef.current = false;
+      setMensaje((previo) => (previo === AVISO_ESPERA_CANCELADA ? '' : previo));
+    }
   }
 
   // Rediseño del círculo de carga (2026-09-24, pedido por Claudia: "prefiero
@@ -1006,9 +1028,10 @@ export default function Dashboard() {
     const vigilante = setTimeout(() => {
       setCargasEnCurso(0);
       setCargando(false);
-      setMensaje(
-        'Una acción tardó demasiado en responder y se canceló la espera. Es posible que sí se haya guardado del lado del servidor — revisa antes de repetirla.'
-      );
+      // Si la acción todavía sigue viva, el aviso se quita solo cuando
+      // termine (ver "terminarCarga").
+      avisoDeEsperaRef.current = cargasRealesRef.current > 0;
+      setMensaje(AVISO_ESPERA_CANCELADA);
     }, Math.max(TIEMPO_MAXIMO_ESPERA_MS, TIEMPO_MAXIMO_CARGA_INICIAL_MS) + 5000);
     return () => clearTimeout(vigilante);
   }, [cargasEnCurso]);
@@ -4293,6 +4316,47 @@ function CampoPosicion({ posicion, total, onMover, etiqueta }) {
 // Renombrar, ocultar, agregar y eliminar categoría siguen igual que antes
 // (se guardan al momento), pero se bloquean mientras haya cambios de orden
 // sin guardar, para no mezclar las dos cosas.
+// Textos de ayuda que se pueden minimizar. Minimizados queda solo un
+// botoncito "ℹ️ <título>" para volver a abrirlos. Se recuerda en este
+// aparato cómo se dejaron ("clave" distingue una ayuda de otra).
+const AYUDA_MINIMIZADA_KEY = 'pyme_ayuda_minimizada_';
+function AyudaMinimizable({ clave, titulo, children }) {
+  const [minimizada, setMinimizada] = useState(() => {
+    try {
+      return window.localStorage.getItem(AYUDA_MINIMIZADA_KEY + clave) === '1';
+    } catch {
+      return false;
+    }
+  });
+  function alternar() {
+    setMinimizada((antes) => {
+      const ahora = !antes;
+      try {
+        if (ahora) window.localStorage.setItem(AYUDA_MINIMIZADA_KEY + clave, '1');
+        else window.localStorage.removeItem(AYUDA_MINIMIZADA_KEY + clave);
+      } catch {
+        // Sin almacenamiento: vale mientras la pestaña esté abierta.
+      }
+      return ahora;
+    });
+  }
+  if (minimizada) {
+    return (
+      <button type="button" className="ayuda-minimizable-abrir" onClick={alternar} aria-expanded="false" title="Ver la explicación">
+        ℹ️ {titulo} ▾
+      </button>
+    );
+  }
+  return (
+    <div className="ayuda-minimizable">
+      {children}
+      <button type="button" className="ayuda-minimizable-cerrar" onClick={alternar} aria-expanded="true" title="Minimizar esta explicación">
+        ▴ Minimizar
+      </button>
+    </div>
+  );
+}
+
 function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, terminarCarga, onDirtyChange }) {
   const categoriasPredeterminadas = opciones.categoria || [];
   const categoriasOcultas = opciones.categoriaOculta || [];
@@ -4660,26 +4724,59 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
     }
   }
 
-  // Los dos botones (Nuevo–Viejo / A–Z) de un encabezado.
-  function botonesOrdenRapidoJSX(alcance, nombre, clase) {
-    return botonesDeOrdenRapido(alcance, nombre).map((b) => (
-      <button
-        key={b.criterio}
-        type="button"
-        className={clase}
-        data-orden-rapido={`${b.criterio}:${b.sentido}`}
-        onClick={() => pedirOrdenRapido(alcance, nombre, b.criterio, b.sentido)}
-        disabled={bloqueoPorCambios || b.apagado}
-        title={
-          tituloBloqueo ||
-          (b.apagado
-            ? 'Aquí no hay productos que acomodar'
-            : `Acomoda ${alcance === 'todas' ? 'los productos de TODAS las categorías' : 'los productos de aquí'} ${ORDEN_RAPIDO[b.criterio].frase[b.sentido]}. Antes de hacerlo te pregunta. Al presionarlo otra vez, los acomoda al revés.`)
-        }
-      >
-        {b.criterio === 'fecha' ? '🕒' : '🔤'} <span className="orden-rapido-prefijo">Orden {b.criterio === 'fecha' ? 'por ' : ''}</span>{b.texto}
-      </button>
-    ));
+  // Lo que lleva un botón "compacto" (solo ícono) de los encabezados
+  // (2026-10-06, Claudia: "que los botones se minimicen, que solo se vean
+  // sus íconos… el nombre completo solo al pasar el mouse o presionar").
+  // El nombre va en "data-pista": global.css lo enseña en una etiqueta
+  // flotante al pasar el mouse, al presionar o al llegar con el teclado
+  // (sale al instante y no mueve nada de lugar). "motivoApagado" explica
+  // por qué no se puede usar, cuando está apagado.
+  function propsBotonCompacto(nombreBoton, motivoApagado) {
+    const pista = motivoApagado ? `${nombreBoton} — ${motivoApagado}` : nombreBoton;
+    return { 'data-pista': pista, 'aria-label': pista };
+  }
+
+  // Los dos botones (Nuevo–Viejo / A–Z) de un encabezado. Con "compacto"
+  // (los de cada categoría y los de Ofertas) solo se ve el ícono con una
+  // flechita que dice hacia dónde acomoda.
+  function botonesOrdenRapidoJSX(alcance, nombre, clase, compacto) {
+    return botonesDeOrdenRapido(alcance, nombre).map((b) => {
+      const nombreBoton = `Orden ${b.criterio === 'fecha' ? 'por ' : ''}${b.texto}`;
+      const comun = {
+        type: 'button',
+        'data-orden-rapido': `${b.criterio}:${b.sentido}`,
+        onClick: () => pedirOrdenRapido(alcance, nombre, b.criterio, b.sentido),
+        disabled: bloqueoPorCambios || b.apagado,
+      };
+      if (compacto) {
+        return (
+          <button
+            key={b.criterio}
+            {...comun}
+            className={`${clase} btn-icono`}
+            {...propsBotonCompacto(nombreBoton, motivoBloqueo || (b.apagado ? 'aquí no hay productos que acomodar' : ''))}
+          >
+            <span aria-hidden="true">{b.criterio === 'fecha' ? '🕒' : '🔤'}</span>
+            <span className="btn-icono-sentido" aria-hidden="true">{b.sentido === 'asc' ? '↑' : '↓'}</span>
+          </button>
+        );
+      }
+      return (
+        <button
+          key={b.criterio}
+          {...comun}
+          className={clase}
+          title={
+            tituloBloqueo ||
+            (b.apagado
+              ? 'Aquí no hay productos que acomodar'
+              : `Acomoda ${alcance === 'todas' ? 'los productos de TODAS las categorías' : 'los productos de aquí'} ${ORDEN_RAPIDO[b.criterio].frase[b.sentido]}. Antes de hacerlo te pregunta. Al presionarlo otra vez, los acomoda al revés.`)
+          }
+        >
+          {b.criterio === 'fecha' ? '🕒' : '🔤'} <span className="orden-rapido-prefijo">Orden {b.criterio === 'fecha' ? 'por ' : ''}</span>{b.texto}
+        </button>
+      );
+    });
   }
 
   // Ocultar/mostrar la zona 🔥 Ofertas completa del catálogo (los productos
@@ -5055,6 +5152,8 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
   }
   const bloqueoPorCambios = hayCambios || guardando;
   const tituloBloqueo = bloqueoPorCambios ? 'Primero guarda o descarta los cambios de orden' : undefined;
+  // Lo mismo, para la etiqueta de los botones compactos (va después del nombre).
+  const motivoBloqueo = bloqueoPorCambios ? 'primero guarda o descarta los cambios de orden' : '';
 
   // Un renglón de producto (se usa igual en una categoría y en Ofertas).
   function filaProducto({ p, i, total, lista, clave, onMover }) {
@@ -5251,17 +5350,25 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
       {/* Etiqueta que sigue al dedo mientras se arrastra en celular. */}
       <div ref={fantasmaRef} className="orden-fantasma" aria-hidden="true" style={{ display: 'none' }} />
       <div ref={espaciadorRef} aria-hidden="true" style={{ height: 0 }} />
-      <p className="muted">
-        Acomoda todo lo que quieras y al final dale <strong>💾 Guardar orden</strong> (un solo guardado). Para mover
-        algo: escribe el número de lugar en su cajita y da Enter (por ejemplo, del 10 al 2 de un jalón), usa ▲ ▼ para
-        moverlo de uno en uno, o arrástralo desde ⠿ (con el mouse o con el dedo en el celular). Lo que muevas se queda resaltado en su lugar nuevo.
-      </p>
-      <p className="muted">
-        Los botones <strong>🕒 Orden por Nuevo–Viejo</strong> y <strong>🔤 Orden A–Z</strong> acomodan de un jalón (por
-        fecha en que se agregaron, o por nombre): los de arriba, los productos de todas las categorías; los de cada
-        categoría, solo los suyos. Antes de cambiar nada te preguntan, y esos se guardan solos. Si presionas el mismo
-        botón otra vez, acomoda al revés.
-      </p>
+      {/* Los textos de ayuda se pueden minimizar (2026-10-06, pedido de
+          Claudia); se recuerda cómo los dejó. */}
+      <AyudaMinimizable clave="orden" titulo="Cómo acomodar el catálogo">
+        <p className="muted">
+          Acomoda todo lo que quieras y al final dale <strong>💾 Guardar orden</strong> (un solo guardado). Para mover
+          algo: escribe el número de lugar en su cajita y da Enter (por ejemplo, del 10 al 2 de un jalón), usa ▲ ▼ para
+          moverlo de uno en uno, o arrástralo desde ⠿ (con el mouse o con el dedo en el celular). Lo que muevas se queda resaltado en su lugar nuevo.
+        </p>
+        <p className="muted">
+          Los botones <strong>🕒 Orden por Nuevo–Viejo</strong> y <strong>🔤 Orden A–Z</strong> acomodan de un jalón (por
+          fecha en que se agregaron, o por nombre): los de arriba, los productos de todas las categorías; los de cada
+          categoría (🕒 y 🔤, con su flechita), solo los suyos. Antes de cambiar nada te preguntan, y esos se guardan
+          solos. Si presionas el mismo botón otra vez, acomoda al revés.
+        </p>
+        <p className="muted">
+          En cada categoría: ✏️ renombrar, el ojo para ocultarla o volver a mostrarla en el catálogo (ojo tachado =
+          está oculta) y 🗑️ eliminar. Pasa el mouse por un botón (o déjalo presionado) para ver su nombre.
+        </p>
+      </AyudaMinimizable>
 
       <div className="orden-barra-superior">
         <div className="orden-buscador">
@@ -5339,39 +5446,46 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
               {zonaOfertasOculta && <span className="badge badge-oculto">Oculta del catálogo</span>}
             </h3>
             <div className="orden-categoria-botones">
-              {botonesOrdenRapidoJSX('ofertas', '', 'btn btn-secondary btn-small btn-orden-rapido')}
+              {botonesOrdenRapidoJSX('ofertas', '', 'btn btn-secondary btn-small btn-orden-rapido', true)}
               <button
                 type="button"
-                className="btn btn-secondary btn-small"
+                className="btn btn-secondary btn-small btn-icono"
+                data-accion="renombrar"
                 onClick={() => {
                   setTituloOfertasNuevo(tituloOfertas === 'Ofertas' ? '' : tituloOfertas);
                   setRenombrandoOfertas(true);
                 }}
                 disabled={bloqueoPorCambios}
-                title={tituloBloqueo}
+                {...propsBotonCompacto('Renombrar', motivoBloqueo)}
               >
-                ✏️ Renombrar
+                <span aria-hidden="true">✏️</span>
               </button>
               <button
                 type="button"
-                className="btn btn-secondary btn-small"
+                className={`btn btn-secondary btn-small btn-icono btn-ojo ${zonaOfertasOculta ? 'btn-ojo-cerrado' : ''}`}
+                data-accion="ocultar"
+                aria-pressed={zonaOfertasOculta}
                 onClick={toggleZonaOfertas}
                 disabled={cambiandoZonaOfertas || bloqueoPorCambios}
-                title={tituloBloqueo}
+                {...propsBotonCompacto(
+                  zonaOfertasOculta ? 'Mostrar en el catálogo' : 'Ocultar del catálogo',
+                  motivoBloqueo
+                )}
               >
-                {zonaOfertasOculta ? 'Mostrar' : 'Ocultar'}
+                <IconoOjo abierto={!zonaOfertasOculta} tamano={16} />
               </button>
               <button
                 type="button"
-                className="btn btn-eliminar btn-small"
+                className="btn btn-eliminar btn-small btn-icono"
+                data-accion="eliminar"
                 onClick={() => {
                   setConfirmoQuitarOfertas(false);
                   setEliminandoOfertas(true);
                 }}
                 disabled={bloqueoPorCambios || ofertasLocal.length === 0}
-                title={tituloBloqueo || (ofertasLocal.length === 0 ? 'No hay ningún producto en oferta' : undefined)}
+                {...propsBotonCompacto('Eliminar', motivoBloqueo || (ofertasLocal.length === 0 ? 'no hay ningún producto en oferta' : ''))}
               >
-                🗑️ Eliminar
+                <span aria-hidden="true">🗑️</span>
               </button>
             </div>
           </div>
@@ -5506,33 +5620,40 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
                 {grupo.oculta && <span className="badge badge-oculto">Oculta del catálogo</span>}
               </h3>
               <div className="orden-categoria-botones">
-                {botonesOrdenRapidoJSX('categoria', grupo.nombre, 'btn btn-secondary btn-small btn-orden-rapido')}
+                {botonesOrdenRapidoJSX('categoria', grupo.nombre, 'btn btn-secondary btn-small btn-orden-rapido', true)}
                 <button
                   type="button"
-                  className="btn btn-secondary btn-small"
+                  className="btn btn-secondary btn-small btn-icono"
+                  data-accion="renombrar"
                   onClick={() => abrirRenombrar(grupo.nombre)}
                   disabled={bloqueoPorCambios}
-                  title={tituloBloqueo}
+                  {...propsBotonCompacto('Renombrar', motivoBloqueo)}
                 >
-                  ✏️ Renombrar
+                  <span aria-hidden="true">✏️</span>
                 </button>
                 <button
                   type="button"
-                  className="btn btn-secondary btn-small"
+                  className={`btn btn-secondary btn-small btn-icono btn-ojo ${grupo.oculta ? 'btn-ojo-cerrado' : ''}`}
+                  data-accion="ocultar"
+                  aria-pressed={!!grupo.oculta}
                   onClick={() => toggleOcultarCategoria(grupo)}
                   disabled={ocultandoCategoria === grupo.nombre || bloqueoPorCambios}
-                  title={tituloBloqueo}
+                  {...propsBotonCompacto(
+                    grupo.oculta ? 'Mostrar en el catálogo' : 'Ocultar del catálogo',
+                    motivoBloqueo
+                  )}
                 >
-                  {grupo.oculta ? 'Mostrar' : 'Ocultar'}
+                  <IconoOjo abierto={!grupo.oculta} tamano={16} />
                 </button>
                 <button
                   type="button"
-                  className="btn btn-eliminar btn-small"
+                  className="btn btn-eliminar btn-small btn-icono"
+                  data-accion="eliminar"
                   onClick={() => abrirEliminar(grupo)}
                   disabled={bloqueoPorCambios}
-                  title={tituloBloqueo}
+                  {...propsBotonCompacto('Eliminar', motivoBloqueo)}
                 >
-                  🗑️ Eliminar
+                  <span aria-hidden="true">🗑️</span>
                 </button>
               </div>
             </div>
@@ -9348,11 +9469,16 @@ function AnaliticaTab({ sesionToken }) {
 // dibujos de línea sencillos, del mismo estilo, y el ícono dice el ESTADO:
 //   ojo cerrado (tachado)  -> la contraseña NO se ve
 //   ojo abierto            -> la contraseña SÍ se ve
-function IconoOjo({ abierto }) {
+// (2026-10-06) También lo usan los botones de "Ocultar" de "Orden del
+// catálogo", con el mismo significado: ojo abierto = se ve en el catálogo,
+// ojo tachado = está oculta. "tamano" es el lado del dibujo, en pixeles.
+function IconoOjo({ abierto, tamano = 20 }) {
   return (
     <svg
-      width="20"
-      height="20"
+      className="icono-ojo"
+      data-ojo={abierto ? 'abierto' : 'cerrado'}
+      width={tamano}
+      height={tamano}
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
