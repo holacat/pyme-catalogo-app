@@ -4170,3 +4170,41 @@ body.orden-arrastrando-tactil {
 
 /* Explicación de arriba de "Mi sucursal". */
 .sucursal-explicacion { margin: 0 0 0.8rem; }
+
+
+/* ==== Aviso central "Enviando tu pedido a WhatsApp" (2026-10-05) ====
+   Pedido por Claudia: que el aviso salga en medio de la pantalla (antes
+   era un renglón chiquito arriba). Usa la misma ventana ".modal-overlay"
+   / ".modal-box" del carrito. Tres momentos: enviando, listo y error. */
+.aviso-envio { text-align: center; max-width: 400px; }
+.aviso-envio h3 { margin: 0 0 0.5rem; font-size: 1.15rem; }
+.aviso-envio p { margin: 0 0 0.7rem; line-height: 1.45; }
+.aviso-envio .modal-check { margin: 0 0 0.3rem; }
+.aviso-envio-nota { color: var(--muted); font-size: 0.85rem; }
+.aviso-envio-error { color: var(--danger); }
+.aviso-envio-link { display: inline-block; font-size: 0.9rem; padding: 0.4rem 0.2rem; }
+.aviso-envio-cerrar { display: block; margin: 0.5rem auto 0; padding: 0.4rem 0.2rem; font-size: 0.8rem; font-weight: 400; color: var(--muted); }
+.aviso-envio-botones { display: flex; flex-direction: column; gap: 0.55rem; margin-top: 0.9rem; }
+.aviso-envio-botones .btn {
+  width: 100%;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  box-sizing: border-box;
+}
+/* Ruedita verde (color de WhatsApp) que gira mientras se envía. */
+.aviso-envio-rueda {
+  width: 46px;
+  height: 46px;
+  margin: 0.2rem auto 0.9rem;
+  border-radius: 50%;
+  border: 5px solid #d7f5e1;
+  border-top-color: #25d366;
+  animation: avisoEnvioGiro 0.9s linear infinite;
+}
+@keyframes avisoEnvioGiro { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .aviso-envio-rueda { animation-duration: 2.4s; }
+}
