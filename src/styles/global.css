@@ -4147,10 +4147,15 @@ body.orden-arrastrando-tactil {
      celular, como la de esa bolsa). Antes, una foto alta estiraba su
      tarjeta y los textos de cada producto quedaban a distinta altura.
    - La foto nunca se recorta ni se deforma: se ve completa y centrada.
-   Para hacer el espacio más bajo o más alto basta cambiar "9 / 16". */
+   - Lo que sobra arriba y abajo se rellena con el verde claro del
+     catálogo, difuminado. Claudia lo eligió entre tres estilos (blanco,
+     verde y "según la foto"): "el verde me gustó, ese hay que dejarlo".
+   Para hacer el espacio más bajo o más alto basta cambiar "9 / 16"; para
+   otro color de relleno, la línea "background". */
 .product-photo {
   aspect-ratio: 9 / 16;
-  background: #ffffff;
+  background: #eef8f2;
+  background: linear-gradient(180deg, #cfe9da 0%, #eef8f2 30%, #f7fcf9 50%, #eef8f2 70%, #cfe9da 100%);
   position: relative;
   overflow: hidden;
 }
@@ -4161,73 +4166,7 @@ body.orden-arrastrando-tactil {
   height: 100%;
   object-fit: contain;
 }
-.product-photo .product-photo-fondo { display: none; }
 .product-photo-placeholder { position: absolute; inset: 0; }
-
-/* ---- Relleno de arriba y abajo: TRES ESTILOS A PRUEBA (temporal) ----
-   Claudia va a elegir uno con la barrita "🎨 Fondo de las fotos" del
-   catálogo (Catalog.jsx). El estilo se anota en la etiqueta <html>
-   ("data-fondo-foto"). Cuando elija: dejar fijo ese y borrar los otros dos
-   y la barrita.
-   Estilo 1, "blanco": es el de arriba (fondo blanco), no necesita nada más. */
-
-/* Estilo 2, "verde": el verde claro del catálogo, difuminado. */
-html[data-fondo-foto="verde"] .product-photo {
-  background: linear-gradient(180deg, #cfe9da 0%, #eef8f2 30%, #f7fcf9 50%, #eef8f2 70%, #cfe9da 100%);
-}
-
-/* Estilo 3, "según la foto": un tono suave del color que predomina en cada
-   foto (como el fondo de los reproductores de música). Es una copia
-   chiquita de la misma foto, muy difuminada y agrandada, hasta que solo
-   queda su color. Se hace con puro CSS: no hay que "leer" la foto. */
-html[data-fondo-foto="dinamico"] .product-photo { container-type: inline-size; }
-html[data-fondo-foto="dinamico"] .product-photo .product-photo-fondo {
-  display: block;
-  inset: auto;
-  left: 45%;
-  top: 45%;
-  width: 10%;
-  height: 10%;
-  object-fit: cover;
-  filter: blur(10px) saturate(1.7);
-  filter: blur(3.4cqw) saturate(1.7);
-  transform: scale(22);
-  opacity: 0.62;
-  cursor: default;
-  pointer-events: none;
-}
-
-/* Barrita temporal para probar los tres estilos. Solo se dibuja en un
-   navegador con la sesión del panel abierta; se queda pegada arriba al
-   deslizar, para comparar cómodamente. */
-.prueba-estilos {
-  position: sticky;
-  top: 0.4rem;
-  z-index: 20;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.4rem 0.5rem;
-  margin: 0 0 1rem;
-  padding: 0.5rem 0.75rem;
-  background: #fffbea;
-  border: 1px dashed #d9b84a;
-  border-radius: 10px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-  font-size: 0.85rem;
-}
-.prueba-estilos-titulo { font-weight: 700; color: #6b5310; }
-.prueba-estilos-btn {
-  font: inherit;
-  padding: 0.35rem 0.75rem;
-  border: 1px solid var(--border);
-  background: white;
-  border-radius: 999px;
-  cursor: pointer;
-  color: var(--text);
-}
-.prueba-estilos-btn.activo { background: var(--brand); border-color: var(--brand); color: white; font-weight: 600; }
-.prueba-estilos-nota { color: var(--muted); font-size: 0.78rem; }
 
 /* Explicación de arriba de "Mi sucursal". */
 .sucursal-explicacion { margin: 0 0 0.8rem; }
