@@ -364,6 +364,8 @@ function conLimiteDeTiempo(promesa, etiqueta, opciones = {}) {
 // vieja se quedara con el nombre anterior), aquí los dos nombres se tratan
 // como el MISMO estado: se cuentan juntos, se filtran juntos y siempre se
 // muestran como "Pendiente".
+// Valor especial del filtro por dueño de Stock (no puede chocar con un ID).
+const FILTRO_SIN_DUENO = '\u0000sin-dueno';
 const ESTADO_PENDIENTE = 'Pendiente';
 const ESTADO_PENDIENTE_VIEJO = 'Sin solicitud';
 const ESTADOS_PEDIDO = [ESTADO_PENDIENTE, 'En proceso', 'Pagado', 'Reembolsado', 'Cancelado'];
@@ -879,6 +881,12 @@ export default function Dashboard() {
   // 'todo' muestra el stock completo (con el dueño de cada quien); 'mio'
   // filtra solo los productos donde yo tengo algo asignado.
   const [filtroStockPersonal, setFiltroStockPersonal] = useState('todo');
+  // Filtro por dueño en Stock (2026-10-05, pedido varias veces por
+  // Claudia: "ver rápido qué productos tiene cada persona"). '' = todos;
+  // el ID de una persona = solo donde ESA persona tiene piezas a su
+  // nombre; FILTRO_SIN_DUENO = productos que nadie tiene asignados.
+  // "Mi stock personal" (arriba) sigue siendo el atajo para verme a mí.
+  const [filtroDuenoStock, setFiltroDuenoStock] = useState('');
    const esAdministrador = rol === 'Administrador';
   // Funcionalidad 1, Paso 2 (Permisos de pestañas, 2026-09): reemplaza los
   // "esAdministrador &&" que antes decidían a mano qué pestañas se ven. El
@@ -1734,10 +1742,66 @@ export default function Dashboard() {
   function esDuenoDelProducto(producto) {
     return (producto.Duenos || []).some((d) => String(d.usuarioId) === String(usuarioId) && d.cantidad > 0);
   }
+  // Filtro por dueño (2026-10-05): quién tiene piezas a su nombre, en
+  // cuántos productos y cuántas piezas — sale de la misma columna "Dueño"
+  // que ya se ve en la tabla, así que funciona igual para cualquier cuenta.
+  function piezasDe(producto, idPersona) {
+    return (producto.Duenos || []).reduce(
+      (suma, d) => suma + (String(d.usuarioId) === String(idPersona) && d.cantidad > 0 ? Number(d.cantidad) || 0 : 0),
+      0
+    );
+  }
+  function tieneAlgunDueno(producto) {
+    return (producto.Duenos || []).some((d) => d.cantidad > 0);
+  }
+  const duenosDeStock = (() => {
+    const mapa = new Map();
+    productos.forEach((p) => {
+      const vistos = new Set();
+      (p.Duenos || []).forEach((d) => {
+        if (!(d.cantidad > 0)) return;
+        const id = String(d.usuarioId);
+        const persona = mapa.get(id) || { id, nombre: String(d.nombre || 'Sin nombre'), productos: 0, piezas: 0 };
+        if (!vistos.has(id)) persona.productos += 1;
+        vistos.add(id);
+        persona.piezas += Number(d.cantidad) || 0;
+        mapa.set(id, persona);
+      });
+    });
+    return Array.from(mapa.values()).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es', { sensitivity: 'base' }));
+  })();
+  const productosSinDueno = productos.filter((p) => !tieneAlgunDueno(p)).length;
+  // Si la persona elegida ya no tiene nada (se le acabó o se reasignó),
+  // se sigue viendo en la lista mientras esté elegida, con 0.
+  const duenoElegido =
+    filtroDuenoStock && filtroDuenoStock !== FILTRO_SIN_DUENO
+      ? duenosDeStock.find((d) => d.id === String(filtroDuenoStock)) || {
+          id: String(filtroDuenoStock),
+          nombre: (usuarios.find((u) => String(u.ID) === String(filtroDuenoStock)) || {}).Nombre || 'Esa persona',
+          productos: 0,
+          piezas: 0,
+        }
+      : null;
+  const valorSelectorDueno = filtroStockPersonal === 'mio' ? String(usuarioId) : filtroDuenoStock;
+  function elegirDuenoDeStock(valor) {
+    if (valor && valor === String(usuarioId)) {
+      // Elegirme a mí es lo mismo que "Mi stock personal".
+      setFiltroStockPersonal('mio');
+      setFiltroDuenoStock('');
+      return;
+    }
+    setFiltroStockPersonal('todo');
+    setFiltroDuenoStock(valor);
+  }
+
   const productosFiltrados =
     filtroStockPersonal === 'mio'
       ? productosOrdenadosPorColumna.filter(esDuenoDelProducto)
-      : productosOrdenadosPorColumna;
+      : filtroDuenoStock === FILTRO_SIN_DUENO
+        ? productosOrdenadosPorColumna.filter((p) => !tieneAlgunDueno(p))
+        : filtroDuenoStock
+          ? productosOrdenadosPorColumna.filter((p) => piezasDe(p, filtroDuenoStock) > 0)
+          : productosOrdenadosPorColumna;
 
   // P14: de todos los productos que pasan los filtros, cuáles se dibujan
   // (los primeros 50 / 100 / todos). El buscador y los filtros siguen
@@ -1750,7 +1814,7 @@ export default function Dashboard() {
 
   const filtroFechaActivo = !!(filtroDesde || filtroHasta);
   const hayFiltrosStockActivos =
-    filtroFechaActivo || !!filtroCategoriaStock || !!busquedaStock.trim() || filtroStockPersonal === 'mio';
+    filtroFechaActivo || !!filtroCategoriaStock || !!busquedaStock.trim() || filtroStockPersonal === 'mio' || !!filtroDuenoStock;
 
   // Al darle clic a un encabezado de columna ordenable: 1er clic ordena de
   // menor a mayor, 2do clic de mayor a menor, 3er clic quita ese orden y
@@ -1769,6 +1833,7 @@ export default function Dashboard() {
     setBusquedaStock('');
     setFiltroCategoriaStock('');
     setFiltroStockPersonal('todo');
+    setFiltroDuenoStock('');
   }
   // Pedidos: igual que los productos, más recientes primero. Además se
   // pueden filtrar por fecha (Desde/Hasta) y por Estado con la tablita de
@@ -2275,18 +2340,47 @@ export default function Dashboard() {
           <div className="stock-personal-toggle">
             <button
               type="button"
-              className={`resumen-btn ${filtroStockPersonal === 'todo' ? 'activo' : ''}`}
-              onClick={() => setFiltroStockPersonal('todo')}
+              className={`resumen-btn ${filtroStockPersonal === 'todo' && !filtroDuenoStock ? 'activo' : ''}`}
+              onClick={() => elegirDuenoDeStock('')}
             >
               Todo el stock
             </button>
             <button
               type="button"
               className={`resumen-btn ${filtroStockPersonal === 'mio' ? 'activo' : ''}`}
-              onClick={() => setFiltroStockPersonal('mio')}
+              onClick={() => elegirDuenoDeStock(String(usuarioId))}
             >
               Mi stock personal
             </button>
+            {/* Filtro por dueño (2026-10-05): ver qué productos tiene cada
+                persona. Entre paréntesis, en cuántos productos tiene piezas. */}
+            <label className="pedidos-filtro-dueno-admin stock-filtro-dueno">
+              Ver stock de:
+              <select value={valorSelectorDueno} onChange={(e) => elegirDuenoDeStock(e.target.value)} aria-label="Ver el stock de una persona">
+                <option value="">Todos</option>
+                {!duenosDeStock.some((d) => d.id === String(usuarioId)) && <option value={String(usuarioId)}>Yo (0)</option>}
+                {duenoElegido && duenoElegido.productos === 0 && <option value={duenoElegido.id}>{duenoElegido.nombre} (0)</option>}
+                {duenosDeStock.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.id === String(usuarioId) ? `Yo — ${d.nombre}` : d.nombre} ({d.productos})
+                  </option>
+                ))}
+                <option value={FILTRO_SIN_DUENO}>Sin dueño ({productosSinDueno})</option>
+              </select>
+            </label>
+            {duenoElegido && (
+              <span className="stock-dueno-resumen">
+                🧑 <strong>{duenoElegido.nombre}</strong> tiene <strong>{duenoElegido.piezas}</strong> pieza
+                {duenoElegido.piezas === 1 ? '' : 's'} a su nombre en <strong>{duenoElegido.productos}</strong> producto
+                {duenoElegido.productos === 1 ? '' : 's'}.
+              </span>
+            )}
+            {filtroDuenoStock === FILTRO_SIN_DUENO && (
+              <span className="stock-dueno-resumen">
+                📦 <strong>{productosSinDueno}</strong> producto{productosSinDueno === 1 ? '' : 's'} que nadie tiene asignado
+                {productosSinDueno === 1 ? '' : 's'}.
+              </span>
+            )}
           </div>
 
           <div className="filtro-fechas">
@@ -3881,6 +3975,69 @@ function moverEnLista(lista, desde, hasta) {
   return copia;
 }
 
+// ---- Orden rápido (2026-10-05) ----
+// Pedido por Claudia: en "Orden del catálogo", un botón general (todas las
+// categorías) y uno en cada categoría para acomodar los productos "por
+// tiempo de agregado, del más nuevo al más viejo; si se presiona de nuevo,
+// del más viejo al más nuevo", y otro por orden alfabético; "antes de
+// accionar el cambio, que pregunte".
+// criterio: 'fecha' | 'nombre'.  sentido: 'desc' | 'asc'.
+//   fecha/desc = Nuevo–Viejo (lo primero que ofrece el botón), fecha/asc = Viejo–Nuevo
+//   nombre/asc = A–Z (lo primero que ofrece el botón),         nombre/desc = Z–A
+const ORDEN_RAPIDO = {
+  fecha: {
+    primero: 'desc',
+    etiqueta: { desc: 'Nuevo–Viejo', asc: 'Viejo–Nuevo' },
+    frase: { desc: 'del más nuevo al más viejo', asc: 'del más viejo al más nuevo' },
+    nota: 'Se toma la fecha en que se agregó cada producto.',
+  },
+  nombre: {
+    primero: 'asc',
+    etiqueta: { asc: 'A–Z', desc: 'Z–A' },
+    frase: { asc: 'por nombre, de la A a la Z', desc: 'por nombre, de la Z a la A' },
+    nota: 'Se toma el nombre del producto, sin distinguir mayúsculas ni acentos.',
+  },
+};
+
+// Acomoda una lista de productos. "lugarEnHoja" (ID → renglón de la hoja)
+// desempata: entre dos productos con la misma fecha o el mismo nombre va
+// primero el que se agregó antes, para que el resultado sea siempre igual.
+function ordenarProductosPor(lista, criterio, sentido, lugarEnHoja) {
+  const lugar = (p) => (lugarEnHoja && lugarEnHoja[String(p.ID)]) || 0;
+  const fecha = (p) => {
+    const t = new Date(p.FechaCreacion).getTime();
+    return Number.isNaN(t) ? 0 : t; // sin fecha = lo más viejo
+  };
+  const copia = lista.slice();
+  if (criterio === 'nombre') {
+    copia.sort(
+      (a, b) =>
+        String(a.Nombre || '').trim().localeCompare(String(b.Nombre || '').trim(), 'es', { numeric: true, sensitivity: 'base' }) ||
+        lugar(a) - lugar(b)
+    );
+  } else {
+    copia.sort((a, b) => fecha(a) - fecha(b) || lugar(a) - lugar(b));
+  }
+  if (sentido === 'desc') copia.reverse();
+  return copia;
+}
+
+function mismoOrdenDeProductos(a, b) {
+  return a.length === b.length && a.every((p, i) => String(p.ID) === String(b[i].ID));
+}
+
+// Qué sentido ofrece el botón: el primero de ese criterio, salvo que TODAS
+// las listas ya estén así — entonces ofrece el contrario (es el "si se
+// presiona de nuevo" que pidió Claudia). Se decide mirando cómo están
+// acomodadas, así que sigue funcionando después de recargar la página.
+function siguienteSentidoDeOrden(listas, criterio, lugarEnHoja) {
+  const primero = ORDEN_RAPIDO[criterio].primero;
+  const conVarios = listas.filter((l) => l.length > 1);
+  if (conVarios.length === 0) return primero;
+  const yaEstan = conVarios.every((l) => mismoOrdenDeProductos(l, ordenarProductosPor(l, criterio, primero, lugarEnHoja)));
+  return yaEstan ? (primero === 'desc' ? 'asc' : 'desc') : primero;
+}
+
 // Cajita con el número de lugar (1, 2, 3…): se escribe el lugar a donde se
 // quiere mandar y se da Enter — así algo pasa del lugar 10 al 2 de un jalón,
 // sin darle 8 veces a la flechita.
@@ -4001,6 +4158,15 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
   const [confirmoBorrarProductos, setConfirmoBorrarProductos] = useState(false);
   const [guardandoEliminar, setGuardandoEliminar] = useState(false);
 
+  // Orden rápido (2026-10-05): lo que se está por confirmar
+  // ({ alcance: 'todas' | 'categoria' | 'ofertas', nombre, criterio, sentido })
+  // y el aviso verde de "listo" de cuando terminó.
+  const [ordenRapido, setOrdenRapido] = useState(null);
+  const [avisoListo, setAvisoListo] = useState('');
+  // Sube de número cuando hay que volver a acomodar la pantalla con lo que
+  // quedó en el servidor (ver el efecto de abajo).
+  const [resincronizar, setResincronizar] = useState(0);
+
   function acomodarDesdeServidor() {
     setGruposLocal(agruparParaOrden(productos, categoriasPredeterminadas, categoriasOcultas, categoriaOrdenExplicito));
     setOfertasLocal(ordenarOfertas(productos, ofertasOrdenGuardado));
@@ -4016,6 +4182,21 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
     acomodarDesdeServidor();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productos, opciones]);
+
+  // Después de un "orden rápido": la pantalla se vuelve a acomodar con lo
+  // que de verdad quedó guardado (el efecto de arriba no corre mientras se
+  // está guardando, así que hace falta pedirlo aparte al terminar).
+  useEffect(() => {
+    if (resincronizar === 0 || hayCambiosRef.current) return;
+    acomodarDesdeServidor();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resincronizar]);
+
+  useEffect(() => {
+    if (!avisoListo) return undefined;
+    const t = setTimeout(() => setAvisoListo(''), 8000);
+    return () => clearTimeout(t);
+  }, [avisoListo]);
 
   // Avisa al Dashboard que hay cambios sin guardar (para el aviso de "no te
   // salgas sin guardar" y para pausar la actualización automática).
@@ -4179,6 +4360,132 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
       setGuardando(false);
       terminarCarga?.();
     }
+  }
+
+  // ---- Orden rápido (2026-10-05): por fecha o por nombre, con pregunta ----
+  // Renglón de la hoja de cada producto (los de más abajo son los más
+  // nuevos): sirve para desempatar fechas o nombres iguales.
+  const lugarEnHoja = {};
+  productos.forEach((p, i) => { lugarEnHoja[String(p.ID)] = i + 1; });
+
+  // Las listas a las que les toca cada alcance.
+  function listasDeOrdenRapido(alcance, nombre) {
+    if (alcance === 'ofertas') return [ofertasLocal];
+    if (alcance === 'categoria') {
+      const g = gruposLocal.find((x) => x.nombre === nombre);
+      return g ? [g.productos] : [];
+    }
+    return gruposLocal.map((g) => g.productos).concat(ofertasLocal.length > 0 ? [ofertasLocal] : []);
+  }
+
+  // Lo que dibuja cada par de botones: [{ criterio, sentido, texto, apagado }].
+  function botonesDeOrdenRapido(alcance, nombre) {
+    const listas = listasDeOrdenRapido(alcance, nombre);
+    const hayQueAcomodar = listas.some((l) => l.length > 1);
+    return ['fecha', 'nombre'].map((criterio) => {
+      const sentido = siguienteSentidoDeOrden(listas, criterio, lugarEnHoja);
+      return { criterio, sentido, texto: ORDEN_RAPIDO[criterio].etiqueta[sentido], apagado: !hayQueAcomodar };
+    });
+  }
+
+  function pedirOrdenRapido(alcance, nombre, criterio, sentido) {
+    if (bloqueoPorCambios) return;
+    setAvisoListo('');
+    setOrdenRapido({ alcance, nombre: nombre || '', criterio, sentido });
+  }
+
+  // Ya confirmado: se manda al servidor de un jalón (UNA llamada para todos
+  // los productos, más una para la zona de Ofertas si le toca; cada una
+  // deja UN renglón de Bitácora, que se puede deshacer desde la papelera).
+  // La pantalla no se mueve "por adelantado": se acomoda al terminar, con
+  // lo que de verdad quedó guardado.
+  async function aplicarOrdenRapido() {
+    const pedido = ordenRapido;
+    if (!pedido || guardando || hayCambios) return;
+    const { alcance, nombre, criterio, sentido } = pedido;
+    const frase = ORDEN_RAPIDO[criterio].frase[sentido];
+    setOrdenRapido(null);
+    setGuardando(true);
+    setMensaje('');
+    iniciarCarga?.();
+    try {
+      const cambios = [];
+      const categoriasCambiadas = [];
+      if (alcance !== 'ofertas') {
+        gruposLocal.forEach((g) => {
+          if (alcance === 'categoria' && g.nombre !== nombre) return;
+          const acomodados = ordenarProductosPor(g.productos, criterio, sentido, lugarEnHoja);
+          if (mismoOrdenDeProductos(acomodados, g.productos)) return;
+          categoriasCambiadas.push(g.nombre);
+          acomodados.forEach((p, i) => cambios.push({ productoId: p.ID, orden: i + 1 }));
+        });
+      }
+      let ofertasAcomodadas = null;
+      if (alcance !== 'categoria' && ofertasLocal.length > 1) {
+        const acomodadas = ordenarProductosPor(ofertasLocal, criterio, sentido, lugarEnHoja);
+        if (!mismoOrdenDeProductos(acomodadas, ofertasLocal)) ofertasAcomodadas = acomodadas;
+      }
+      if (cambios.length === 0 && !ofertasAcomodadas) {
+        setAvisoListo('Ya estaban acomodados así: no hubo nada que cambiar.');
+        return;
+      }
+      if (cambios.length > 0) {
+        const cuales =
+          categoriasCambiadas.length === 1
+            ? `"${categoriasCambiadas[0]}"`
+            : `${categoriasCambiadas.length} categorías (${categoriasCambiadas.slice(0, 6).join(', ')}${categoriasCambiadas.length > 6 ? '…' : ''})`;
+        await actualizarOrdenMultiple({
+          sesionToken,
+          cambios,
+          resumen: `Productos — ${cuales}: acomodados ${frase} (${cambios.length} producto${cambios.length === 1 ? '' : 's'})`,
+        });
+      }
+      if (ofertasAcomodadas) {
+        await actualizarOrdenOfertas({
+          sesionToken,
+          productoIds: ofertasAcomodadas.map((p) => p.ID),
+          resumen: `Zona de Ofertas — acomodada ${frase} (${ofertasAcomodadas.length} productos)`,
+        });
+      }
+      await onCambio();
+      const donde =
+        alcance === 'todas' ? 'Todas las categorías quedaron' : alcance === 'ofertas' ? `La zona de "${tituloOfertas}" quedó` : `"${nombre}" quedó`;
+      setAvisoListo(`${donde} ${alcance === 'todas' ? 'acomodadas' : 'acomodada'} ${frase}. Así se ve ya en el catálogo.`);
+      if (alcance === 'categoria') setResaltado(`c:${nombre}`);
+    } catch (err) {
+      setMensaje(`Error al acomodar: ${err.message} — revisa cómo quedó y vuelve a intentarlo.`);
+      try {
+        await onCambio();
+      } catch {
+        // Si tampoco se pudo actualizar, la actualización automática lo hará.
+      }
+    } finally {
+      setGuardando(false);
+      terminarCarga?.();
+      setResincronizar((n) => n + 1);
+    }
+  }
+
+  // Los dos botones (Nuevo–Viejo / A–Z) de un encabezado.
+  function botonesOrdenRapidoJSX(alcance, nombre, clase) {
+    return botonesDeOrdenRapido(alcance, nombre).map((b) => (
+      <button
+        key={b.criterio}
+        type="button"
+        className={clase}
+        data-orden-rapido={`${b.criterio}:${b.sentido}`}
+        onClick={() => pedirOrdenRapido(alcance, nombre, b.criterio, b.sentido)}
+        disabled={bloqueoPorCambios || b.apagado}
+        title={
+          tituloBloqueo ||
+          (b.apagado
+            ? 'Aquí no hay productos que acomodar'
+            : `Acomoda ${alcance === 'todas' ? 'los productos de TODAS las categorías' : 'los productos de aquí'} ${ORDEN_RAPIDO[b.criterio].frase[b.sentido]}. Antes de hacerlo te pregunta. Al presionarlo otra vez, los acomoda al revés.`)
+        }
+      >
+        {b.criterio === 'fecha' ? '🕒' : '🔤'} <span className="orden-rapido-prefijo">Orden {b.criterio === 'fecha' ? 'por ' : ''}</span>{b.texto}
+      </button>
+    ));
   }
 
   // Ocultar/mostrar la zona 🔥 Ofertas completa del catálogo (los productos
@@ -4755,6 +5062,12 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
         algo: escribe el número de lugar en su cajita y da Enter (por ejemplo, del 10 al 2 de un jalón), usa ▲ ▼ para
         moverlo de uno en uno, o arrástralo desde ⠿ (con el mouse o con el dedo en el celular). Lo que muevas se queda resaltado en su lugar nuevo.
       </p>
+      <p className="muted">
+        Los botones <strong>🕒 Orden por Nuevo–Viejo</strong> y <strong>🔤 Orden A–Z</strong> acomodan de un jalón (por
+        fecha en que se agregaron, o por nombre): los de arriba, los productos de todas las categorías; los de cada
+        categoría, solo los suyos. Antes de cambiar nada te preguntan, y esos se guardan solos. Si presionas el mismo
+        botón otra vez, acomoda al revés.
+      </p>
 
       <div className="orden-barra-superior">
         <div className="orden-buscador">
@@ -4778,6 +5091,11 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
         <button type="button" className="btn btn-secondary" onClick={abrirAgregarCategoria} disabled={bloqueoPorCambios} title={tituloBloqueo}>
           + Agregar categoría
         </button>
+        {/* Orden rápido de TODAS las categorías a la vez (2026-10-05). */}
+        <span className="orden-rapido-general" role="group" aria-label="Acomodar los productos de todas las categorías">
+          <span className="orden-rapido-general-titulo">Todas las categorías:</span>
+          {botonesOrdenRapidoJSX('todas', '', 'btn btn-secondary')}
+        </span>
       </div>
 
       {/* Barra pegada arriba mientras haya cambios sin guardar: se ve
@@ -4803,6 +5121,11 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
         </div>
       )}
       {mensaje && <p className="info-msg error">{mensaje}</p>}
+      {avisoListo && !guardando && (
+        <p className="orden-aviso-listo" role="status">
+          ✅ {avisoListo}
+        </p>
+      )}
 
       {/* ---- Zona 🔥 Ofertas (2026-10-01, pendiente P11) ---- */}
       {hayZonaOfertas && (!textoBuscadoOrden || ofertasVisibles.length > 0) && (
@@ -4822,6 +5145,7 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
               {zonaOfertasOculta && <span className="badge badge-oculto">Oculta del catálogo</span>}
             </h3>
             <div className="orden-categoria-botones">
+              {botonesOrdenRapidoJSX('ofertas', '', 'btn btn-secondary btn-small btn-orden-rapido')}
               <button
                 type="button"
                 className="btn btn-secondary btn-small"
@@ -4988,6 +5312,7 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
                 {grupo.oculta && <span className="badge badge-oculto">Oculta del catálogo</span>}
               </h3>
               <div className="orden-categoria-botones">
+                {botonesOrdenRapidoJSX('categoria', grupo.nombre, 'btn btn-secondary btn-small btn-orden-rapido')}
                 <button
                   type="button"
                   className="btn btn-secondary btn-small"
@@ -5038,6 +5363,59 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
           </section>
         );
       })}
+
+      {/* ---- Orden rápido: pregunta antes de cambiar nada (2026-10-05) ---- */}
+      {ordenRapido && (() => {
+        const info = ORDEN_RAPIDO[ordenRapido.criterio];
+        const listas = listasDeOrdenRapido(ordenRapido.alcance, ordenRapido.nombre).filter((l) => l.length > 1);
+        const cuantosProductos =
+          ordenRapido.alcance === 'todas'
+            ? gruposLocal.reduce((suma, g) => suma + g.productos.length, 0)
+            : listas.reduce((suma, l) => suma + l.length, 0);
+        const cuantasCategorias = gruposLocal.filter((g) => g.productos.length > 1).length;
+        return (
+          <div className="modal-overlay" onClick={() => setOrdenRapido(null)}>
+            <div className="modal-box orden-rapido-pregunta" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+              <h3>¿Cambiar el orden?</h3>
+              <p>
+                {ordenRapido.alcance === 'todas' && (
+                  <>
+                    Los productos de <strong>TODAS las categorías</strong> ({cuantasCategorias} categoría
+                    {cuantasCategorias === 1 ? '' : 's'}, {cuantosProductos} productos
+                    {ofertasLocal.length > 1 ? `, y también la zona de 🔥 ${tituloOfertas}` : ''})
+                  </>
+                )}
+                {ordenRapido.alcance === 'categoria' && (
+                  <>
+                    Los <strong>{cuantosProductos} productos de {ordenRapido.nombre}</strong>
+                  </>
+                )}
+                {ordenRapido.alcance === 'ofertas' && (
+                  <>
+                    Los <strong>{cuantosProductos} productos de la zona de 🔥 {tituloOfertas}</strong>
+                  </>
+                )}{' '}
+                van a quedar acomodados <strong>{info.frase[ordenRapido.sentido]}</strong>.
+              </p>
+              <p className="muted">
+                {info.nota} Se pierde el acomodo que tenías hecho a mano ahí, y así se verá también en el catálogo de tus
+                clientas.{ordenRapido.alcance === 'todas' ? ' Las categorías NO cambian de lugar entre sí: solo los productos dentro de cada una.' : ''}
+              </p>
+              <p className="muted">
+                Si te arrepientes, el Admin Central lo puede deshacer desde la papelera de la Bitácora.
+              </p>
+              <div className="modal-actions">
+                <button type="button" className="btn btn-secondary" onClick={() => setOrdenRapido(null)}>
+                  Cancelar
+                </button>
+                <button type="button" className="btn btn-primary" onClick={aplicarOrdenRapido} autoFocus>
+                  Sí, acomodar
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {renombrandoOfertas && (
         <div className="modal-overlay" onClick={() => setRenombrandoOfertas(false)}>
@@ -8788,7 +9166,9 @@ function PedidoRow({
         {/* Arreglo (2026-09-30, pedido por Claudia): "una vez se haga la
             solicitud debe de decir en Guardar, en vez de Guardar, 'en
             espera' o 'pendiente'" — así ya no parece un botón normal
-            esperando a que le den clic otra vez. */}
+            esperando a que le den clic otra vez.
+            2026-10-05: decía "Pendiente" y se confundía con el ESTADO
+            "Pendiente" de los pedidos; Claudia eligió "Esperando…". */}
         <button
           className="btn btn-small"
           onClick={handleGuardar}
@@ -8801,7 +9181,7 @@ function PedidoRow({
                 : undefined
           }
         >
-          {haySolicitudPendienteReembolso ? 'Pendiente' : guardando ? 'Guardando…' : 'Guardar'}
+          {haySolicitudPendienteReembolso ? 'Esperando…' : guardando ? 'Guardando…' : 'Guardar'}
         </button>
       </td>
     </tr>
