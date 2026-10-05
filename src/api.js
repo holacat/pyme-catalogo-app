@@ -175,6 +175,14 @@ export function listarBitacora(sesionToken) {
   return get('listarBitacora', { sesionToken });
 }
 
+// ---- Entradas y salidas (2026-10-05) ----
+// El historial de piezas que entran y salen (altas, piezas agregadas o
+// bajadas, ventas, reembolsos, productos eliminados). Lo ve quien tenga la
+// pestaña "Entradas y salidas" en 🔐 Permisos.
+export function listarEntradasSalidas(sesionToken) {
+  return get('listarEntradasSalidas', { sesionToken });
+}
+
 // ---- Analítica de ventas (Bloque 3, ítem 4) ----
 // Solo lo puede ver un Administrador (el backend lo revisa también).
 // `desde`/`hasta` van como texto "YYYY-MM-DD".
