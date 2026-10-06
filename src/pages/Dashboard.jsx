@@ -24,6 +24,12 @@ import {
   quitarTodasLasOfertas,
   restaurarCambio,
   listarEntradasSalidas,
+  // Tickets (2026-10-06).
+  crearTickets,
+  actualizarTicket,
+  rehacerTicket,
+  cancelarTicket,
+  guardarConfiguracionTickets,
   renombrarCategoria,
   eliminarCategoria,
   crearUsuario,
@@ -54,7 +60,7 @@ import {
 import ImageUploader from '../components/ImageUploader.jsx';
 import ImageLightbox from '../components/ImageLightbox.jsx';
 // Descargas en Excel y PDF (2026-10-05). Archivo nuevo: src/exportar.js
-import { descargarExcel, descargarPDF, fechaParaArchivo } from '../exportar.js';
+import { descargarExcel, descargarPDF, fechaParaArchivo, crearQR, descargarTicketPDF } from '../exportar.js';
 
 // Un producto puede tener Disponible guardado como booleano real (true/false)
 // o como texto ("TRUE"/"SI") si alguien lo escribió a mano en el Sheet. Esta
@@ -514,7 +520,7 @@ const PESTANAS_TODAS_PERMITIDAS = {
 // puede ver ninguna, de todos modos cae en "stock" (el panel se lo va a
 // negar y mostrará el aviso correspondiente, ver más abajo).
 const ORDEN_PESTANAS_INICIALES = [
-  'stock', 'pedidos', 'alertas', 'orden', 'nuevo', 'cuenta', 'bitacora', 'usuarios', 'analitica', 'inventario',
+  'stock', 'pedidos', 'alertas', 'orden', 'nuevo', 'cuenta', 'bitacora', 'usuarios', 'analitica', 'inventario', 'tickets',
 ];
 
 function primeraPestanaVisible(permisosCalculados) {
@@ -658,6 +664,38 @@ export default function Dashboard() {
   // a los demás les llega vacía. "papeleraDias" = cuántos días se guardan.
   const [papelera, setPapelera] = useState([]);
   const [papeleraDias, setPapeleraDias] = useState(30);
+  // ---- Tickets (2026-10-06) ----
+  // Llegan con cada carga del panel: los tickets que esta persona puede ver,
+  // los pedidos pagados que todavía no tienen ticket, y los datos de la
+  // tienda + el interruptor de "automático".
+  const [tickets, setTickets] = useState([]);
+  const [pedidosParaTicket, setPedidosParaTicket] = useState([]);
+  const [configuracionTickets, setConfiguracionTickets] = useState(null);
+  const [ticketsPuedeConfigurar, setTicketsPuedeConfigurar] = useState(false);
+  // Ticket abierto en su ventana (se guarda el ID: el ticket se toma siempre
+  // de la lista más reciente, para que lo que se ve nunca esté viejo).
+  const [ticketAbiertoId, setTicketAbiertoId] = useState(null);
+  // Pedido pagado al que se le dio 🎫 en Pedidos (abre "Generar ticket").
+  const [pedidoParaGenerarTicket, setPedidoParaGenerarTicket] = useState(null);
+  // Folio que hay que buscar al abrir la pestaña Tickets. Arranca con el que
+  // venga en la dirección (?ticket=T-00012): así llega quien lee el QR.
+  const [folioBuscadoDeTicket, setFolioBuscadoDeTicket] = useState(() => {
+    try {
+      return new URLSearchParams(window.location.search).get('ticket') || '';
+    } catch {
+      return '';
+    }
+  });
+  // "Ver sus pedidos" desde un ticket: Pedidos enseña solo esos.
+  const [filtroPedidosDeTicket, setFiltroPedidosDeTicket] = useState(null); // { folio, ids: Set }
+  // true cuando ya llegó al menos una carga completa del panel (para no
+  // decir "no encontré ese ticket" antes de tener la lista).
+  const [panelYaCargo, setPanelYaCargo] = useState(false);
+  const numeroDeCargaRef = useRef(0);
+  const ultimaCargaAplicadaRef = useRef(0);
+  // Lo que se va escribiendo en "Datos de la tienda" (vive aquí arriba para
+  // que no se pierda al cambiar de pestaña antes de guardar). null = sin tocar.
+  const [tiendaEnEdicion, setTiendaEnEdicion] = useState(null);
   // Catálogos por sucursal (2026-10-02): la(s) sucursal(es) que esta cuenta
   // puede ver en "🏪 Mi sucursal" — la suya si tiene "Catálogo propio"
   // prendido; el Admin Central recibe todas. Ver SucursalTab.
@@ -902,6 +940,24 @@ export default function Dashboard() {
   function puedeVer(pestana) {
     return !!permisos[pestana];
   }
+  // Tickets (2026-10-06): si se llegó con un folio en la dirección (por el
+  // QR de un ticket), en cuanto hay sesión se abre la pestaña Tickets; ella
+  // busca el folio y abre ese ticket.
+  // Para los tickets hacen falta DOS permisos: "tickets" y "pedidos" (así lo
+  // revisa también el servidor).
+  const puedeVerTickets = !!permisos.tickets && !!permisos.pedidos;
+  useEffect(() => {
+    if (!folioBuscadoDeTicket || !autenticado) return;
+    if (puedeVerTickets) {
+      setTab('tickets');
+    } else if (panelYaCargo) {
+      // Ya cargó el panel y esta cuenta no tiene Tickets: se dice, y el
+      // folio se olvida (para que no brinque de pestaña más tarde).
+      setMensaje(`Llegaste con el enlace del ticket ${folioBuscadoDeTicket}, pero esta cuenta no tiene permiso para ver tickets.`);
+      atenderFolioDeTicket();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [folioBuscadoDeTicket, autenticado, puedeVerTickets, panelYaCargo]);
   // Opciones predeterminadas para los campos de "+ Agregar producto"
   // (Nombre, Código propio, Categoría, Marca, Talla, Color). Se guarda como
   // { categoria: ['Bolsas', 'Zapatos'], color: ['Rojo'], ... }. A propósito
@@ -1117,14 +1173,15 @@ export default function Dashboard() {
   // no debe perder un cambio sin querer).
   useEffect(() => {
     function onKeyDown(e) {
-      if (e.key === 'Escape' && !fotoAmpliada && !notaEnZoom && sinGuardar.size > 0) {
+      // (2026-10-06) Tampoco con una ventana de ticket abierta.
+      if (e.key === 'Escape' && !fotoAmpliada && !notaEnZoom && !ticketAbiertoId && !pedidoParaGenerarTicket && sinGuardar.size > 0) {
         cancelarCambios();
       }
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sinGuardar, fotoAmpliada, notaEnZoom]);
+  }, [sinGuardar, fotoAmpliada, notaEnZoom, ticketAbiertoId, pedidoParaGenerarTicket]);
 
   // `silencioso: true` se usa para los refrescos automáticos de fondo: no
   // muestra "Actualizando…" ni mensajes de error a cada rato, para no ser
@@ -1134,6 +1191,12 @@ export default function Dashboard() {
     const silencioso = !!opciones.silencioso;
     // Fix "switcheo" de sesión (2026-09): "número de turno" de quien pidió estos datos.
     const miSesionId = sesionIdRef.current;
+    // (2026-10-06) Número de esta carga: si su respuesta llega DESPUÉS de la
+    // de una carga más nueva (un refresco de fondo que iba atrasado), ya no
+    // se aplica — traería datos viejos y, por ejemplo, haría desaparecer un
+    // momento el ticket que se acaba de generar.
+    numeroDeCargaRef.current += 1;
+    const miNumeroDeCarga = numeroDeCargaRef.current;
     if (!silencioso) {
       setCargando(true);
       iniciarCarga();
@@ -1158,6 +1221,8 @@ export default function Dashboard() {
           .then((r) => {
         // Fix "switcheo" de sesión (2026-09): si ya cambiamos de sesión, ignoramos esta respuesta vieja.
         if (miSesionId !== sesionIdRef.current) return;
+        if (miNumeroDeCarga < ultimaCargaAplicadaRef.current) return;
+        ultimaCargaAplicadaRef.current = miNumeroDeCarga;
         setProductos(r.productos || []);
         setPedidos(r.pedidos || []);
         setAlertas(r.alertas || []);
@@ -1172,6 +1237,15 @@ export default function Dashboard() {
         setPapelera(r.papelera || []);
         if (r.papeleraDias) setPapeleraDias(r.papeleraDias);
         setSucursales(r.sucursales || []);
+        // Si la parte de tickets falló en el servidor ("errorTickets"), se
+        // conserva lo que ya se tenía en vez de vaciar la pestaña.
+        if (!r.errorTickets) {
+          setTickets(r.tickets || []);
+          setPedidosParaTicket(r.pedidosParaTicket || []);
+          setConfiguracionTickets(r.configuracionTickets || null);
+          setTicketsPuedeConfigurar(!!r.ticketsPuedeConfigurar);
+        }
+        setPanelYaCargo(true);
         setUsuarios(r.usuarios || []);
         setTransferencias(r.transferencias || []);
         // Permisos al día (2026-10-05): antes solo llegaban al iniciar
@@ -1352,6 +1426,15 @@ export default function Dashboard() {
     setBitacora([]);
     setPapelera([]);
     setSucursales([]);
+    setTickets([]);
+    setPanelYaCargo(false);
+    setPedidosParaTicket([]);
+    setConfiguracionTickets(null);
+    setTicketsPuedeConfigurar(false);
+    setTicketAbiertoId(null);
+    setPedidoParaGenerarTicket(null);
+    setFiltroPedidosDeTicket(null);
+    setTiendaEnEdicion(null);
     setUsuarios([]);
     setTransferencias([]);
     setTransferenciasPendientes([]);
@@ -1436,9 +1519,122 @@ export default function Dashboard() {
         if (res && res.solicitudReembolsoCreada) {
           setMensaje('Tu solicitud de reembolso se envió al Administrador — en cuanto la confirme o la cancele, este pedido pasará a "Reembolsado" (o se quedará como está).');
         }
+        // Tickets automáticos (2026-10-06): el servidor avisa si al quedar
+        // pagado salió el ticket solo, o si sigue esperando a los demás
+        // pedidos de esa clienta.
+        if (res && Array.isArray(res.ticketsCreados) && res.ticketsCreados.length > 0) {
+          setMensaje(`🎫 Se generó solo el ticket ${res.ticketsCreados.join(', ')} (modo automático). Lo encuentras en la pestaña Tickets o con el 🎫 del pedido.`);
+        } else if (res && res.ticketEnEspera > 0) {
+          setMensaje(`⏳ El ticket de esta clienta saldrá solo cuando se resuelva${res.ticketEnEspera === 1 ? '' : 'n'} su${res.ticketEnEspera === 1 ? '' : 's'} otro${res.ticketEnEspera === 1 ? '' : 's'} ${res.ticketEnEspera} pedido${res.ticketEnEspera === 1 ? '' : 's'} de esta compra (Pendiente o En proceso).`);
+        }
       })
       .catch((err) => setMensaje(`Error al actualizar pedido: ${conEtiquetasDeEstado(err.message)}`))
       .finally(terminarCarga);
+  }
+
+  // ---- Tickets (2026-10-06) ----
+  // Qué ticket vigente tiene cada pedido, y qué pedidos pagados todavía no
+  // tienen (de los que esta persona sí puede usar): para el 🎫 de Pedidos.
+  const ticketVigentePorPedidoId = {};
+  tickets.forEach((t) => {
+    if (t.Estado === ESTADO_TICKET_CANCELADO) return;
+    (t.PedidoIDs || []).forEach((id) => { ticketVigentePorPedidoId[String(id)] = t; });
+  });
+  // El servidor manda de cada pedido pagado sin ticket solo su ID, su clave
+  // de clienta y cuántos pedidos de esa compra faltan por resolver: lo demás
+  // sale de la lista de pedidos que el panel ya tiene.
+  const pedidoPorIdParaTicket = {};
+  pedidos.forEach((ped) => { pedidoPorIdParaTicket[String(ped.ID)] = ped; });
+  const codigoPorProductoParaTicket = {};
+  productos.forEach((prod) => { codigoPorProductoParaTicket[String(prod.ID)] = prod.CodigoPropio || ''; });
+  const pedidosSinTicket = pedidosParaTicket
+    .map((x) => {
+      const ped = pedidoPorIdParaTicket[String(x.ID)];
+      if (!ped) return null;
+      return {
+        ID: String(ped.ID),
+        Fecha: ped.Fecha,
+        Cliente: String(ped.Cliente || ''),
+        Telefono: textoSeguro(ped.Telefono),
+        Producto: String(ped.Producto || ''),
+        ProductoID: String(ped.ProductoID ?? ''),
+        Codigo: String(codigoPorProductoParaTicket[String(ped.ProductoID)] || ''),
+        Cantidad: Math.max(1, Math.floor(Number(ped.Cantidad) || 1)),
+        Precio: Number(ped.Precio) || 0,
+        SucursalNombre: String(ped.Sucursal || '').trim() ? String(ped.SucursalNombre || 'Sucursal') : '',
+        ClaveCliente: x.ClaveCliente,
+        SinResolver: Number(x.SinResolver) || 0,
+      };
+    })
+    .filter(Boolean);
+  const idsDePedidosParaTicket = new Set(pedidosSinTicket.map((p) => String(p.ID)));
+  const ticketAbierto = ticketAbiertoId ? tickets.find((t) => t.ID === ticketAbiertoId) || null : null;
+  // Si el pedido al que se le iba a generar ticket deja de estar en la lista
+  // (alguien más ya se lo generó, o dejó de estar pagado), la ventana se
+  // cierra de una vez: que no vuelva a aparecer sola más tarde.
+  useEffect(() => {
+    if (pedidoParaGenerarTicket && panelYaCargo && !pedidosParaTicket.some((x) => String(x.ID) === pedidoParaGenerarTicket)) {
+      setPedidoParaGenerarTicket(null);
+    }
+  }, [pedidoParaGenerarTicket, panelYaCargo, pedidosParaTicket]);
+
+  // Cada acción regresa su promesa (y deja pasar el error): la ventana que
+  // la pidió enseña el resultado ahí mismo, donde se está viendo.
+  function accionDeTicket(promesa, etiqueta) {
+    iniciarCarga();
+    return conLimiteDeTiempo(promesa, etiqueta)
+      .then((res) => cargarTodo(sesionToken, { silencioso: true }).then(() => res))
+      .finally(terminarCarga);
+  }
+  function handleCrearTickets(pedidoIds, porLote) {
+    return accionDeTicket(crearTickets({ sesionToken, pedidoIds, porLote: !!porLote }), 'Generar ticket');
+  }
+  function handleActualizarTicket(ticket, cambios) {
+    return accionDeTicket(actualizarTicket({ sesionToken, ticketId: ticket.ID, ...cambios }), 'Guardar ticket');
+  }
+  function handleRehacerTicket(ticket) {
+    return accionDeTicket(rehacerTicket({ sesionToken, ticketId: ticket.ID }), 'Volver a armar ticket');
+  }
+  function handleCancelarTicket(ticket, motivo) {
+    return accionDeTicket(cancelarTicket({ sesionToken, ticketId: ticket.ID, motivo }), 'Cancelar ticket');
+  }
+  function handleGuardarConfiguracionTickets(cambios) {
+    return accionDeTicket(guardarConfiguracionTickets({ sesionToken, ...cambios }), 'Guardar datos de tickets');
+  }
+  // El 🎫 de un pedido: si ya tiene ticket lo abre; si no, ofrece generarlo.
+  function abrirTicketDesdePedido(pedido) {
+    const ticket = ticketVigentePorPedidoId[String(pedido.ID)];
+    if (ticket) setTicketAbiertoId(ticket.ID);
+    else if (idsDePedidosParaTicket.has(String(pedido.ID))) setPedidoParaGenerarTicket(String(pedido.ID));
+  }
+  // "Ver sus pedidos" desde un ticket.
+  function verPedidosDeTicket(ticket) {
+    if (sinGuardar.size > 0) {
+      const salir = window.confirm('Tienes cambios sin guardar. Si continúas se van a perder. ¿Quieres salir de todas formas?');
+      if (!salir) return;
+      cancelarCambios();
+    }
+    setTicketAbiertoId(null);
+    setFiltroPedidosDeTicket({ folio: ticket.Folio, ids: new Set((ticket.PedidoIDs || []).map(String)) });
+    setFiltroEstado('');
+    setFiltroPedidoDesde('');
+    setFiltroPedidoHasta('');
+    setFiltroPedidoDueno('');
+    setTab('pedidos');
+  }
+  // Ya se buscó el folio con el que se llegó: se quita de la dirección para
+  // que no se vuelva a abrir solo al recargar.
+  function atenderFolioDeTicket() {
+    setFolioBuscadoDeTicket('');
+    try {
+      const direccion = new URL(window.location.href);
+      if (direccion.searchParams.has('ticket')) {
+        direccion.searchParams.delete('ticket');
+        window.history.replaceState(window.history.state, '', `${direccion.pathname}${direccion.search}${direccion.hash}`);
+      }
+    } catch {
+      // Si no se puede tocar la dirección, no pasa nada.
+    }
   }
 
   function handleCambiarDisponibilidad(producto) {
@@ -1582,6 +1778,7 @@ export default function Dashboard() {
   // igual que "irAStockYResaltar", para poder identificar rápido, desde el
   // aviso de una solicitud de reembolso en Alertas, a qué pedido corresponde.
   function irAPedidoYResaltar(pedidoId) {
+    setFiltroPedidosDeTicket(null);
     setTab('pedidos');
     setPedidoFijadoId(pedidoId);
     setPedidoResaltadoId(pedidoId);
@@ -2017,7 +2214,12 @@ export default function Dashboard() {
   // Pedidos: igual que los productos, más recientes primero. Además se
   // pueden filtrar por fecha (Desde/Hasta) y por Estado con la tablita de
   // conteos de la derecha.
-  const pedidosOrdenados = pedidos.slice().reverse();
+  // Con "Ver sus pedidos" de un ticket, la tabla enseña solo esos (los demás
+  // filtros de abajo se siguen aplicando encima).
+  const pedidosOrdenados = pedidos
+    .slice()
+    .reverse()
+    .filter((ped) => !filtroPedidosDeTicket || filtroPedidosDeTicket.ids.has(String(ped.ID)));
 
   function pedidoEnRangoDeFecha(pedido) {
     if (!filtroPedidoDesde && !filtroPedidoHasta) return true;
@@ -2412,6 +2614,9 @@ export default function Dashboard() {
         const todas = [
           { clave: 'stock', texto: 'Stock', visible: puedeVer('stock') },
           { clave: 'pedidos', texto: `Pedidos (${pedidos.length})`, visible: puedeVer('pedidos') },
+          // 2026-10-06: tickets de los pedidos pagados. Solo sale si el
+          // servidor ya la conoce (manda su permiso).
+          { clave: 'tickets', texto: '🎫 Tickets', visible: puedeVerTickets },
           { clave: 'alertas', texto: `Alertas (${conteoAlertasPestana})`, visible: puedeVer('alertas') },
           { clave: 'cuenta', texto: '📄 Estado de cuenta', visible: puedeVer('cuenta') },
           { clave: 'bitacora', texto: '🗒️ Bitácora', visible: puedeVer('bitacora') },
@@ -2799,6 +3004,16 @@ export default function Dashboard() {
 
            {tab === 'pedidos' && puedeVer('pedidos') && (
         <>
+          {filtroPedidosDeTicket && (
+            <p className="ticket-filtro-pedidos" role="status">
+              🎫 Viendo solo los pedidos del ticket <strong>{filtroPedidosDeTicket.folio}</strong>{' '}
+              ({pedidosOrdenados.length} de {filtroPedidosDeTicket.ids.size}
+              {pedidosFiltrados.length !== pedidosOrdenados.length ? `; con los filtros de abajo se ven ${pedidosFiltrados.length}` : ''}).
+              <button type="button" className="btn btn-secondary btn-small" onClick={() => setFiltroPedidosDeTicket(null)}>
+                Ver todos los pedidos
+              </button>
+            </p>
+          )}
           <div className="filtro-fechas">
             <label>
               Pedidos desde
@@ -2919,6 +3134,9 @@ export default function Dashboard() {
                     montoReembolsado={montoReembolsadoPorPedidoId[ped.ID]}
                     solicitudReembolsoPendiente={solicitudReembolsoPendientePorPedidoId[ped.ID]}
                     resaltado={ped.ID === pedidoResaltadoId}
+                    ticket={puedeVerTickets ? ticketVigentePorPedidoId[String(ped.ID)] : undefined}
+                    puedeGenerarTicket={puedeVerTickets && idsDePedidosParaTicket.has(String(ped.ID))}
+                    onTicket={abrirTicketDesdePedido}
                     onGuardar={handleGuardarPedido}
                     onDirtyChange={marcarSucio}
                     onAbrirNota={(cliente, valor, onChange) => setNotaEnZoom({ cliente, valor, onChange })}
@@ -3048,6 +3266,22 @@ export default function Dashboard() {
           onCambio={() => cargarTodo(sesionToken, { silencioso: true })}
           iniciarCarga={iniciarCarga}
           terminarCarga={terminarCarga}
+        />
+      )}
+
+      {tab === 'tickets' && puedeVerTickets && (
+        <TicketsTab
+          tickets={tickets}
+          pedidosParaTicket={pedidosSinTicket}
+          configuracion={configuracionTickets}
+          tienda={tiendaEnEdicion}
+          setTienda={setTiendaEnEdicion}
+          puedeConfigurar={ticketsPuedeConfigurar}
+          folioBuscado={panelYaCargo ? folioBuscadoDeTicket : ''}
+          onFolioAtendido={atenderFolioDeTicket}
+          onCrear={handleCrearTickets}
+          onAbrirTicket={(t) => setTicketAbiertoId(t.ID)}
+          onGuardarConfiguracion={handleGuardarConfiguracionTickets}
         />
       )}
 
@@ -3181,6 +3415,44 @@ export default function Dashboard() {
       {fotoAmpliada && (
         <ImageLightbox src={fotoAmpliada} onClose={() => setFotoAmpliada('')} />
       )}
+
+      {/* ---- Tickets (2026-10-06): ventanas ---- */}
+      {ticketAbierto && puedeVerTickets && (
+        <ModalTicket
+          key={ticketAbierto.ID}
+          ticket={ticketAbierto}
+          configuracion={configuracionTickets}
+          puedeVerPedidos={puedeVer('pedidos')}
+          onCerrar={() => setTicketAbiertoId(null)}
+          onGuardar={handleActualizarTicket}
+          onRehacer={handleRehacerTicket}
+          onCancelar={handleCancelarTicket}
+          onVerPedidos={verPedidosDeTicket}
+        />
+      )}
+      {pedidoParaGenerarTicket && puedeVerTickets && (() => {
+        const delPedido = pedidosSinTicket.find((p) => String(p.ID) === pedidoParaGenerarTicket);
+        if (!delPedido) return null;
+        return (
+          <ModalGenerarTicket
+            key={pedidoParaGenerarTicket}
+            pedidos={pedidosSinTicket.filter((p) => p.ClaveCliente === delPedido.ClaveCliente)}
+            inicialId={pedidoParaGenerarTicket}
+            onCerrar={() => setPedidoParaGenerarTicket(null)}
+            onGenerar={(ids) =>
+              handleCrearTickets(ids).then((res) => {
+                setPedidoParaGenerarTicket(null);
+                // Se abre el ticket recién hecho, listo para descargar (y se
+                // dice aparte, por si la lista tarda en traerlo).
+                if (res && res.creados && res.creados[0]) {
+                  setTicketAbiertoId(res.creados[0].ID);
+                  setMensaje(`🎫 Se generó el ticket ${res.creados[0].Folio}.`);
+                }
+              })
+            }
+          />
+        );
+      })()}
 
       {notaEnZoom && (
         <div className="modal-overlay" onClick={() => setNotaEnZoom(null)}>
@@ -9597,6 +9869,962 @@ function AvisoFlotante({ anclaRef, abierto, onCerrar, autoCerrarMs = 0, children
   );
 }
 
+// ============================================================================
+// TICKETS (2026-10-06) — recibos de los pedidos pagados
+// ============================================================================
+// Pedido de Claudia (diseño de septiembre, afinado el 2026-10-06): al quedar
+// "Pagado" un pedido se le puede sacar su ticket (a mano, por lote o solo,
+// si está prendido el automático); un ticket junta los pedidos de la misma
+// clienta; se puede editar, cancelar y descargar en PDF tipo recibo (80 mm)
+// con su folio y un código QR. Al leer el QR con la cámara del celular se
+// abre este panel directo en ese ticket.
+// El ticket es un DOCUMENTO: nada de lo que se haga aquí mueve pedidos,
+// stock ni dinero.
+const ESTADO_TICKET_CANCELADO = 'Cancelado';
+const HORAS_MISMA_COMPRA = 24; // igual que HORAS_MISMA_COMPRA_ en Code.gs
+
+// Lo que lleva el QR: la dirección de este mismo panel + el folio.
+function enlaceDeTicket(folio) {
+  try {
+    return `${window.location.origin}${window.location.pathname}?ticket=${encodeURIComponent(folio)}`;
+  } catch {
+    return String(folio || '');
+  }
+}
+
+function tiendaDeTickets(configuracion) {
+  return (configuracion && configuracion.tienda) || {};
+}
+
+// Baja uno o varios tickets en UN archivo PDF (cada ticket en su hoja).
+function bajarTicketsEnPDF(tickets, configuracion) {
+  if (!tickets || tickets.length === 0) throw new Error('No hay ningún ticket que descargar.');
+  const nombre = tickets.length === 1 ? `ticket-${tickets[0].Folio}` : `tickets-${fechaParaArchivo()}`;
+  descargarTicketPDF(
+    nombre,
+    tickets.map((ticket) => ({ ticket, tienda: tiendaDeTickets(configuracion), enlace: enlaceDeTicket(ticket.Folio) }))
+  );
+}
+
+// Los renglones de un ticket (si en la hoja alguien dejó algo raro, se ignora).
+function renglonesDeTicket(ticket) {
+  return (Array.isArray(ticket.Items) ? ticket.Items : []).filter((it) => it && typeof it === 'object');
+}
+
+function piezasDeTicket(ticket) {
+  return renglonesDeTicket(ticket).reduce((suma, it) => suma + (Number(it.cantidad) || 0), 0);
+}
+
+// Lo que lleva el fondo oscuro de una ventana para cerrarla con un clic
+// AFUERA: solo si el clic empezó y terminó en el fondo (seleccionar texto
+// arrastrando y soltar afuera no cuenta) y solo si "permitido".
+function useCerrarConClicAfuera(onCerrar, permitido) {
+  const empezoAfuera = useRef(false);
+  return {
+    onMouseDown: (e) => {
+      empezoAfuera.current = e.target === e.currentTarget;
+    },
+    onClick: (e) => {
+      if (permitido && empezoAfuera.current && e.target === e.currentTarget) onCerrar();
+      empezoAfuera.current = false;
+    },
+  };
+}
+
+// El código QR dibujado en pantalla (el mismo que sale en el PDF).
+function CodigoQR({ texto, lado = 132 }) {
+  const qr = crearQR(texto);
+  if (!qr) return null;
+  const n = qr.lado + 8; // con su orilla blanca
+  let trazo = '';
+  qr.celdas.forEach((fila, y) => {
+    fila.forEach((oscura, x) => {
+      if (oscura) trazo += `M${x + 4} ${y + 4}h1v1h-1z`;
+    });
+  });
+  return (
+    <svg className="ticket-qr" width={lado} height={lado} viewBox={`0 0 ${n} ${n}`} shapeRendering="crispEdges" role="img" aria-label="Código QR del ticket">
+      <rect width={n} height={n} fill="#ffffff" />
+      <path d={trazo} fill="#000000" />
+    </svg>
+  );
+}
+
+// Cómo se ve el ticket (en pantalla; el PDF sale con este mismo acomodo).
+function VistaDeTicket({ ticket, tienda }) {
+  const cancelado = ticket.Estado === ESTADO_TICKET_CANCELADO;
+  const items = renglonesDeTicket(ticket);
+  const piezas = piezasDeTicket(ticket);
+  // Igual que el PDF: si el ticket se sacó otro día que la compra, las dos fechas.
+  const diaDe = (valor) => (valor ? new Date(valor).toDateString() : '');
+  const otroDia = !!(ticket.FechaCompra && ticket.Fecha && diaDe(ticket.FechaCompra) !== diaDe(ticket.Fecha));
+  return (
+    <div className={`ticket-papel ${cancelado ? 'ticket-papel-cancelado' : ''}`}>
+      {cancelado && <p className="ticket-papel-sello">*** TICKET CANCELADO ***</p>}
+      {tienda.nombre && <p className="ticket-papel-tienda">{tienda.nombre}</p>}
+      {tienda.direccion && <p className="ticket-papel-chico">{tienda.direccion}</p>}
+      {tienda.telefono && <p className="ticket-papel-chico">Tel. {tienda.telefono}</p>}
+      {(tienda.nombre || tienda.direccion || tienda.telefono) && <hr />}
+      <p className="ticket-papel-titulo">TICKET DE COMPRA</p>
+      <p className="ticket-papel-folio">Folio {ticket.Folio}</p>
+      <p><strong>{otroDia ? 'Fecha de compra:' : 'Fecha:'}</strong> {formatearFechaHora(ticket.FechaCompra || ticket.Fecha)}</p>
+      {otroDia && <p><strong>Ticket emitido:</strong> {formatearFechaHora(ticket.Fecha)}</p>}
+      <p><strong>Cliente:</strong> {ticket.Cliente || 'Público en general'}</p>
+      {ticket.Telefono && <p><strong>Tel.:</strong> {ticket.Telefono}</p>}
+      {ticket.Vendedor && <p><strong>Le atendió:</strong> {ticket.Vendedor}</p>}
+      <hr />
+      <table className="ticket-papel-tabla">
+        <thead>
+          <tr><th>Cant.</th><th>Descripción</th><th>Importe</th></tr>
+        </thead>
+        <tbody>
+          {items.map((it, i) => (
+            <tr key={i}>
+              <td>{Number(it.cantidad) || 0} x</td>
+              <td>
+                {it.descripcion}
+                <span className="ticket-papel-detalle">
+                  {it.codigo ? `Cód. ${it.codigo} · ` : ''}{formatearMoneda(Number(it.precio) || 0)} c/u
+                </span>
+              </td>
+              <td>{formatearMoneda(Number(it.importe) || 0)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <hr />
+      <p className="ticket-papel-total"><span>TOTAL</span><span>{formatearMoneda(Number(ticket.Total) || 0)}</span></p>
+      <p className="ticket-papel-chico ticket-papel-izquierda">
+        {piezas} pieza{piezas === 1 ? '' : 's'} en {items.length} producto{items.length === 1 ? '' : 's'}
+      </p>
+      {ticket.Notas && (
+        <>
+          <hr />
+          <p><strong>Nota:</strong> {ticket.Notas}</p>
+        </>
+      )}
+      <hr />
+      <div className="ticket-papel-qr">
+        <CodigoQR texto={enlaceDeTicket(ticket.Folio)} />
+        <p className="ticket-papel-folio-chico">Folio {ticket.Folio}</p>
+      </div>
+      {tienda.mensaje && <p className="ticket-papel-mensaje">{tienda.mensaje}</p>}
+    </div>
+  );
+}
+
+// Ventana de UN ticket: verlo, descargarlo, editarlo, volver a armarlo o
+// cancelarlo. Las acciones regresan una promesa; si truena, aquí se enseña
+// el error y la ventana se queda abierta.
+function ModalTicket({ ticket, configuracion, puedeVerPedidos, onCerrar, onGuardar, onRehacer, onCancelar, onVerPedidos }) {
+  const [modo, setModo] = useState('ver'); // 'ver' | 'editar' | 'cancelar'
+  const [ocupado, setOcupado] = useState(false);
+  const [error, setError] = useState('');
+  const [aviso, setAviso] = useState('');
+  const [cliente, setCliente] = useState('');
+  const [telefono, setTelefono] = useState('');
+  const [notas, setNotas] = useState('');
+  const [renglones, setRenglones] = useState([]);
+  const [motivo, setMotivo] = useState('');
+  const tienda = tiendaDeTickets(configuracion);
+  const cancelado = ticket.Estado === ESTADO_TICKET_CANCELADO;
+  const desactualizado = ticket.Desactualizado || [];
+
+  function empezarAEditar() {
+    setCliente(ticket.Cliente || '');
+    setTelefono(ticket.Telefono || '');
+    setNotas(ticket.Notas || '');
+    setRenglones(renglonesDeTicket(ticket).map((it) => ({ ...it, cantidad: String(it.cantidad ?? ''), precio: String(it.precio ?? '') })));
+    setError('');
+    setAviso('');
+    setModo('editar');
+  }
+  function cambiarRenglon(indice, campo, valor) {
+    setRenglones((antes) => antes.map((r, i) => (i === indice ? { ...r, [campo]: valor } : r)));
+  }
+  // Un renglón está bien si trae descripción, una cantidad entera de 1 o
+  // más y un precio escrito (puede ser 0, pero no vacío): así lo que se ve
+  // en el formulario es justo lo que se guarda.
+  const cantidadValida = (r) => /^\d+$/.test(String(r.cantidad).trim()) && Number(r.cantidad) >= 1;
+  const precioValido = (r) => String(r.precio).trim() !== '' && Number.isFinite(Number(r.precio)) && Number(r.precio) >= 0;
+  const renglonValido = (r) => !!String(r.descripcion || '').trim() && cantidadValida(r) && precioValido(r);
+  const totalEditado = renglones.reduce((suma, r) => suma + (cantidadValida(r) && precioValido(r) ? Number(r.cantidad) * Number(r.precio) : 0), 0);
+  const edicionInvalida = renglones.length === 0 || renglones.some((r) => !renglonValido(r));
+  const pedidosQueSalen = (ticket.PedidoIDs || []).filter((id) => !renglones.some((r) => String(r.pedidoId || '') === String(id))).length;
+
+  function correr(promesa, alTerminar) {
+    setOcupado(true);
+    setError('');
+    setAviso('');
+    return Promise.resolve(promesa)
+      .then((res) => {
+        if (alTerminar) alTerminar(res);
+      })
+      .catch((err) => setError(err.message || String(err)))
+      .finally(() => setOcupado(false));
+  }
+  function guardar() {
+    correr(
+      onGuardar(ticket, {
+        cliente,
+        telefono,
+        notas,
+        items: renglones.map((r) => ({
+          pedidoId: r.pedidoId || '',
+          productoId: r.productoId || '',
+          descripcion: String(r.descripcion || '').trim(),
+          codigo: String(r.codigo || '').trim(),
+          cantidad: Number(r.cantidad),
+          precio: Number(r.precio),
+        })),
+      }),
+      () => {
+        setModo('ver');
+        setAviso('Cambios guardados en el ticket.');
+      }
+    );
+  }
+  function rehacer() {
+    // Desde "Editar" borra lo escrito a mano: se pregunta antes.
+    if (modo === 'editar' && !window.confirm('Esto borra lo que escribiste a mano en el ticket y vuelve a tomar clienta, productos, cantidades y precios de sus pedidos que siguen pagados. ¿Continuar?')) return;
+    correr(onRehacer(ticket), () => {
+      setModo('ver');
+      setAviso('El ticket se volvió a armar con sus pedidos que siguen pagados.');
+    });
+  }
+  function cancelar() {
+    correr(onCancelar(ticket, motivo.trim()), () => {
+      setModo('ver');
+      setAviso('El ticket quedó cancelado. Sus pedidos siguen igual y ya pueden tener otro ticket.');
+    });
+  }
+  function descargar() {
+    try {
+      bajarTicketsEnPDF([ticket], configuracion);
+      setError('');
+      setAviso('Se descargó el PDF. Búscalo en tus Descargas.');
+    } catch (err) {
+      setError(`No se pudo armar el PDF: ${err.message}`);
+    }
+  }
+
+  // El clic afuera solo cierra mientras se está VIENDO el ticket: al editar
+  // o cancelar se sale con sus botones, para no perder lo escrito sin querer.
+  const fondo = useCerrarConClicAfuera(onCerrar, !ocupado && modo === 'ver');
+
+  return (
+    <div className="modal-overlay modal-overlay-ticket" {...fondo}>
+      <div className="modal-box modal-box-ancho modal-ticket" data-ticket-folio={ticket.Folio}>
+        <h3>
+          🎫 Ticket {ticket.Folio}{' '}
+          {cancelado ? <span className="ticket-chip ticket-chip-cancelado">Cancelado</span> : <span className="ticket-chip ticket-chip-vigente">Vigente</span>}
+        </h3>
+        <p className="muted ticket-datos-internos">
+          Lo generó {ticket.CreadoPor || '—'} el {formatearFechaHora(ticket.Fecha)}
+          {ticket.Origen ? ` (${String(ticket.Origen).toLowerCase()})` : ''}
+          {ticket.EditadoPor ? ` · Editado por ${ticket.EditadoPor} el ${formatearFechaHora(ticket.EditadoEl)}` : ''}
+          {cancelado ? ` · Cancelado por ${ticket.CanceladoPor || '—'} el ${formatearFechaHora(ticket.CanceladoEl)}${ticket.MotivoCancelacion ? `: ${ticket.MotivoCancelacion}` : ''}` : ''}
+        </p>
+
+        {error && <p className="info-msg error ticket-msg">{error}</p>}
+        {aviso && !error && <p className="ticket-listo" role="status">✅ {aviso}</p>}
+
+        {!cancelado && desactualizado.length > 0 && modo === 'ver' && (
+          <div className="ticket-aviso-cambio" role="alert">
+            <strong>⚠️ Este ticket ya no coincide con sus pedidos:</strong>
+            <ul>
+              {desactualizado.map((d) => (
+                <li key={d.pedidoId}>
+                  {d.cambio ? (
+                    <>El pedido de "{d.producto || 'un producto'}" <strong>{d.cambio}</strong>.</>
+                  ) : (
+                    <>"{d.producto || 'Un pedido'}" ahora está <strong>{d.estado === 'Eliminado' ? 'eliminado' : etiquetaEstadoPedido(d.estado)}</strong>.</>
+                  )}
+                </li>
+              ))}
+            </ul>
+            <div className="ticket-aviso-cambio-botones">
+              <button type="button" className="btn btn-secondary btn-small" onClick={rehacer} disabled={ocupado} data-ticket-accion="rehacer">
+                ↺ Volver a armar con lo que sigue pagado
+              </button>
+              <span className="muted">o edítalo a mano, o cancélalo.</span>
+            </div>
+          </div>
+        )}
+
+        {modo === 'ver' && <VistaDeTicket ticket={ticket} tienda={tienda} />}
+
+        {modo === 'editar' && (
+          <div className="ticket-edicion">
+            <p className="modal-aviso">
+              Esto cambia <strong>solo lo que dice el ticket</strong>. No mueve pedidos, stock ni dinero (eso se hace en Pedidos).
+            </p>
+            <div className="ticket-edicion-campos">
+              <label className="modal-field">
+                Cliente
+                <input value={cliente} maxLength={80} onChange={(e) => setCliente(e.target.value)} />
+              </label>
+              <label className="modal-field">
+                Teléfono
+                <input value={telefono} maxLength={30} inputMode="tel" onChange={(e) => setTelefono(e.target.value)} />
+              </label>
+            </div>
+            <div className="table-scroll">
+              <table className="data-table ticket-edicion-tabla">
+                <thead>
+                  <tr><th>Cant.</th><th>Descripción</th><th>Código</th><th>Precio c/u</th><th>Importe</th><th /></tr>
+                </thead>
+                <tbody>
+                  {renglones.map((r, i) => (
+                    <tr key={i}>
+                      <td>
+                        <input className={`ticket-input-cant ${cantidadValida(r) ? '' : 'ticket-input-mal'}`} inputMode="numeric" value={r.cantidad} aria-label="Cantidad" onChange={(e) => cambiarRenglon(i, 'cantidad', limitarDigitos(e.target.value, MAX_DIGITOS_STOCK).split('.')[0])} />
+                      </td>
+                      <td>
+                        <input className={`ticket-input-desc ${String(r.descripcion || '').trim() ? '' : 'ticket-input-mal'}`} value={r.descripcion || ''} maxLength={120} aria-label="Descripción" onChange={(e) => cambiarRenglon(i, 'descripcion', e.target.value)} />
+                      </td>
+                      <td>
+                        <input className="ticket-input-cod" value={r.codigo || ''} maxLength={40} aria-label="Código" onChange={(e) => cambiarRenglon(i, 'codigo', e.target.value)} />
+                      </td>
+                      <td>
+                        <input className={`ticket-input-precio ${precioValido(r) ? '' : 'ticket-input-mal'}`} inputMode="decimal" value={r.precio} aria-label="Precio por pieza" onChange={(e) => cambiarRenglon(i, 'precio', limitarDigitos(e.target.value, MAX_DIGITOS_PRECIO))} />
+                      </td>
+                      <td className="ticket-edicion-importe">
+                        {cantidadValida(r) && precioValido(r) ? formatearMoneda(Number(r.cantidad) * Number(r.precio)) : '—'}
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="btn btn-eliminar btn-small"
+                          onClick={() => setRenglones((antes) => antes.filter((_, k) => k !== i))}
+                          disabled={renglones.length <= 1 || ocupado}
+                          title={renglones.length <= 1 ? 'El ticket debe llevar al menos un producto' : 'Quitar este renglón del ticket. Su pedido no cambia (sigue pagado), pero sale de este ticket y queda libre para sacarle el suyo.'}
+                          aria-label="Quitar este renglón del ticket"
+                        >
+                          ✕
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="ticket-edicion-total">Total del ticket: <strong>{formatearMoneda(totalEditado)}</strong></p>
+            {edicionInvalida && (
+              <p className="ticket-aviso-espera">
+                Para guardar, cada renglón necesita su descripción, una cantidad de 1 o más y su precio (puede ser 0, pero no vacío).
+              </p>
+            )}
+            {pedidosQueSalen > 0 && !edicionInvalida && (
+              <p className="ticket-aviso-espera">
+                Al guardar, {pedidosQueSalen === 1 ? 'el pedido del renglón que quitaste sale' : `los ${pedidosQueSalen} pedidos de los renglones que quitaste salen`} de este
+                ticket: {pedidosQueSalen === 1 ? 'queda' : 'quedan'} como "pagado sin ticket" (el pedido en sí no cambia).
+              </p>
+            )}
+            <label className="modal-field">
+              Nota (sale en el ticket)
+              <textarea value={notas} maxLength={300} rows={2} onChange={(e) => setNotas(e.target.value)} placeholder="Ej. Apartado con anticipo, se entrega el sábado" />
+            </label>
+          </div>
+        )}
+
+        {modo === 'cancelar' && (
+          <div className="ticket-edicion">
+            <p className="modal-aviso ticket-aviso-rojo">
+              Vas a <strong>cancelar el ticket {ticket.Folio}</strong>. Sus pedidos NO cambian (siguen pagados, con su stock y su dinero
+              igual); solo quedan libres para sacarles otro ticket. El folio {ticket.Folio} ya no se vuelve a usar.
+            </p>
+            <label className="modal-field">
+              ¿Por qué se cancela? (opcional)
+              <input value={motivo} maxLength={200} onChange={(e) => setMotivo(e.target.value)} placeholder="Ej. Se capturó mal" autoFocus />
+            </label>
+          </div>
+        )}
+
+        <div className="modal-actions ticket-acciones">
+          {modo === 'ver' && (
+            <>
+              <button type="button" className="btn btn-secondary" onClick={onCerrar} disabled={ocupado}>Cerrar</button>
+              {puedeVerPedidos && (
+                <button type="button" className="btn btn-secondary" onClick={() => onVerPedidos(ticket)} disabled={ocupado} data-ticket-accion="pedidos" title="Abre Pedidos con solo los pedidos de este ticket (ahí se cambia su estado, por ejemplo para un reembolso)">
+                  📋 Ver sus pedidos
+                </button>
+              )}
+              {!cancelado && (
+                <>
+                  <button type="button" className="btn btn-eliminar" onClick={() => { setMotivo(''); setError(''); setAviso(''); setModo('cancelar'); }} disabled={ocupado} data-ticket-accion="cancelar">
+                    🚫 Cancelar ticket
+                  </button>
+                  <button type="button" className="btn btn-secondary" onClick={empezarAEditar} disabled={ocupado} data-ticket-accion="editar">
+                    ✏️ Editar
+                  </button>
+                </>
+              )}
+              <button type="button" className="btn btn-primary" onClick={descargar} disabled={ocupado} data-ticket-accion="pdf">
+                ⬇ Descargar PDF
+              </button>
+            </>
+          )}
+          {modo === 'editar' && (
+            <>
+              <button type="button" className="btn btn-secondary" onClick={() => { setModo('ver'); setError(''); }} disabled={ocupado}>No guardar</button>
+              <button type="button" className="btn btn-secondary" onClick={rehacer} disabled={ocupado} title="Borra lo escrito a mano y vuelve a tomar clienta, productos, cantidades y precios de los pedidos que siguen pagados" data-ticket-accion="rehacer">
+                ↺ Volver a tomar los datos de los pedidos
+              </button>
+              <button type="button" className="btn btn-primary" onClick={guardar} disabled={ocupado || edicionInvalida} data-ticket-accion="guardar">
+                {ocupado ? 'Guardando…' : '💾 Guardar ticket'}
+              </button>
+            </>
+          )}
+          {modo === 'cancelar' && (
+            <>
+              <button type="button" className="btn btn-secondary" onClick={() => setModo('ver')} disabled={ocupado}>No cancelar</button>
+              <button type="button" className="btn btn-eliminar" onClick={cancelar} disabled={ocupado} data-ticket-accion="confirmar-cancelar">
+                {ocupado ? 'Cancelando…' : 'Sí, cancelar el ticket'}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Ventana del botón 🎫 de un pedido pagado: enseña con qué otros pedidos
+// pagados de esa clienta se puede juntar, y genera UN ticket.
+function ModalGenerarTicket({ pedidos, inicialId, onCerrar, onGenerar }) {
+  const inicial = pedidos.find((p) => String(p.ID) === String(inicialId)) || pedidos[0];
+  const [elegidos, setElegidos] = useState(() => {
+    const margen = HORAS_MISMA_COMPRA * 60 * 60 * 1000;
+    const ancla = new Date(inicial.Fecha).getTime();
+    return new Set(
+      pedidos
+        .filter((p) => String(p.ID) === String(inicial.ID) || Math.abs(new Date(p.Fecha).getTime() - ancla) <= margen)
+        .map((p) => String(p.ID))
+    );
+  });
+  const [ocupado, setOcupado] = useState(false);
+  const [error, setError] = useState('');
+  const total = pedidos.filter((p) => elegidos.has(String(p.ID))).reduce((suma, p) => suma + p.Cantidad * p.Precio, 0);
+  function alternar(id) {
+    setElegidos((antes) => {
+      const copia = new Set(antes);
+      if (copia.has(id)) copia.delete(id);
+      else copia.add(id);
+      return copia;
+    });
+  }
+  function generar() {
+    setOcupado(true);
+    setError('');
+    Promise.resolve(onGenerar(Array.from(elegidos)))
+      .catch((err) => setError(err.message || String(err)))
+      .finally(() => setOcupado(false));
+  }
+  const fondo = useCerrarConClicAfuera(onCerrar, !ocupado);
+  return (
+    <div className="modal-overlay modal-overlay-ticket" {...fondo}>
+      <div className="modal-box modal-box-ancho modal-generar-ticket">
+        <h3>🎫 Generar ticket — {inicial.Cliente || 'Cliente sin nombre'}</h3>
+        {pedidos.length > 1 ? (
+          <p className="muted">
+            Esta clienta tiene {pedidos.length} pedidos pagados sin ticket. Los marcados van juntos en <strong>un solo ticket</strong>
+            {' '}(ya vienen marcados los de la misma compra).
+          </p>
+        ) : (
+          <p className="muted">Se va a generar el ticket de este pedido pagado.</p>
+        )}
+        {inicial.SinResolver > 0 && (
+          <p className="ticket-aviso-espera">
+            ⏳ Esta clienta todavía tiene <strong>{inicial.SinResolver}</strong> pedido{inicial.SinResolver === 1 ? '' : 's'} de esta misma compra
+            sin resolver (Pendiente o En proceso). Puedes esperar a que se resuelva{inicial.SinResolver === 1 ? '' : 'n'} para que todo salga en un
+            solo ticket, o generarlo ya con lo pagado.
+          </p>
+        )}
+        {error && <p className="info-msg error ticket-msg">{error}</p>}
+        <ul className="ticket-lote-lista">
+          {pedidos.map((p) => (
+            <li key={p.ID}>
+              <label>
+                <input type="checkbox" checked={elegidos.has(String(p.ID))} onChange={() => alternar(String(p.ID))} disabled={ocupado} />
+                <span className="ticket-lote-producto">{p.Cantidad} x {p.Producto}{p.Codigo ? ` (${p.Codigo})` : ''}</span>
+                <span className="ticket-lote-fecha">{formatearFechaHora(p.Fecha)}</span>
+                <span className="ticket-lote-importe">{formatearMoneda(p.Cantidad * p.Precio)}</span>
+              </label>
+            </li>
+          ))}
+        </ul>
+        <p className="ticket-edicion-total">Total del ticket: <strong>{formatearMoneda(total)}</strong></p>
+        <div className="modal-actions">
+          <button type="button" className="btn btn-secondary" onClick={onCerrar} disabled={ocupado}>Cancelar</button>
+          <button type="button" className="btn btn-primary" onClick={generar} disabled={ocupado || elegidos.size === 0} data-ticket-accion="generar">
+            {ocupado ? 'Generando…' : '🎫 Generar ticket'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// La pestaña "🎫 Tickets".
+function TicketsTab({
+  tickets,
+  pedidosParaTicket,
+  configuracion,
+  puedeConfigurar,
+  tienda,
+  setTienda,
+  folioBuscado,
+  onFolioAtendido,
+  onCrear,
+  onAbrirTicket,
+  onGuardarConfiguracion,
+}) {
+  const [buscar, setBuscar] = useState('');
+  const [filtroEstado, setFiltroEstado] = useState(''); // '' | 'Vigente' | 'Cancelado' | 'aviso'
+  const [limiteFilas, setLimiteFilas] = useLimiteFilas('tickets');
+  // { tipo: 'ok' | 'error', texto, folios, donde: 'lote' | undefined }
+  // Con donde: 'lote' sale junto a la lista de abajo (donde se dio el clic).
+  const [aviso, setAviso] = useState(null);
+  // ---- Por lote ----
+  const [elegidos, setElegidos] = useState(() => new Set());
+  const [filtroProducto, setFiltroProducto] = useState('');
+  const [generando, setGenerando] = useState(false);
+  const [limiteClientes, setLimiteClientes] = useLimiteFilas('ticketsLote');
+  // ---- Datos de la tienda ----
+  // "tienda" (lo que se va escribiendo; null = sin tocar) vive en el panel,
+  // para que no se pierda al cambiar de pestaña antes de guardar.
+  const tiendaGuardada = tiendaDeTickets(configuracion);
+  const [guardandoConfig, setGuardandoConfig] = useState(false);
+  const [avisoConfig, setAvisoConfig] = useState(null);
+  // Mientras se guarda el interruptor, se enseña ya como se eligió (si no,
+  // la palomita tardaba uno o dos segundos en moverse y parecía que no servía).
+  const [automaticoElegido, setAutomaticoElegido] = useState(null);
+  const automaticos = automaticoElegido !== null ? automaticoElegido : !!(configuracion && configuracion.automaticos);
+  const tiendaVista = tienda || tiendaGuardada;
+  const tiendaCambio = !!tienda && ['nombre', 'direccion', 'telefono', 'mensaje'].some((c) => String(tienda[c] || '') !== String(tiendaGuardada[c] || ''));
+
+  // Se llegó con un folio (por el QR o desde Pedidos): se busca y, si está, se abre.
+  const folioAtendidoRef = useRef('');
+  useEffect(() => {
+    if (!folioBuscado || folioAtendidoRef.current === folioBuscado) return;
+    folioAtendidoRef.current = folioBuscado;
+    setBuscar(folioBuscado);
+    setFiltroEstado('');
+    const encontrado = tickets.find((t) => String(t.Folio).toLowerCase() === String(folioBuscado).toLowerCase());
+    if (encontrado) onAbrirTicket(encontrado);
+    else setAviso({ tipo: 'error', texto: `No encontré el ticket ${folioBuscado}. Puede que no exista o que no sea de los que tú puedes ver.` });
+    onFolioAtendido();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [folioBuscado, tickets]);
+
+  const texto = normalizarParaFiltro(buscar);
+  const filtrados = tickets.filter((t) => {
+    if (filtroEstado === 'aviso' && !(t.Estado !== ESTADO_TICKET_CANCELADO && (t.Desactualizado || []).length > 0)) return false;
+    if ((filtroEstado === 'Vigente' || filtroEstado === 'Cancelado') && (t.Estado === ESTADO_TICKET_CANCELADO ? 'Cancelado' : 'Vigente') !== filtroEstado) return false;
+    if (!texto) return true;
+    const donde = normalizarParaFiltro(
+      [t.Folio, t.Cliente, t.Telefono, t.Vendedor, t.CreadoPor, renglonesDeTicket(t).map((it) => `${it.descripcion} ${it.codigo}`).join(' ')].join(' ')
+    );
+    return donde.includes(texto);
+  });
+  const visibles = recortarFilas(filtrados, limiteFilas);
+  const conAviso = tickets.filter((t) => t.Estado !== ESTADO_TICKET_CANCELADO && (t.Desactualizado || []).length > 0).length;
+  const totalVigentes = filtrados.filter((t) => t.Estado !== ESTADO_TICKET_CANCELADO).reduce((suma, t) => suma + (Number(t.Total) || 0), 0);
+
+  // ---- Pedidos pagados sin ticket, juntos por clienta ----
+  const productosDelLote = Array.from(new Set(pedidosParaTicket.map((p) => p.Producto).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
+  // Si el producto elegido ya no tiene pedidos pendientes de ticket (se les
+  // acaba de generar), el filtro se quita solo.
+  const productoElegido = productosDelLote.includes(filtroProducto) ? filtroProducto : '';
+  const pedidosDelLote = productoElegido ? pedidosParaTicket.filter((p) => p.Producto === productoElegido) : pedidosParaTicket;
+  const grupos = [];
+  const grupoPorClave = {};
+  pedidosDelLote.forEach((p) => {
+    if (!grupoPorClave[p.ClaveCliente]) {
+      grupoPorClave[p.ClaveCliente] = { clave: p.ClaveCliente, cliente: p.Cliente, telefono: p.Telefono, pedidos: [] };
+      grupos.push(grupoPorClave[p.ClaveCliente]);
+    }
+    grupoPorClave[p.ClaveCliente].pedidos.push(p);
+  });
+  const gruposVisibles = recortarFilas(grupos, limiteClientes);
+  // Solo cuenta (y solo se manda) lo marcado que SE ESTÁ VIENDO con el
+  // filtro de producto: nunca se genera algo que no está a la vista.
+  const pedidosMarcados = pedidosDelLote.filter((p) => elegidos.has(String(p.ID)));
+  const elegidosVigentes = pedidosMarcados.map((p) => String(p.ID));
+  const clientesElegidos = new Set(pedidosMarcados.map((p) => p.ClaveCliente)).size;
+  const marcadosFueraDeVista = pedidosParaTicket.filter((p) => elegidos.has(String(p.ID))).length - pedidosMarcados.length;
+
+  function alternarPedido(id) {
+    setElegidos((antes) => {
+      const copia = new Set(antes);
+      if (copia.has(id)) copia.delete(id);
+      else copia.add(id);
+      return copia;
+    });
+  }
+  function alternarGrupo(grupo) {
+    const ids = grupo.pedidos.map((p) => String(p.ID));
+    setElegidos((antes) => {
+      const copia = new Set(antes);
+      const todos = ids.every((id) => copia.has(id));
+      ids.forEach((id) => (todos ? copia.delete(id) : copia.add(id)));
+      return copia;
+    });
+  }
+  function elegirLosQueSeVen() {
+    setElegidos((antes) => {
+      const copia = new Set(antes);
+      pedidosDelLote.forEach((p) => copia.add(String(p.ID)));
+      return copia;
+    });
+  }
+  async function generarLote() {
+    if (elegidosVigentes.length === 0 || generando) return;
+    setGenerando(true);
+    setAviso(null);
+    const folios = [];
+    const saltados = [];
+    try {
+      // El servidor recibe máximo 300 pedidos por vez: si son más, se manda
+      // por partes, una tras otra.
+      const TANDA = 250;
+      for (let desde = 0; desde < elegidosVigentes.length; desde += TANDA) {
+        // eslint-disable-next-line no-await-in-loop
+        const res = await onCrear(elegidosVigentes.slice(desde, desde + TANDA), true);
+        (res.creados || []).forEach((c) => folios.push(c.Folio));
+        (res.omitidos || []).forEach((o) => saltados.push(o));
+      }
+      setElegidos(new Set());
+      setAviso({
+        tipo: 'ok',
+        donde: 'lote',
+        folios,
+        texto:
+          `Se ${folios.length === 1 ? 'generó el ticket' : `generaron ${folios.length} tickets:`} ${folios.length > 12 ? `${folios[0]} … ${folios[folios.length - 1]}` : folios.join(', ')}.` +
+          (saltados.length > 0 ? ` Se ${saltados.length === 1 ? 'saltó 1 pedido' : `saltaron ${saltados.length} pedidos`}: ${saltados.slice(0, 3).map((o) => o.motivo).join(' ')}${saltados.length > 3 ? '…' : ''}` : ''),
+      });
+    } catch (err) {
+      setAviso({
+        tipo: 'error',
+        donde: 'lote',
+        texto: `${err.message || String(err)}${folios.length > 0 ? ` (Antes de fallar sí se generaron ${folios.length}: ${folios[0]} … ${folios[folios.length - 1]}.)` : ''}`,
+      });
+    } finally {
+      setGenerando(false);
+    }
+  }
+  function descargarVarios(lista, que) {
+    try {
+      bajarTicketsEnPDF(lista, configuracion);
+      setAviso({ tipo: 'ok', texto: `Se descargó el PDF con ${que}. Búscalo en tus Descargas.` });
+    } catch (err) {
+      setAviso({ tipo: 'error', texto: `No se pudo armar el PDF: ${err.message}` });
+    }
+  }
+
+  function guardarConfiguracion(cambios, textoListo) {
+    setGuardandoConfig(true);
+    setAvisoConfig(null);
+    Promise.resolve(onGuardarConfiguracion(cambios))
+      .then(() => {
+        if (cambios.tienda) setTienda(null);
+        setAvisoConfig({ tipo: 'ok', texto: textoListo });
+      })
+      .catch((err) => setAvisoConfig({ tipo: 'error', texto: err.message || String(err) }))
+      .finally(() => {
+        setGuardandoConfig(false);
+        setAutomaticoElegido(null);
+      });
+  }
+
+  // El aviso de lo último que se hizo. Sale donde se dio el clic: arriba
+  // (descargas de la tabla) o junto a la lista de "por lote".
+  const avisoJSX = aviso && (
+    <p className={aviso.tipo === 'ok' ? 'ticket-listo' : 'info-msg error ticket-msg'} role="status" data-ticket-aviso={aviso.donde || 'arriba'}>
+      {aviso.tipo === 'ok' ? '✅ ' : ''}{aviso.texto}
+      {aviso.tipo === 'ok' && aviso.folios && aviso.folios.length > 0 && (
+        <button
+          type="button"
+          className="btn btn-secondary btn-small ticket-listo-boton"
+          data-ticket-accion="pdf-recientes"
+          onClick={() => {
+            const folios = aviso.folios;
+            descargarVarios(tickets.filter((t) => folios.includes(t.Folio)), folios.length === 1 ? `el ticket ${folios[0]}` : `esos ${folios.length} tickets`);
+          }}
+        >
+          ⬇ Descargar {aviso.folios.length === 1 ? 'su PDF' : `los ${aviso.folios.length} en un PDF`}
+        </button>
+      )}
+    </p>
+  );
+
+  return (
+    <div className="tickets-tab">
+      <AyudaMinimizable clave="tickets" titulo="Cómo funcionan los tickets">
+        <p className="muted">
+          Un <strong>ticket</strong> es el recibo de uno o varios pedidos <strong>pagados</strong> de la misma clienta. Se genera con el botón 🎫
+          del pedido (en Pedidos), aquí abajo por lote, o solo al marcar "Pagado" si prendes el modo automático. Cada ticket lleva su{' '}
+          <strong>folio</strong> y un <strong>código QR</strong>: al leerlo con la cámara del celular se abre este panel directo en ese ticket.
+        </p>
+        <p className="muted">
+          El ticket es solo un documento: editarlo o cancelarlo <strong>no mueve pedidos, stock ni dinero</strong>. Para un reembolso se
+          sigue usando Pedidos (desde el ticket hay un botón que te lleva a sus pedidos).
+        </p>
+      </AyudaMinimizable>
+
+      {aviso && aviso.donde !== 'lote' && avisoJSX}
+
+      {/* ---- Tickets generados ---- */}
+      <div className="filtro-fechas">
+        <label>
+          Buscar ticket
+          <input type="text" value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Folio, clienta, teléfono, producto…" data-ticket-buscar />
+        </label>
+        <label>
+          Ver
+          <select value={filtroEstado} onChange={(e) => setFiltroEstado(e.target.value)}>
+            <option value="">Todos</option>
+            <option value="Vigente">Solo vigentes</option>
+            <option value="Cancelado">Solo cancelados</option>
+            <option value="aviso">Los que ya no coinciden con sus pedidos{conAviso > 0 ? ` (${conAviso})` : ''}</option>
+          </select>
+        </label>
+        {(buscar || filtroEstado) && (
+          <button type="button" className="btn btn-secondary btn-small" onClick={() => { setBuscar(''); setFiltroEstado(''); }}>
+            Quitar filtros
+          </button>
+        )}
+        <button
+          type="button"
+          className="btn btn-secondary btn-small"
+          onClick={() => descargarVarios(filtrados, `${filtrados.length} ticket${filtrados.length === 1 ? '' : 's'}`)}
+          disabled={filtrados.length === 0}
+          data-ticket-accion="pdf-todos"
+          title="Baja en UN archivo PDF todos los tickets que se ven ahora (cada uno en su hoja)"
+        >
+          ⬇ {filtrados.length === 1 ? 'PDF del que se ve' : `PDF de los ${filtrados.length} que se ven`}
+        </button>
+      </div>
+      <p className="muted">
+        {filtrados.length} ticket{filtrados.length === 1 ? '' : 's'}
+        {filtrados.length !== tickets.length ? ` de ${tickets.length}` : ''} · vigentes: {formatearMoneda(totalVigentes)}
+        {conAviso > 0 && filtroEstado !== 'aviso' && (
+          <button type="button" className="ticket-enlace-aviso" onClick={() => setFiltroEstado('aviso')}>
+            ⚠️ {conAviso} ya no coincide{conAviso === 1 ? '' : 'n'} con sus pedidos
+          </button>
+        )}
+      </p>
+      <div className="table-scroll">
+        <table className="data-table tickets-table">
+          <thead>
+            <tr>
+              <th>Folio</th><th>Fecha</th><th>Cliente</th><th>Teléfono</th><th>Productos</th><th>Total</th><th>Estado</th><th>Le atendió</th><th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody onClickCapture={marcarFilaActiva} onFocusCapture={marcarFilaActiva}>
+            {visibles.map((t) => {
+              const cancelado = t.Estado === ESTADO_TICKET_CANCELADO;
+              const piezas = piezasDeTicket(t);
+              return (
+                <tr key={t.ID} className={cancelado ? 'ticket-fila-cancelada' : ''} data-ticket-fila={t.Folio}>
+                  <td>
+                    <button type="button" className="ticket-folio-boton" onClick={() => onAbrirTicket(t)} title={`Abrir el ticket ${t.Folio}`}>
+                      <strong>{t.Folio}</strong>
+                    </button>
+                  </td>
+                  <td>{formatearFechaHora(t.FechaCompra || t.Fecha)}</td>
+                  <td><CeldaTruncada texto={t.Cliente || '—'} /></td>
+                  <td>{t.Telefono || '—'}</td>
+                  <td>
+                    <CeldaTruncada texto={renglonesDeTicket(t).map((it) => `${it.cantidad} x ${it.descripcion}`).join(' · ') || '—'} />
+                    <span className="muted ticket-piezas">{piezas} pieza{piezas === 1 ? '' : 's'}</span>
+                  </td>
+                  <td className="mov-numero">{formatearMoneda(Number(t.Total) || 0)}</td>
+                  <td>
+                    {cancelado ? <span className="ticket-chip ticket-chip-cancelado">Cancelado</span> : <span className="ticket-chip ticket-chip-vigente">Vigente</span>}
+                    {!cancelado && (t.Desactualizado || []).length > 0 && (
+                      <span className="ticket-chip ticket-chip-aviso" title="Alguno de sus pedidos ya no está pagado. Ábrelo para verlo.">⚠️ Revisar</span>
+                    )}
+                  </td>
+                  <td><CeldaTruncada texto={t.Vendedor || t.CreadoPor || '—'} /></td>
+                  <td className="ticket-acciones-celda">
+                    <button type="button" className="btn btn-small" onClick={() => onAbrirTicket(t)} data-ticket-accion="ver">Ver</button>
+                    <button type="button" className="btn btn-secondary btn-small" onClick={() => descargarVarios([t], `el ticket ${t.Folio}`)} data-ticket-accion="pdf-fila" title={`Descargar el ticket ${t.Folio} en PDF`}>
+                      ⬇ PDF
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {tickets.length === 0 && <p className="info-msg">Todavía no hay ningún ticket. Genera el primero aquí abajo, o con el botón 🎫 de un pedido pagado.</p>}
+        {tickets.length > 0 && filtrados.length === 0 && <p className="info-msg">Ningún ticket coincide con lo que buscas.</p>}
+      </div>
+      <BarraFilas total={filtrados.length} visibles={visibles.length} limite={limiteFilas} onCambiar={setLimiteFilas} nombre="tickets" />
+
+      {/* ---- Pedidos pagados sin ticket (por lote) ---- */}
+      <section className="tickets-lote">
+        <h3>Pedidos pagados sin ticket <span className="orden-conteo">({pedidosParaTicket.length})</span></h3>
+        {aviso && aviso.donde === 'lote' && avisoJSX}
+        {pedidosParaTicket.length === 0 ? (
+          <p className="muted">Todos los pedidos pagados que puedes ver ya tienen su ticket.</p>
+        ) : (
+          <>
+            <p className="muted">
+              Marca los pedidos y genera sus tickets de un jalón: sale <strong>un ticket por clienta</strong> (se juntan sus pedidos marcados).
+              Con "Producto" puedes quedarte solo con los pedidos de un producto.
+            </p>
+            <div className="filtro-fechas">
+              <label>
+                Producto
+                <select value={productoElegido} onChange={(e) => setFiltroProducto(e.target.value)} data-ticket-producto>
+                  <option value="">Todos los productos</option>
+                  {productosDelLote.map((nombre) => (
+                    <option key={nombre} value={nombre}>{nombre}</option>
+                  ))}
+                </select>
+              </label>
+              <button type="button" className="btn btn-secondary btn-small" onClick={elegirLosQueSeVen} disabled={generando} data-ticket-accion="marcar-todos">
+                {pedidosDelLote.length === 1 ? 'Marcar el que se ve' : `Marcar los ${pedidosDelLote.length} que se ven`}
+              </button>
+              {(elegidosVigentes.length > 0 || marcadosFueraDeVista > 0) && (
+                <button type="button" className="btn btn-secondary btn-small" onClick={() => setElegidos(new Set())} disabled={generando}>
+                  Quitar marcas
+                </button>
+              )}
+              <button type="button" className="btn btn-primary btn-small" onClick={generarLote} disabled={generando || elegidosVigentes.length === 0} data-ticket-accion="generar-lote">
+                {generando
+                  ? 'Generando…'
+                  : elegidosVigentes.length === 0
+                    ? '🎫 Generar tickets'
+                    : `🎫 Generar ${clientesElegidos} ticket${clientesElegidos === 1 ? '' : 's'} (${elegidosVigentes.length} pedido${elegidosVigentes.length === 1 ? '' : 's'})`}
+              </button>
+            </div>
+            {marcadosFueraDeVista > 0 && (
+              <p className="muted">
+                Tienes {marcadosFueraDeVista} pedido{marcadosFueraDeVista === 1 ? '' : 's'} marcado{marcadosFueraDeVista === 1 ? '' : 's'} de otros productos que
+                ahora no se ve{marcadosFueraDeVista === 1 ? '' : 'n'}: solo se generan los que están a la vista.
+              </p>
+            )}
+            <ul className="tickets-lote-grupos">
+              {gruposVisibles.map((g) => {
+                const ids = g.pedidos.map((p) => String(p.ID));
+                const marcados = ids.filter((id) => elegidos.has(id)).length;
+                const totalGrupo = g.pedidos.reduce((suma, p) => suma + p.Cantidad * p.Precio, 0);
+                const sinResolver = Math.max(0, ...g.pedidos.map((p) => p.SinResolver || 0));
+                return (
+                  <li key={g.clave} className="tickets-lote-grupo" data-ticket-cliente={g.cliente}>
+                    <label className="tickets-lote-cliente">
+                      <input
+                        type="checkbox"
+                        checked={marcados === ids.length}
+                        ref={(el) => { if (el) el.indeterminate = marcados > 0 && marcados < ids.length; }}
+                        onChange={() => alternarGrupo(g)}
+                        disabled={generando}
+                      />
+                      <strong>{g.cliente || 'Cliente sin nombre'}</strong>
+                      {g.telefono && <span className="muted">{g.telefono}</span>}
+                      <span className="tickets-lote-total">{g.pedidos.length} pedido{g.pedidos.length === 1 ? '' : 's'} · {formatearMoneda(totalGrupo)}</span>
+                    </label>
+                    {sinResolver > 0 && (
+                      <p className="ticket-aviso-espera">
+                        ⏳ Todavía tiene {sinResolver} pedido{sinResolver === 1 ? '' : 's'} de esta compra sin resolver (Pendiente o En proceso).
+                      </p>
+                    )}
+                    <ul className="ticket-lote-lista">
+                      {g.pedidos.map((p) => (
+                        <li key={p.ID}>
+                          <label>
+                            <input type="checkbox" checked={elegidos.has(String(p.ID))} onChange={() => alternarPedido(String(p.ID))} disabled={generando} data-ticket-pedido={p.ID} />
+                            <span className="ticket-lote-producto">{p.Cantidad} x {p.Producto}{p.Codigo ? ` (${p.Codigo})` : ''}{p.SucursalNombre ? ` · 🏪 ${p.SucursalNombre}` : ''}</span>
+                            <span className="ticket-lote-fecha">{formatearFechaHora(p.Fecha)}</span>
+                            <span className="ticket-lote-importe">{formatearMoneda(p.Cantidad * p.Precio)}</span>
+                          </label>
+                        </li>
+                      ))}
+                    </ul>
+                  </li>
+                );
+              })}
+            </ul>
+            <BarraFilas total={grupos.length} visibles={gruposVisibles.length} limite={limiteClientes} onCambiar={setLimiteClientes} nombre="clientas" />
+          </>
+        )}
+      </section>
+
+      {/* ---- Modo automático y datos de la tienda ---- */}
+      <section className="tickets-config">
+        <h3>⚙️ Modo automático y datos de la tienda</h3>
+        {avisoConfig && (
+          <p className={avisoConfig.tipo === 'ok' ? 'ticket-listo' : 'info-msg error ticket-msg'} role="status">
+            {avisoConfig.tipo === 'ok' ? '✅ ' : ''}{avisoConfig.texto}
+          </p>
+        )}
+        <label className={`tickets-interruptor ${automaticos ? 'tickets-interruptor-prendido' : ''}`}>
+          <input
+            type="checkbox"
+            checked={automaticos}
+            disabled={!puedeConfigurar || guardandoConfig}
+            data-ticket-automatico
+            onChange={(e) => {
+              const prender = e.target.checked;
+              setAutomaticoElegido(prender);
+              guardarConfiguracion(
+                { automaticos: prender },
+                prender
+                  ? 'Modo automático PRENDIDO: el ticket sale solo al marcar "Pagado".'
+                  : 'Modo automático APAGADO: los tickets se generan solo a mano.'
+              );
+            }}
+          />
+          <span>
+            <strong>Generar el ticket solo al marcar "Pagado"</strong> — está {automaticos ? 'PRENDIDO' : 'APAGADO'}.
+            <span className="muted tickets-interruptor-nota">
+              Prendido: en cuanto un pedido queda "Pagado" sale su ticket. Si esa clienta tiene más pedidos de la misma compra (hechos con
+              menos de {HORAS_MISMA_COMPRA} horas de diferencia) todavía Pendientes o En proceso, espera a que se resuelvan todos y saca uno
+              solo. Apagado: solo se generan a mano.
+            </span>
+          </span>
+        </label>
+        {!puedeConfigurar && <p className="muted">Solo un Administrador puede cambiar esto y los datos de la tienda.</p>}
+        <div className="tickets-tienda">
+          <label className="modal-field">
+            Nombre de la tienda
+            <input value={tiendaVista.nombre || ''} maxLength={60} disabled={!puedeConfigurar || guardandoConfig} onChange={(e) => setTienda({ ...tiendaVista, nombre: e.target.value })} placeholder="Ej. Bolsas Claudia" data-tienda="nombre" />
+          </label>
+          <label className="modal-field">
+            Teléfono
+            <input value={tiendaVista.telefono || ''} maxLength={40} disabled={!puedeConfigurar || guardandoConfig} onChange={(e) => setTienda({ ...tiendaVista, telefono: e.target.value })} placeholder="Ej. 55 1234 5678" data-tienda="telefono" />
+          </label>
+          <label className="modal-field tickets-tienda-ancho">
+            Dirección
+            <input value={tiendaVista.direccion || ''} maxLength={160} disabled={!puedeConfigurar || guardandoConfig} onChange={(e) => setTienda({ ...tiendaVista, direccion: e.target.value })} placeholder="Calle, número, colonia, ciudad" data-tienda="direccion" />
+          </label>
+          <label className="modal-field tickets-tienda-ancho">
+            Mensaje al final del ticket
+            <input value={tiendaVista.mensaje || ''} maxLength={200} disabled={!puedeConfigurar || guardandoConfig} onChange={(e) => setTienda({ ...tiendaVista, mensaje: e.target.value })} placeholder="Ej. ¡Gracias por tu compra!" data-tienda="mensaje" />
+          </label>
+        </div>
+        {puedeConfigurar && (
+          <div className="tickets-tienda-botones">
+            <button type="button" className="btn btn-primary btn-small" disabled={!tiendaCambio || guardandoConfig} data-ticket-accion="guardar-tienda" onClick={() => guardarConfiguracion({ tienda }, 'Datos de la tienda guardados. Salen en los tickets que descargues desde ahora (también en los ya generados).')}>
+              {guardandoConfig ? 'Guardando…' : '💾 Guardar datos de la tienda'}
+            </button>
+            {tiendaCambio && (
+              <button type="button" className="btn btn-secondary btn-small" disabled={guardandoConfig} onClick={() => setTienda(null)}>
+                Descartar
+              </button>
+            )}
+            {!tiendaGuardada.nombre && <span className="muted">Mientras no pongas el nombre, el ticket sale sin encabezado de tienda.</span>}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
 function PedidoRow({
   pedido,
   categoria,
@@ -9609,6 +10837,9 @@ function PedidoRow({
   montoReembolsado,
   solicitudReembolsoPendiente,
   resaltado,
+  ticket,
+  puedeGenerarTicket = false,
+  onTicket,
   onGuardar,
   onDirtyChange,
   onAbrirNota,
@@ -9926,6 +11157,22 @@ function PedidoRow({
               aria-label="Volver a bloquear esta fila"
             >
               🔓
+            </button>
+          )}
+          {/* Tickets (2026-10-06): 🎫 junto al Estado. Con ticket (🎫✓, en
+              verde): lo abre. Pagado y sin ticket (🎫): ofrece generarlo. Va
+              solo el ícono, sin el folio escrito, para no ensanchar la
+              columna; el folio sale al dejar el mouse encima y al abrirlo. */}
+          {(ticket || puedeGenerarTicket) && onTicket && (
+            <button
+              type="button"
+              className={`btn-icono-aviso btn-ticket ${ticket ? 'btn-ticket-hecho' : ''}`}
+              onClick={() => onTicket(pedido)}
+              data-ticket-pedido-boton={ticket ? ticket.Folio : 'generar'}
+              title={ticket ? `Ticket ${ticket.Folio} — clic para verlo o descargarlo` : 'Generar el ticket de este pedido pagado'}
+              aria-label={ticket ? `Ver el ticket ${ticket.Folio}` : 'Generar el ticket de este pedido'}
+            >
+              🎫{ticket ? <span className="btn-ticket-listo" aria-hidden="true">✓</span> : null}
             </button>
           )}
           {haySolicitudPendienteReembolso && (
