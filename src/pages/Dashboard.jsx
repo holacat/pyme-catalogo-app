@@ -9,6 +9,7 @@ import {
   // existiendo en api.js/Code.gs por si algún día hacen falta sueltas, pero
   // el Dashboard ya no las usa una por una.
   cargarPanelCompleto,
+  consultarMarcaDeCambios,
   agregarOpcion,
   eliminarOpcion,
   actualizarStock,
@@ -288,8 +289,39 @@ const MAX_CARACTERES_TALLA = 20;
 const MAX_CARACTERES_COLOR = 30;
 const MAX_CARACTERES_DESCRIPCION = 250;
 
-// Cada cuánto se refresca solo el Dashboard en segundo plano (milisegundos).
+// Cada cuánto revisa el Dashboard, en segundo plano, si hay algo nuevo
+// (milisegundos).
+//
+// Rediseño (2026-10-06, reportado por Claudia: cambiar el estado de un pedido
+// tardó casi un minuto y el panel "ya no actúa rápido"). Antes, cada 6
+// segundos se pedían TODAS las hojas completas, hubiera cambios o no, y sin
+// esperar a que contestara la petición anterior: con varias pantallas
+// abiertas las peticiones se encimaban y el servidor se atoraba. Ahora:
+//   - cada 6 s solo se pregunta "¿hay algo nuevo?" (la "marca de cambios":
+//     el servidor la contesta casi al instante, sin abrir la hoja de cálculo);
+//   - los datos completos se piden solo cuando la marca cambió, o cada
+//     minuto por si alguien escribió directo en la hoja de Google;
+//   - nunca se manda una petición mientras la anterior no ha contestado, ni
+//     mientras se está guardando algo;
+//   - con la pestaña del navegador en segundo plano se revisa mucho menos.
 const INTERVALO_REFRESCO_MS = 6000;
+const REFRESCO_COMPLETO_MS = 60000;
+const REFRESCO_PESTANA_OCULTA_MS = 30000;
+// Tope de espera de la pregunta "¿hay algo nuevo?".
+const LIMITE_MARCA_MS = 15000;
+// Una petición que lleva más de esto sin contestar se da por perdida (para
+// que una sola petición colgada no deje al panel sin refrescarse nunca más).
+const PETICION_PERDIDA_MS = 90000;
+// …pero si todavía no hay nada en pantalla, o la pantalla quedó atrasada
+// después de guardar, no se espera tanto para volver a intentar.
+const PETICION_PERDIDA_SIN_DATOS_MS = 15000;
+const PETICION_PERDIDA_TRAS_GUARDAR_MS = 30000;
+// Después de guardar algo, el botón espera a lo mucho esto a que llegue la
+// recarga de los datos; pasado ese tiempo suelta el botón y la recarga sigue
+// llegando por su cuenta.
+const ESPERA_MAXIMA_RECARGA_TRAS_GUARDAR_MS = 15000;
+const AVISO_PONIENDOSE_AL_DIA =
+  '⏳ La pantalla se está poniendo al día: el servidor está tardando en mandar los datos. Si acabas de guardar algo, eso ya quedó guardado — no lo repitas. Este aviso se quita solo.';
 
 // Bug real (2026-09-24, reportado por Claudia: "actualicé un estatus de un
 // pedido y el círculo de carga se quedó cargando más de 1 minuto, hasta en
@@ -344,6 +376,15 @@ const AVISO_ESPERA_CANCELADA =
 // carga inicial (45s); de ahí en adelante, ya con `doPost` "caliente", se
 // usa el tope normal de 25s.
 let primeraEscrituraDeLaSesionYaHecha_ = false;
+// (2026-10-06) Cuando se deja de esperar un guardado, la petición sigue su
+// camino. Si el servidor por fin contesta, el Dashboard se entera por aquí y
+// le dice a la persona, sin lugar a dudas, si se guardó o no (antes se
+// quedaba el "es posible que sí se haya guardado" y había que adivinar).
+let alTerminarTarde_ = null;
+// Cambia cada vez que se inicia o se cierra sesión: un guardado que contesta
+// tarde, cuando ya hay otra persona en esta misma pestaña, no le avisa nada
+// a esa otra persona.
+let numeroDeSesion_ = 0;
 function conLimiteDeTiempo(promesa, etiqueta, opciones = {}) {
   const esLectura = !!opciones.esLectura;
   let ms = opciones.ms || TIEMPO_MAXIMO_ESPERA_MS;
@@ -351,15 +392,28 @@ function conLimiteDeTiempo(promesa, etiqueta, opciones = {}) {
     ms = Math.max(ms, TIEMPO_MAXIMO_CARGA_INICIAL_MS);
     primeraEscrituraDeLaSesionYaHecha_ = true;
   }
+  let seDejoDeEsperar = false;
+  if (!esLectura) {
+    const sesionAlPedir = numeroDeSesion_;
+    Promise.resolve(promesa).then(
+      (respuesta) => {
+        if (seDejoDeEsperar && alTerminarTarde_ && sesionAlPedir === numeroDeSesion_) alTerminarTarde_(etiqueta, true, respuesta);
+      },
+      (error) => {
+        if (seDejoDeEsperar && alTerminarTarde_ && sesionAlPedir === numeroDeSesion_) alTerminarTarde_(etiqueta, false, error);
+      }
+    );
+  }
   return Promise.race([
     promesa,
     new Promise((_, reject) =>
       setTimeout(() => {
+        seDejoDeEsperar = true;
         const segundos = Math.round(ms / 1000);
         const error = new Error(
           esLectura
             ? `Sigue cargando… la conexión está tardando más de lo normal (más de ${segundos}s). Se va a seguir intentando solo — si tarda mucho más, dale clic a "Actualizar".`
-            : `${etiqueta}: el servidor está tardando más de lo normal (más de ${segundos}s). Es posible que el cambio sí se haya guardado del lado del servidor — revisa antes de repetirlo.`
+            : `${etiqueta}: el servidor está tardando más de lo normal (más de ${segundos}s). Es posible que el cambio sí se haya guardado del lado del servidor — revisa antes de repetirlo. En cuanto el servidor conteste, aquí mismo te aviso si se guardó o no.`
         );
         error.esLimiteDeTiempo = true;
         reject(error);
@@ -693,6 +747,25 @@ export default function Dashboard() {
   const [panelYaCargo, setPanelYaCargo] = useState(false);
   const numeroDeCargaRef = useRef(0);
   const ultimaCargaAplicadaRef = useRef(0);
+  // ---- Refresco de fondo (2026-10-06, ver "INTERVALO_REFRESCO_MS") ----
+  // Cargas completas que siguen sin contestar: [{ desde }].
+  const cargasEnVueloRef = useRef([]);
+  // Cuándo empezó el último intento de carga, cuánto tardó la última, y
+  // cuándo se aplicó la última que sí llegó.
+  const ultimoIntentoDeCargaRef = useRef(0);
+  const duracionUltimaCargaRef = useRef(0);
+  const ultimaCargaCompletaRef = useRef(0);
+  // La "marca de cambios" que traían los datos que están en pantalla.
+  const marcaVistaRef = useRef('');
+  // true si el servidor todavía no sabe contestar la marca (versión de antes).
+  const servidorSinMarcaRef = useRef(false);
+  // Cuándo se mandó la última pregunta "¿hay algo nuevo?" (0 = ninguna en camino).
+  const revisandoMarcaDesdeRef = useRef(0);
+  const ultimaRevisionDeMarcaRef = useRef(0);
+  // Número de la carga que la pantalla NECESITA (la de después de guardar).
+  // 0 = la pantalla está al día.
+  const cargaNecesariaRef = useRef(0);
+  const latidoRef = useRef(null);
   // Lo que se va escribiendo en "Datos de la tienda" (vive aquí arriba para
   // que no se pierda al cambiar de pestaña antes de guardar). null = sin tocar.
   const [tiendaEnEdicion, setTiendaEnEdicion] = useState(null);
@@ -982,8 +1055,12 @@ export default function Dashboard() {
   const cargasRealesRef = useRef(0);
   // true mientras está en pantalla el aviso amarillo de "tardó demasiado".
   const avisoDeEsperaRef = useRef(false);
+  // Cuándo empezó la última acción (para que el refresco de fondo no compita
+  // con un guardado que está en camino).
+  const ultimaAccionIniciadaRef = useRef(0);
   function iniciarCarga() {
     cargasRealesRef.current += 1;
+    ultimaAccionIniciadaRef.current = Date.now();
     setCargasEnCurso((n) => n + 1);
   }
   function terminarCarga() {
@@ -1183,12 +1260,19 @@ export default function Dashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sinGuardar, fotoAmpliada, notaEnZoom, ticketAbiertoId, pedidoParaGenerarTicket]);
 
-  // `silencioso: true` se usa para los refrescos automáticos de fondo: no
-  // muestra "Actualizando…" ni mensajes de error a cada rato, para no ser
-  // molesto. Los refrescos que sí pide Claudia directamente (guardar algo,
-  // iniciar sesión) siguen mostrando el aviso normal.
-   function cargarTodo(token, opciones = {}) {
+  // `silencioso: true` no muestra "Actualizando…" ni mensajes de error (para
+  // no ser molesto). Hay dos clases de carga silenciosa:
+  //   - `deFondo: true`: el refresco automático (ver "latido" más abajo);
+  //   - sin `deFondo`: la recarga que se pide justo DESPUÉS de guardar algo.
+  //     Esa es obligatoria: si falla o tarda, se reintenta sola hasta que
+  //     llegue (aunque haya renglones con cambios sin guardar), para que la
+  //     pantalla nunca se quede enseñando datos de antes del guardado.
+  function cargarTodo(token, opciones = {}) {
     const silencioso = !!opciones.silencioso;
+    const deFondo = !!opciones.deFondo;
+    // Un guardado de la sesión ANTERIOR que termina cuando ya entró otra
+    // persona en esta pestaña no debe traer aquí los datos de la anterior.
+    if (token !== sesionTokenRef.current) return Promise.resolve(null);
     // Fix "switcheo" de sesión (2026-09): "número de turno" de quien pidió estos datos.
     const miSesionId = sesionIdRef.current;
     // (2026-10-06) Número de esta carga: si su respuesta llega DESPUÉS de la
@@ -1197,11 +1281,17 @@ export default function Dashboard() {
     // momento el ticket que se acaba de generar.
     numeroDeCargaRef.current += 1;
     const miNumeroDeCarga = numeroDeCargaRef.current;
+    if (!deFondo) cargaNecesariaRef.current = miNumeroDeCarga;
     if (!silencioso) {
       setCargando(true);
       iniciarCarga();
     }
-  
+    const empezo = Date.now();
+    ultimoIntentoDeCargaRef.current = empezo;
+    const enVuelo = { desde: empezo };
+    cargasEnVueloRef.current = cargasEnVueloRef.current.concat([enVuelo]);
+    let seDejoDeEsperar = false;
+
       // Arreglo de rendimiento (2026-09-25, reportado por Claudia: al abrir
     // el panel — o incluso al darle "Actualizar" — se quedaba "cargando"
     // sin nunca terminar). Antes aquí se hacían 8 peticiones SEPARADAS al
@@ -1217,12 +1307,22 @@ export default function Dashboard() {
     // y ya decide del lado del servidor qué partes puede ver esta cuenta
     // (igual que antes, solo que en un solo viaje de ida y vuelta en vez de
     // ocho).
-                   return conLimiteDeTiempo(cargarPanelCompleto(token), 'Cargar datos', { ms: TIEMPO_MAXIMO_CARGA_INICIAL_MS, esLectura: true })
-          .then((r) => {
-        // Fix "switcheo" de sesión (2026-09): si ya cambiamos de sesión, ignoramos esta respuesta vieja.
-        if (miSesionId !== sesionIdRef.current) return;
-        if (miNumeroDeCarga < ultimaCargaAplicadaRef.current) return;
-        ultimaCargaAplicadaRef.current = miNumeroDeCarga;
+    const peticion = cargarPanelCompleto(token);
+    // (2026-10-06) La respuesta se aplica CUANDO LLEGUE, aunque ya se haya
+    // dejado de esperarla (antes, una respuesta que llegaba tarde se tiraba a
+    // la basura y había que pedir todo otra vez).
+    const aplicada = peticion.then((r) => {
+      // Fix "switcheo" de sesión (2026-09): si ya cambiamos de sesión, ignoramos esta respuesta vieja.
+      if (miSesionId !== sesionIdRef.current) return r;
+      if (miNumeroDeCarga < ultimaCargaAplicadaRef.current) return r;
+      ultimaCargaAplicadaRef.current = miNumeroDeCarga;
+      // La "marca de cambios" con la que el servidor armó estos datos: el
+      // refresco de fondo solo vuelve a pedir todo cuando la marca cambie.
+      // Un servidor de antes no la manda: se sigue refrescando como antes.
+      marcaVistaRef.current = r && typeof r.marca === 'string' ? r.marca : '';
+      servidorSinMarcaRef.current = !marcaVistaRef.current;
+      ultimaCargaCompletaRef.current = Date.now();
+      if (miNumeroDeCarga >= cargaNecesariaRef.current) cargaNecesariaRef.current = 0;
         setProductos(r.productos || []);
         setPedidos(r.pedidos || []);
         setAlertas(r.alertas || []);
@@ -1262,26 +1362,43 @@ export default function Dashboard() {
             // Sin almacenamiento: los permisos valen mientras la pestaña esté abierta.
           }
         }
-        // Arreglo (2026-09-25, reportado por Claudia: el aviso de "sigue
-        // cargando" se quedó pegado en pantalla para siempre, ni el
-        // refresco automático de cada 6s lo quitaba). Antes esta línea
-        // SOLO limpiaba el mensaje en una carga NO silenciosa — un
-        // refresco de fondo que sí tuvo éxito nunca tocaba un aviso viejo.
-        // Ahora, si lo que había en pantalla era justo un aviso o error de
-        // ESTA misma función (cargar datos), se quita solo en cuanto
-        // cualquier carga (silenciosa o no) sí funciona — así el aviso
-        // desaparece apenas la conexión se recupera, sin que Claudia tenga
-        // que darle clic a "Actualizar" a mano.
-        setMensaje((prev) => {
-          if (!silencioso) return '';
-          return prev && (prev.startsWith('Sigue cargando') || prev.startsWith('Error al cargar datos'))
-            ? ''
-            : prev;
-        });
-      })
-            .catch((err) => {
+      // Arreglo (2026-09-25, reportado por Claudia: el aviso de "sigue
+      // cargando" se quedó pegado en pantalla para siempre, ni el refresco
+      // automático lo quitaba). Si lo que había en pantalla era justo un
+      // aviso o error de ESTA misma función (cargar datos), se quita solo en
+      // cuanto cualquier carga (silenciosa o no) sí funciona — así el aviso
+      // desaparece apenas la conexión se recupera, sin tener que darle clic
+      // a "Actualizar" a mano.
+      setMensaje((prev) => {
+        if (!silencioso && !seDejoDeEsperar) return '';
+        return prev && (prev === AVISO_PONIENDOSE_AL_DIA || prev.startsWith('Sigue cargando') || prev.startsWith('Error al cargar datos'))
+          ? ''
+          : prev;
+      });
+      return r;
+    });
+    // Pase lo que pase con la petición de verdad (bien, mal, tarde): deja de
+    // contar como "en camino", y se anota cuánto tardó.
+    aplicada.then(
+      () => null,
+      (err) => err
+    ).then((err) => {
+      cargasEnVueloRef.current = cargasEnVueloRef.current.filter((x) => x !== enVuelo);
+      if (miSesionId === sesionIdRef.current) duracionUltimaCargaRef.current = Date.now() - empezo;
+      // Si ya se había dejado de esperar y el servidor por fin contestó que
+      // la sesión ya no vale, se cierra la sesión igual.
+      if (err && err.sesionInvalida && seDejoDeEsperar && miSesionId === sesionIdRef.current) {
+        handleLogout();
+        setErrorLogin(err.message || 'Tu sesión ya no es válida. Vuelve a iniciar sesión.');
+      }
+    });
+
+    const conTope = conLimiteDeTiempo(aplicada, 'Cargar datos', { ms: TIEMPO_MAXIMO_CARGA_INICIAL_MS, esLectura: true })
+      .then((r) => r || null)
+      .catch((err) => {
+        if (err && err.esLimiteDeTiempo) seDejoDeEsperar = true;
         // Fix "switcheo" de sesión (2026-09): mismo control que arriba, para no reaccionar a una respuesta vieja.
-        if (miSesionId !== sesionIdRef.current) return;
+        if (miSesionId !== sesionIdRef.current) return null;
         // Si el servidor dice que la sesión ya no es válida (expiró, la
         // cuenta se inhabilitó, o quedó guardado un token viejo de otra
         // sesión), cerramos sesión automáticamente en vez de dejar el
@@ -1289,7 +1406,7 @@ export default function Dashboard() {
         if (err.sesionInvalida) {
           handleLogout();
           setErrorLogin(err.message || 'Tu sesión ya no es válida. Vuelve a iniciar sesión.');
-          return;
+          return null;
         }
         // Arreglo (2026-09-25, pedido por Claudia: el mensaje de "tardó
         // demasiado" al abrir el panel se veía como un error grave y
@@ -1299,11 +1416,14 @@ export default function Dashboard() {
         // `conLimiteDeTiempo` tal cual — no lo marcamos como "Error". Un
         // fallo de verdad (por ejemplo el servidor contestó pero con un
         // problema) sí se muestra como error.
-        if (!silencioso) {
+        // (Si mientras tanto ya llegó OTRA carga más nueva, la pantalla ya
+        // tiene datos al día: no hay nada que avisar.)
+        if (!silencioso && ultimaCargaAplicadaRef.current <= miNumeroDeCarga) {
           setMensaje(err.esLimiteDeTiempo ? err.message : `Error al cargar datos: ${err.message}`);
         }
+        return null;
       })
-           .finally(() => {
+      .finally(() => {
         // Bug real (2026-09-24): antes este `return` por "ya no es la
         // sesión activa" estaba ANTES de apagar el círculo de carga — si
         // alguna vez pasaba (o si una petición tardaba tanto que la sesión
@@ -1320,6 +1440,31 @@ export default function Dashboard() {
         if (miSesionId !== sesionIdRef.current) return;
         setVerificandoSesion(false);
       });
+
+    // La carga inicial, el botón "Actualizar" y el refresco de fondo esperan
+    // lo que haga falta (tienen su propio tope de tiempo).
+    if (!silencioso || deFondo) return conTope;
+
+    // La recarga de DESPUÉS de guardar (2026-10-06, reportado por Claudia: el
+    // botón se quedó en "Guardando…" casi un minuto y el pedido seguía como
+    // "sin guardar", aunque el servidor ya lo había guardado: lo que no
+    // llegaba era ESTA recarga). Quien guardó espera aquí a lo mucho unos
+    // segundos; si para entonces no ha llegado, se suelta el botón, se avisa
+    // que la pantalla se está poniendo al día, y la recarga sigue llegando
+    // por su cuenta (y si falla, el refresco de fondo la repite).
+    let yaTermino = false;
+    conTope.then(() => { yaTermino = true; });
+    return Promise.race([
+      conTope,
+      new Promise((resolver) => {
+        setTimeout(() => {
+          if (!yaTermino && !opciones.sinAviso && miSesionId === sesionIdRef.current && cargaNecesariaRef.current > 0) {
+            setMensaje((prev) => (prev ? prev : AVISO_PONIENDOSE_AL_DIA));
+          }
+          resolver(null);
+        }, ESPERA_MAXIMA_RECARGA_TRAS_GUARDAR_MS);
+      }),
+    ]);
   }
 
   useEffect(() => {
@@ -1331,16 +1476,141 @@ export default function Dashboard() {
   // cambios de stock se ven casi al instante, sin tener que darle
   // "Actualizar" a mano. Se pausa si hay cambios sin guardar o si está
   // abierto el formulario de agregar/editar producto, para no interrumpir.
-  useEffect(() => {
+  //
+  // "latido" corre cada INTERVALO_REFRESCO_MS y decide qué toca (ver la
+  // explicación completa junto a esa constante, arriba del archivo).
+  function latido() {
     if (!autenticado) return;
-    const intervalo = setInterval(() => {
-      if (sinGuardar.size === 0 && !productoEditando && tab !== 'nuevo') {
-        cargarTodo(sesionToken, { silencioso: true });
+    const ahora = Date.now();
+    // Cuánto se le espera a una carga antes de darla por perdida: poco si
+    // todavía no hay nada en pantalla; algo más si la pantalla quedó
+    // atrasada después de guardar; y bastante en el refresco normal.
+    const esperaPorPerdida = ultimaCargaCompletaRef.current === 0
+      ? PETICION_PERDIDA_SIN_DATOS_MS
+      : (cargaNecesariaRef.current > 0 ? PETICION_PERDIDA_TRAS_GUARDAR_MS : PETICION_PERDIDA_MS);
+    const hayCargaEnVuelo = cargasEnVueloRef.current.some((x) => ahora - x.desde < esperaPorPerdida);
+    // Mientras se está guardando algo, el refresco no compite con ese
+    // guardado (salvo que la acción lleve colgada más de la cuenta).
+    // (Si todavía no hay datos en pantalla no puede haber un guardado en
+    // camino: lo único "en curso" es la carga inicial misma.)
+    const hayAccionEnCurso = ultimaCargaCompletaRef.current !== 0 && cargasRealesRef.current > 0 && ahora - ultimaAccionIniciadaRef.current < PETICION_PERDIDA_MS;
+    // Si la última carga tardó mucho, la siguiente espera más: al servidor
+    // no se le piden cosas más rápido de lo que alcanza a contestarlas.
+    const respiro = Math.min(60000, 2 * duracionUltimaCargaRef.current);
+    const tocaRespirar = ahora - ultimoIntentoDeCargaRef.current < respiro;
+
+    // 1) La pantalla quedó atrasada después de guardar algo (su recarga
+    //    falló o no ha llegado): ponerla al día es lo primero, aunque haya
+    //    renglones con cambios sin guardar (esos no se pierden: cada renglón
+    //    conserva lo que se le escribió).
+    if (cargaNecesariaRef.current > 0) {
+      if (!hayCargaEnVuelo && !hayAccionEnCurso && !tocaRespirar) {
+        cargarTodo(sesionToken, { silencioso: true, deFondo: true });
       }
+      return;
+    }
+    if (sinGuardar.size > 0 || productoEditando || tab === 'nuevo') return;
+    if (hayCargaEnVuelo || hayAccionEnCurso || tocaRespirar) return;
+
+    const oculta = typeof document !== 'undefined' && !!document.hidden;
+    const desdeUltimaCompleta = ahora - ultimaCargaCompletaRef.current;
+
+    // 2) Servidor de antes (no sabe contestar la marca): se piden los datos
+    //    completos como antes, pero nunca encimados.
+    if (servidorSinMarcaRef.current) {
+      if (oculta && desdeUltimaCompleta < REFRESCO_PESTANA_OCULTA_MS) return;
+      cargarTodo(sesionToken, { silencioso: true, deFondo: true });
+      return;
+    }
+    // 3) Cada minuto, completo de todos modos (por si alguien escribió
+    //    directo en la hoja de Google). Con la pestaña en segundo plano no.
+    if (!oculta && desdeUltimaCompleta >= REFRESCO_COMPLETO_MS) {
+      cargarTodo(sesionToken, { silencioso: true, deFondo: true });
+      return;
+    }
+    // 4) Lo normal: preguntar solo "¿hay algo nuevo?".
+    if (revisandoMarcaDesdeRef.current > 0 && ahora - revisandoMarcaDesdeRef.current < LIMITE_MARCA_MS + 5000) return;
+    if (oculta && ahora - ultimaRevisionDeMarcaRef.current < REFRESCO_PESTANA_OCULTA_MS) return;
+    revisandoMarcaDesdeRef.current = ahora;
+    ultimaRevisionDeMarcaRef.current = ahora;
+    const miSesionId = sesionIdRef.current;
+    conLimiteDeTiempo(consultarMarcaDeCambios(), 'Revisar cambios', { ms: LIMITE_MARCA_MS, esLectura: true })
+      .then((r) => {
+        if (miSesionId !== sesionIdRef.current) return;
+        const marca = r && typeof r.marca === 'string' ? r.marca : '';
+        if (!marca) {
+          servidorSinMarcaRef.current = true;
+          return;
+        }
+        const yaHayCargaEnVuelo = cargasEnVueloRef.current.some((x) => Date.now() - x.desde < PETICION_PERDIDA_MS);
+        const accionEnCurso = cargasRealesRef.current > 0 && Date.now() - ultimaAccionIniciadaRef.current < PETICION_PERDIDA_MS;
+        if (marca !== marcaVistaRef.current && !yaHayCargaEnVuelo && !accionEnCurso) {
+          cargarTodo(sesionToken, { silencioso: true, deFondo: true });
+        }
+      })
+      .catch((err) => {
+        // Un servidor de antes contesta "Acción no reconocida".
+        if (err && err.datos && err.datos.error === 'Acción no reconocida') servidorSinMarcaRef.current = true;
+        // Cualquier otra falla (se fue el internet un momento): se vuelve a
+        // preguntar en el siguiente latido.
+      })
+      .finally(() => {
+        if (revisandoMarcaDesdeRef.current === ahora) revisandoMarcaDesdeRef.current = 0;
+      });
+  }
+  latidoRef.current = latido;
+
+  useEffect(() => {
+    if (!autenticado) return undefined;
+    const intervalo = setInterval(() => {
+      if (latidoRef.current) latidoRef.current();
     }, INTERVALO_REFRESCO_MS);
-    return () => clearInterval(intervalo);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autenticado, sesionToken, rol, permisos, sinGuardar, productoEditando, tab]);
+    // Al volver a la pestaña (o al desbloquear el celular) se revisa de una
+    // vez, sin esperar al siguiente latido.
+    function alVolver() {
+      if (typeof document !== 'undefined' && !document.hidden && latidoRef.current) latidoRef.current();
+    }
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', alVolver);
+    return () => {
+      clearInterval(intervalo);
+      if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', alVolver);
+    };
+  }, [autenticado]);
+
+  // Un guardado que se dejó de esperar y que el servidor por fin contestó
+  // (ver "alTerminarTarde_" junto a "conLimiteDeTiempo"): se dice claro si
+  // quedó guardado o no, y la pantalla se pone al día.
+  useEffect(() => {
+    alTerminarTarde_ = (etiqueta, salioBien, dato) => {
+      if (!autenticado) return;
+      if (salioBien) {
+        setMensaje(dato && dato.solicitudReembolsoCreada
+          ? '✓ Tu solicitud de reembolso sí se envió al Administrador: el servidor tardó en contestar, pero ya quedó. No hace falta repetirla.'
+          : `✓ "${etiqueta}" sí se guardó: el servidor tardó en contestar, pero el cambio ya quedó. No hace falta repetirlo.`);
+        if (dato && dato.pedido && !dato.solicitudReembolsoCreada) pintarPedidoGuardado(dato.pedido);
+      } else if (dato && dato.datos) {
+        // El servidor contestó, y contestó que no.
+        setMensaje(`Error: "${etiqueta}" NO se guardó: ${conEtiquetasDeEstado(dato.message || 'el servidor lo rechazó')}`);
+      } else {
+        // Se perdió la conexión antes de saber: no hay forma de asegurarlo.
+        setMensaje(`No se pudo confirmar si "${etiqueta}" se guardó (se perdió la conexión con el servidor). Revisa cómo quedó antes de repetirlo.`);
+      }
+      cargarTodo(sesionToken, { silencioso: true });
+      // El aviso sale hasta arriba del panel: si se está más abajo (por
+      // ejemplo en el formulario de un producto), se lleva la vista ahí.
+      setTimeout(() => {
+        try {
+          const aviso = document.querySelector('.info-msg');
+          if (aviso && aviso.scrollIntoView) aviso.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        } catch {
+          // Solo es para que se vea.
+        }
+      }, 60);
+    };
+    return () => {
+      alTerminarTarde_ = null;
+    };
+  });
 
    // Hace scroll hasta la fila resaltada (ver irAStockYResaltar) para que se
   // vea aunque esté más abajo en la tabla, sin tener que buscarla a mano.
@@ -1374,6 +1644,7 @@ export default function Dashboard() {
          .then((res) => {
         // Fix "switcheo" de sesión (2026-09): "nueva sesión", para que las respuestas de la sesión anterior ya no cuenten.
         sesionIdRef.current += 1;
+        numeroDeSesion_ += 1;
         const permisosCalculados = res.permisos || PESTANAS_TODAS_PERMITIDAS;
         localStorage.setItem(TOKEN_KEY, res.token);
         localStorage.setItem(ROL_KEY, res.rol);
@@ -1398,6 +1669,14 @@ export default function Dashboard() {
 
     function handleLogout() {
            sesionIdRef.current += 1;
+    numeroDeSesion_ += 1;
+    cargaNecesariaRef.current = 0;
+    marcaVistaRef.current = '';
+    servidorSinMarcaRef.current = false;
+    ultimaCargaCompletaRef.current = 0;
+    duracionUltimaCargaRef.current = 0;
+    revisandoMarcaDesdeRef.current = 0;
+    cargasEnVueloRef.current = [];
            localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(ROL_KEY);
     localStorage.removeItem(NOMBRE_KEY);
@@ -1504,13 +1783,43 @@ export default function Dashboard() {
       .finally(terminarCarga);
   }
 
+  // (2026-10-06) Pinta en la lista lo que el servidor dice que quedó escrito
+  // en un pedido, sin esperar a la recarga completa. Cualquier carga que
+  // venga atrasada (pedida ANTES de este guardado) ya no se aplica: traería
+  // el pedido como estaba antes.
+  function pintarPedidoGuardado(pedidoGuardado) {
+    if (!pedidoGuardado || pedidoGuardado.ID === undefined || pedidoGuardado.ID === null) return;
+    ultimaCargaAplicadaRef.current = Math.max(ultimaCargaAplicadaRef.current, numeroDeCargaRef.current + 1);
+    setPedidos((lista) => lista.map((p) => (String(p.ID) === String(pedidoGuardado.ID) ? { ...p, ...pedidoGuardado, ID: p.ID } : p)));
+  }
+
   function handleGuardarPedido(pedidoId, { cantidad, telefono, notas, estado, montoReembolso }) {
     iniciarCarga();
     return conLimiteDeTiempo(
       actualizarPedido({ sesionToken, pedidoId, cantidad, telefono, notas, estado, montoReembolso }),
       'Actualizar pedido'
     )
-      .then((res) => cargarTodo(sesionToken, { silencioso: true }).then(() => res))
+      .then((res) => {
+        // Reportado por Claudia (2026-10-06): el botón se quedó en
+        // "Guardando…" casi un minuto y el pedido seguía marcado "sin
+        // guardar". El servidor ya había guardado; lo que no llegaba era la
+        // recarga completa de todas las hojas que se esperaba aquí. Ahora el
+        // servidor contesta cómo quedó el pedido y se pinta de inmediato; la
+        // recarga completa (stock, bitácora, tickets…) llega después, de
+        // fondo, sin detener el botón. (Con una solicitud de reembolso sí se
+        // espera: el renglón depende de que llegue la solicitud. Igual con
+        // un "Reembolsado": el renglón enseña cuánto se reembolsó, y ese
+        // dato llega con la recarga. Y un servidor de antes no manda el
+        // pedido: se espera como antes.)
+        if (res && res.pedido && !res.solicitudReembolsoCreada && res.pedido.Estado !== 'Reembolsado') {
+          pintarPedidoGuardado(res.pedido);
+          // "sinAviso": el renglón ya está al día; no hace falta avisar que
+          // el resto de la pantalla viene en camino.
+          cargarTodo(sesionToken, { silencioso: true, sinAviso: true });
+          return res;
+        }
+        return cargarTodo(sesionToken, { silencioso: true }).then(() => res);
+      })
       .then((res) => {
         // Candado de Reembolsos (2026-09-30, pedido por Claudia): si el
         // pedido no cambió de Estado de verdad porque hacía falta permiso,
@@ -3290,7 +3599,7 @@ export default function Dashboard() {
           sesionToken={sesionToken}
           productos={productos}
           nombreSesion={nombreSesion}
-          onCambio={() => cargarTodo(sesionToken, { silencioso: true })}
+          onCambio={() => cargarTodo(sesionToken, { silencioso: true, deFondo: true })}
         />
       )}
 
@@ -6984,7 +7293,17 @@ function StockRow({
   const campoStockRef = useRef(null);
   const [avisoCandadoStock, setAvisoCandadoStock] = useState(null); // null | 'hover' | 'clic'
   const [avisoMinimoCerrado, setAvisoMinimoCerrado] = useState(false);
-  const sinGuardar = Number(valor) !== Number(producto.Stock);
+  // (2026-10-06) Lo que se acaba de guardar BIEN en este renglón. Si la
+  // recarga de los datos tarda en llegar, el renglón ya no se marca "sin
+  // guardar" ni deja mandar lo mismo otra vez mientras tanto. Se olvida en
+  // cuanto el Stock que manda el servidor cambia (ya llegó la recarga, o
+  // alguien más lo movió).
+  const [recienGuardado, setRecienGuardado] = useState(null);
+  useEffect(() => {
+    setRecienGuardado(null);
+  }, [producto.Stock]);
+  const yaQuedoGuardado = recienGuardado !== null && Number(valor) === recienGuardado;
+  const sinGuardar = Number(valor) !== Number(producto.Stock) && !yaQuedoGuardado;
   const llave = `stock:${producto.ID}`;
   const visible = esProductoVisible(producto);
   const foto = primeraFoto(producto.FotoURL);
@@ -7305,7 +7624,9 @@ function StockRow({
             className={`btn btn-small ${guardandoStock ? 'btn-guardando' : ''}`}
             onClick={() => {
               setGuardandoStock(true);
+              const valorMandado = Number(valor);
               onActualizar(producto.ID, valor)
+                .then(() => setRecienGuardado(valorMandado))
                 .catch(() => {})
                 .finally(() => setGuardandoStock(false));
             }}
