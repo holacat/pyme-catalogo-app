@@ -850,3 +850,499 @@ export function descargarPDF(nombreArchivo, opciones) {
   const bytes = crearPDF(opciones);
   bajarArchivo(`${nombreDeArchivoSeguro(nombreArchivo)}.pdf`, bytes, 'application/pdf');
 }
+
+// ---------------------------------------------------------------------------
+// Código QR — hecho a mano (modo bytes, corrección de errores "M",
+// versiones 1 a 10: hasta 213 letras). Lo usan los tickets: el QR lleva un
+// enlace con el folio.
+// ---------------------------------------------------------------------------
+// Por versión (1 a 10), con corrección M: [total de códigos, códigos de
+// corrección por bloque, número de bloques].
+const QR_VERSIONES_M = [
+  null,
+  [26, 10, 1], [44, 16, 1], [70, 26, 1], [100, 18, 2], [134, 24, 2],
+  [172, 16, 4], [196, 18, 4], [242, 22, 4], [292, 22, 5], [346, 26, 5],
+];
+// Centros de los cuadritos de alineación.
+const QR_ALINEACION = [null, [], [6, 18], [6, 22], [6, 26], [6, 30], [6, 34], [6, 22, 38], [6, 24, 42], [6, 26, 46], [6, 28, 50]];
+
+function qrMultiplicar(x, y) {
+  let z = 0;
+  for (let i = 7; i >= 0; i--) {
+    z = (z << 1) ^ ((z >>> 7) * 0x11d);
+    z ^= ((y >>> i) & 1) * x;
+  }
+  return z & 0xff;
+}
+
+function qrDivisor(grado) {
+  const resultado = new Array(grado).fill(0);
+  resultado[grado - 1] = 1;
+  let raiz = 1;
+  for (let i = 0; i < grado; i++) {
+    for (let j = 0; j < resultado.length; j++) {
+      resultado[j] = qrMultiplicar(resultado[j], raiz);
+      if (j + 1 < resultado.length) resultado[j] ^= resultado[j + 1];
+    }
+    raiz = qrMultiplicar(raiz, 0x02);
+  }
+  return resultado;
+}
+
+function qrResiduo(datos, divisor) {
+  const resultado = divisor.map(() => 0);
+  datos.forEach((b) => {
+    const factor = b ^ resultado.shift();
+    resultado.push(0);
+    divisor.forEach((coeficiente, i) => {
+      resultado[i] ^= qrMultiplicar(coeficiente, factor);
+    });
+  });
+  return resultado;
+}
+
+function qrCondicionDeMascara(mascara, x, y) {
+  switch (mascara) {
+    case 0: return (x + y) % 2 === 0;
+    case 1: return y % 2 === 0;
+    case 2: return x % 3 === 0;
+    case 3: return (x + y) % 3 === 0;
+    case 4: return (Math.floor(x / 3) + Math.floor(y / 2)) % 2 === 0;
+    case 5: return ((x * y) % 2) + ((x * y) % 3) === 0;
+    case 6: return (((x * y) % 2) + ((x * y) % 3)) % 2 === 0;
+    default: return (((x + y) % 2) + ((x * y) % 3)) % 2 === 0;
+  }
+}
+
+// Qué tan "feo" quedó un QR con cierta máscara (entre menos, mejor se lee).
+function qrCastigo(celdas) {
+  const n = celdas.length;
+  let castigo = 0;
+  const PATRON_A = [true, false, true, true, true, false, true, false, false, false, false];
+  const PATRON_B = [false, false, false, false, true, false, true, true, true, false, true];
+  const revisarLinea = (leer) => {
+    let corrida = 1;
+    for (let i = 1; i < n; i++) {
+      if (leer(i) === leer(i - 1)) {
+        corrida += 1;
+        if (corrida === 5) castigo += 3;
+        else if (corrida > 5) castigo += 1;
+      } else corrida = 1;
+    }
+    for (let i = 0; i + 11 <= n; i++) {
+      let esA = true;
+      let esB = true;
+      for (let k = 0; k < 11; k++) {
+        const v = leer(i + k);
+        if (v !== PATRON_A[k]) esA = false;
+        if (v !== PATRON_B[k]) esB = false;
+        if (!esA && !esB) break;
+      }
+      if (esA) castigo += 40;
+      if (esB) castigo += 40;
+    }
+  };
+  for (let y = 0; y < n; y++) revisarLinea((i) => celdas[y][i]);
+  for (let x = 0; x < n; x++) revisarLinea((i) => celdas[i][x]);
+  let oscuras = 0;
+  for (let y = 0; y < n; y++) {
+    for (let x = 0; x < n; x++) {
+      if (celdas[y][x]) oscuras += 1;
+      if (y + 1 < n && x + 1 < n) {
+        const c = celdas[y][x];
+        if (c === celdas[y][x + 1] && c === celdas[y + 1][x] && c === celdas[y + 1][x + 1]) castigo += 3;
+      }
+    }
+  }
+  castigo += Math.floor(Math.abs((oscuras * 100) / (n * n) - 50) / 5) * 10;
+  return castigo;
+}
+
+// Regresa { lado, celdas } — "celdas[renglón][columna]" es true donde va un
+// cuadrito negro — o null si el texto no cabe (más de 213 letras).
+export function crearQR(texto) {
+  const bytes = Array.from(aBytesUtf8(String(texto === null || texto === undefined ? '' : texto)));
+  let version = 0;
+  for (let v = 1; v <= 10; v++) {
+    const [total, correccion, bloques] = QR_VERSIONES_M[v];
+    const capacidadEnBits = (total - correccion * bloques) * 8;
+    if (4 + (v < 10 ? 8 : 16) + bytes.length * 8 <= capacidadEnBits) {
+      version = v;
+      break;
+    }
+  }
+  if (!version) return null;
+  const [totalDeCodigos, codigosDeCorreccion, numeroDeBloques] = QR_VERSIONES_M[version];
+  const codigosDeDatos = totalDeCodigos - codigosDeCorreccion * numeroDeBloques;
+
+  // 1) Los datos, bit por bit.
+  const bits = [];
+  const agregarBits = (valor, cuantos) => {
+    for (let i = cuantos - 1; i >= 0; i--) bits.push((valor >>> i) & 1);
+  };
+  agregarBits(0b0100, 4); // modo "bytes"
+  agregarBits(bytes.length, version < 10 ? 8 : 16);
+  bytes.forEach((b) => agregarBits(b, 8));
+  const capacidad = codigosDeDatos * 8;
+  agregarBits(0, Math.min(4, capacidad - bits.length));
+  agregarBits(0, (8 - (bits.length % 8)) % 8);
+  for (let relleno = 0xec; bits.length < capacidad; relleno ^= 0xec ^ 0x11) agregarBits(relleno, 8);
+  const datos = [];
+  for (let i = 0; i < bits.length; i += 8) {
+    let b = 0;
+    for (let k = 0; k < 8; k++) b = (b << 1) | bits[i + k];
+    datos.push(b);
+  }
+
+  // 2) Corrección de errores, por bloques, y todo intercalado.
+  const bloquesCortos = numeroDeBloques - (totalDeCodigos % numeroDeBloques);
+  const largoCorto = Math.floor(totalDeCodigos / numeroDeBloques);
+  const divisor = qrDivisor(codigosDeCorreccion);
+  const bloques = [];
+  let k = 0;
+  for (let i = 0; i < numeroDeBloques; i++) {
+    const parte = datos.slice(k, k + largoCorto - codigosDeCorreccion + (i < bloquesCortos ? 0 : 1));
+    k += parte.length;
+    const correccion = qrResiduo(parte, divisor);
+    if (i < bloquesCortos) parte.push(0);
+    bloques.push(parte.concat(correccion));
+  }
+  const codigos = [];
+  for (let i = 0; i < bloques[0].length; i++) {
+    bloques.forEach((bloque, j) => {
+      if (i !== largoCorto - codigosDeCorreccion || j >= bloquesCortos) codigos.push(bloque[i]);
+    });
+  }
+
+  // 3) El dibujo: primero lo fijo (esquinas, líneas guía…).
+  const lado = version * 4 + 17;
+  const celdas = Array.from({ length: lado }, () => new Array(lado).fill(false));
+  const fijas = Array.from({ length: lado }, () => new Array(lado).fill(false));
+  const fijar = (x, y, oscura) => {
+    celdas[y][x] = !!oscura;
+    fijas[y][x] = true;
+  };
+  for (let i = 0; i < lado; i++) {
+    fijar(6, i, i % 2 === 0);
+    fijar(i, 6, i % 2 === 0);
+  }
+  const esquina = (cx, cy) => {
+    for (let dy = -4; dy <= 4; dy++) {
+      for (let dx = -4; dx <= 4; dx++) {
+        const d = Math.max(Math.abs(dx), Math.abs(dy));
+        const x = cx + dx;
+        const y = cy + dy;
+        if (x >= 0 && x < lado && y >= 0 && y < lado) fijar(x, y, d !== 2 && d !== 4);
+      }
+    }
+  };
+  esquina(3, 3);
+  esquina(lado - 4, 3);
+  esquina(3, lado - 4);
+  const centros = QR_ALINEACION[version];
+  centros.forEach((cy, i) => {
+    centros.forEach((cx, j) => {
+      const ultimo = centros.length - 1;
+      if ((i === 0 && j === 0) || (i === 0 && j === ultimo) || (i === ultimo && j === 0)) return;
+      for (let dy = -2; dy <= 2; dy++) {
+        for (let dx = -2; dx <= 2; dx++) fijar(cx + dx, cy + dy, Math.max(Math.abs(dx), Math.abs(dy)) !== 1);
+      }
+    });
+  });
+  const dibujarFormato = (mascara) => {
+    const dato = mascara; // corrección "M" = 00, seguido de la máscara
+    let resto = dato;
+    for (let i = 0; i < 10; i++) resto = (resto << 1) ^ ((resto >>> 9) * 0x537);
+    const formato = ((dato << 10) | resto) ^ 0x5412;
+    const bit = (i) => ((formato >>> i) & 1) !== 0;
+    for (let i = 0; i <= 5; i++) fijar(8, i, bit(i));
+    fijar(8, 7, bit(6));
+    fijar(8, 8, bit(7));
+    fijar(7, 8, bit(8));
+    for (let i = 9; i < 15; i++) fijar(14 - i, 8, bit(i));
+    for (let i = 0; i < 8; i++) fijar(lado - 1 - i, 8, bit(i));
+    for (let i = 8; i < 15; i++) fijar(8, lado - 15 + i, bit(i));
+    fijar(8, lado - 8, true);
+  };
+  dibujarFormato(0);
+  if (version >= 7) {
+    let resto = version;
+    for (let i = 0; i < 12; i++) resto = (resto << 1) ^ ((resto >>> 11) * 0x1f25);
+    const info = (version << 12) | resto;
+    for (let i = 0; i < 18; i++) {
+      const oscura = ((info >>> i) & 1) !== 0;
+      const a = lado - 11 + (i % 3);
+      const b = Math.floor(i / 3);
+      fijar(a, b, oscura);
+      fijar(b, a, oscura);
+    }
+  }
+
+  // 4) Los datos, en zigzag desde la esquina de abajo a la derecha.
+  let indice = 0;
+  for (let derecha = lado - 1; derecha >= 1; derecha -= 2) {
+    if (derecha === 6) derecha = 5;
+    for (let vertical = 0; vertical < lado; vertical++) {
+      for (let j = 0; j < 2; j++) {
+        const x = derecha - j;
+        const haciaArriba = ((derecha + 1) & 2) === 0;
+        const y = haciaArriba ? lado - 1 - vertical : vertical;
+        if (!fijas[y][x] && indice < codigos.length * 8) {
+          celdas[y][x] = ((codigos[indice >>> 3] >>> (7 - (indice & 7))) & 1) !== 0;
+          indice += 1;
+        }
+      }
+    }
+  }
+
+  // 5) La máscara que deje el dibujo más fácil de leer.
+  const aplicarMascara = (mascara) => {
+    for (let y = 0; y < lado; y++) {
+      for (let x = 0; x < lado; x++) {
+        if (!fijas[y][x] && qrCondicionDeMascara(mascara, x, y)) celdas[y][x] = !celdas[y][x];
+      }
+    }
+  };
+  let mejor = 0;
+  let menorCastigo = Infinity;
+  for (let mascara = 0; mascara < 8; mascara++) {
+    aplicarMascara(mascara);
+    dibujarFormato(mascara);
+    const castigo = qrCastigo(celdas);
+    if (castigo < menorCastigo) {
+      menorCastigo = castigo;
+      mejor = mascara;
+    }
+    aplicarMascara(mascara); // se deshace (aplicarla dos veces la quita)
+  }
+  aplicarMascara(mejor);
+  dibujarFormato(mejor);
+  return { lado, celdas, version };
+}
+
+// ---------------------------------------------------------------------------
+// Ticket de compra — PDF angosto, tipo recibo de caja (80 mm de ancho; el
+// largo es el que haga falta).
+// ---------------------------------------------------------------------------
+const ANCHO_TICKET = 226.77; // 80 mm en puntos
+
+function dineroDeTicket(numero) {
+  return `$${conMiles(Number(numero) || 0, 2)}`;
+}
+
+// Arma la página de UN ticket. datos: {
+//   ticket: { Folio, Fecha, FechaCompra, Estado, Cliente, Telefono, Items, Total, Notas, Vendedor },
+//   tienda: { nombre, direccion, telefono, mensaje },
+//   enlace: texto que va dentro del QR (si no hay, el QR lleva el folio)
+// }
+function paginaDeTicket(datos) {
+  const ticket = (datos && datos.ticket) || {};
+  const tienda = (datos && datos.tienda) || {};
+  const MARGEN = 11;
+  const ancho = ANCHO_TICKET;
+  const util = ancho - MARGEN * 2;
+  const centro = ancho / 2;
+  const derecha = ancho - MARGEN;
+  const NEGRO = '#000000';
+  const GRIS = '#4b5563';
+  const pasos = []; // lo que hay que dibujar, ya con su "y"
+  let y = 14;
+
+  const centrado = (texto, tamano, negrita, color, maxRenglones) => {
+    partirEnRenglones(textoParaPDF(texto), util, tamano, negrita, maxRenglones || 3).forEach((renglon) => {
+      if (!renglon) return;
+      y += tamano;
+      const yAhora = y;
+      pasos.push((p) => p.texto(centro, yAhora, renglon, { tamano, negrita, color: color || NEGRO, alinear: 'centro' }));
+      y += tamano * 0.28;
+    });
+  };
+  const raya = () => {
+    y += 5;
+    const yAhora = y;
+    pasos.push((p) => p.linea(MARGEN, yAhora, derecha, yAhora, { color: '#6b7280', grosor: 0.6 }));
+    y += 4;
+  };
+  // "Etiqueta: valor", el valor en varios renglones si hace falta.
+  const dato = (etiqueta, valor, tamano = 8, maxRenglones = 3) => {
+    const limpio = textoParaPDF(valor);
+    if (!limpio) return;
+    const anchoEtiqueta = anchoDeTexto(textoParaPDF(etiqueta), tamano, true) + 3;
+    partirEnRenglones(limpio, util - anchoEtiqueta, tamano, false, maxRenglones).forEach((renglon, i) => {
+      y += tamano + 1;
+      const yAhora = y;
+      if (i === 0) pasos.push((p) => p.texto(MARGEN, yAhora, etiqueta, { tamano, negrita: true, color: NEGRO }));
+      pasos.push((p) => p.texto(MARGEN + anchoEtiqueta, yAhora, renglon, { tamano, color: NEGRO }));
+      y += 1.5;
+    });
+  };
+
+  const cancelado = String(ticket.Estado || '') === 'Cancelado';
+  if (cancelado) {
+    centrado('*** TICKET CANCELADO ***', 10, true, NEGRO, 1);
+    y += 3;
+  }
+
+  // ---- La tienda ----
+  if (textoParaPDF(tienda.nombre)) centrado(tienda.nombre, 13, true, NEGRO, 3);
+  if (textoParaPDF(tienda.direccion)) centrado(tienda.direccion, 7.5, false, GRIS, 5);
+  if (textoParaPDF(tienda.telefono)) centrado(`Tel. ${tienda.telefono}`, 7.5, false, GRIS, 1);
+  // La raya de abajo de la tienda, solo si hubo algo de la tienda.
+  if (textoParaPDF(tienda.nombre) || textoParaPDF(tienda.direccion) || textoParaPDF(tienda.telefono)) raya();
+
+  // ---- El ticket ----
+  centrado('TICKET DE COMPRA', 9, true, NEGRO, 1);
+  centrado(`Folio ${ticket.Folio || ''}`, 11, true, NEGRO, 1);
+  y += 2;
+  const fechaCompra = aFecha(ticket.FechaCompra) || aFecha(ticket.Fecha);
+  const fechaEmision = aFecha(ticket.Fecha);
+  // Si el ticket se sacó otro día que la compra, salen las dos fechas.
+  const otroDia = !!(fechaEmision && fechaCompra && textoDeCelda(fechaEmision, 'fecha') !== textoDeCelda(fechaCompra, 'fecha'));
+  if (fechaCompra) dato(otroDia ? 'Fecha de compra:' : 'Fecha:', textoDeCelda(fechaCompra, 'fechaHora'));
+  if (otroDia) dato('Ticket emitido:', textoDeCelda(fechaEmision, 'fechaHora'));
+  // (Si el nombre trae solo signos que el PDF no puede escribir, igual sale algo.)
+  dato('Cliente:', textoParaPDF(ticket.Cliente) ? ticket.Cliente : 'Público en general');
+  dato('Tel.:', ticket.Telefono);
+  dato('Le atendió:', ticket.Vendedor);
+  raya();
+
+  // ---- Los productos ----
+  const items = (Array.isArray(ticket.Items) ? ticket.Items : []).filter((it) => it && typeof it === 'object');
+  const importeDe = (it) => {
+    const cantidad = Number(it.cantidad) || 0;
+    const precio = Number(it.precio) || 0;
+    return it.importe === undefined || it.importe === null ? cantidad * precio : Number(it.importe) || 0;
+  };
+  // Las columnas de cantidad e importe se abren lo que pida el número más
+  // largo (para que "1,000 x" o un importe de millones no se encimen con la
+  // descripción), sin dejar a la descripción con menos de 70 puntos.
+  let anchoCantidad = 26;
+  let anchoImporte = 52;
+  items.forEach((it) => {
+    anchoCantidad = Math.max(anchoCantidad, anchoDeTexto(`${conMiles(Number(it.cantidad) || 0, 0)} x`, 8, true) + 6);
+    anchoImporte = Math.max(anchoImporte, anchoDeTexto(dineroDeTicket(importeDe(it)), 8, true) + 6);
+  });
+  anchoCantidad = Math.min(anchoCantidad, 60);
+  anchoImporte = Math.min(anchoImporte, util - anchoCantidad - 70);
+  const X_DESCRIPCION = MARGEN + anchoCantidad;
+  const ANCHO_IMPORTE = anchoImporte;
+  y += 7;
+  const yTitulos = y;
+  pasos.push((p) => {
+    p.texto(MARGEN, yTitulos, 'CANT.', { tamano: 6.5, negrita: true, color: GRIS });
+    p.texto(X_DESCRIPCION, yTitulos, 'DESCRIPCIÓN', { tamano: 6.5, negrita: true, color: GRIS });
+    p.texto(derecha, yTitulos, 'IMPORTE', { tamano: 6.5, negrita: true, color: GRIS, alinear: 'derecha' });
+  });
+  y += 3;
+  let piezas = 0;
+  items.forEach((it) => {
+    const cantidad = Number(it.cantidad) || 0;
+    const precio = Number(it.precio) || 0;
+    const importe = importeDe(it);
+    piezas += cantidad;
+    const renglones = partirEnRenglones(textoParaPDF(it.descripcion) || 'Producto', derecha - ANCHO_IMPORTE - X_DESCRIPCION, 8, false, 6);
+    renglones.forEach((renglon, i) => {
+      y += 9.5;
+      const yAhora = y;
+      if (i === 0) {
+        pasos.push((p) => {
+          p.texto(MARGEN, yAhora, `${conMiles(cantidad, 0)} x`, { tamano: 8, negrita: true, color: NEGRO });
+          p.texto(derecha, yAhora, dineroDeTicket(importe), { tamano: 8, negrita: true, color: NEGRO, alinear: 'derecha' });
+        });
+      }
+      pasos.push((p) => p.texto(X_DESCRIPCION, yAhora, renglon, { tamano: 8, color: NEGRO }));
+    });
+    const detalle = [textoParaPDF(it.codigo) ? `Cód. ${textoParaPDF(it.codigo)}` : '', `${dineroDeTicket(precio)} c/u`].filter(Boolean).join('  ·  ');
+    partirEnRenglones(detalle, derecha - X_DESCRIPCION, 6.5, false, 3).forEach((renglon) => {
+      y += 7.5;
+      const yAhora = y;
+      pasos.push((p) => p.texto(X_DESCRIPCION, yAhora, renglon, { tamano: 6.5, color: GRIS }));
+    });
+    y += 2.5;
+  });
+  if (items.length === 0) {
+    y += 10;
+    const yAhora = y;
+    pasos.push((p) => p.texto(centro, yAhora, '(sin productos)', { tamano: 8, color: GRIS, alinear: 'centro' }));
+  }
+  raya();
+
+  // ---- El total ----
+  y += 13;
+  const yTotal = y;
+  pasos.push((p) => {
+    p.texto(MARGEN, yTotal, 'TOTAL', { tamano: 12, negrita: true, color: NEGRO });
+    p.texto(derecha, yTotal, dineroDeTicket(ticket.Total), { tamano: 12, negrita: true, color: NEGRO, alinear: 'derecha' });
+  });
+  y += 10;
+  const yPiezas = y;
+  pasos.push((p) =>
+    p.texto(MARGEN, yPiezas, `${conMiles(piezas, 0)} pieza${piezas === 1 ? '' : 's'} en ${items.length} producto${items.length === 1 ? '' : 's'}`, { tamano: 7, color: GRIS })
+  );
+  y += 2;
+  if (textoParaPDF(ticket.Notas)) {
+    raya();
+    dato('Nota:', ticket.Notas, 7.5, 12);
+  }
+  raya();
+
+  // ---- El QR con el folio ----
+  const qr = crearQR(datos.enlace || ticket.Folio || '');
+  if (qr) {
+    const MODULOS = qr.lado + 8; // con su orilla blanca de 4 cuadritos por lado
+    const lado = 92;
+    const modulo = lado / MODULOS;
+    const x0 = centro - lado / 2;
+    y += 2;
+    const y0 = y;
+    pasos.push((p) => {
+      p.rectangulo(x0, y0, lado, lado, { relleno: '#ffffff' });
+      qr.celdas.forEach((fila, r) => {
+        let c = 0;
+        while (c < qr.lado) {
+          if (!fila[c]) {
+            c += 1;
+            continue;
+          }
+          let fin = c;
+          while (fin + 1 < qr.lado && fila[fin + 1]) fin += 1;
+          // Un pelito más ancho y alto, para que no queden rayitas blancas
+          // entre cuadritos vecinos al imprimir o agrandar.
+          p.rectangulo(x0 + (c + 4) * modulo, y0 + (r + 4) * modulo, (fin - c + 1) * modulo + 0.05, modulo + 0.05, { relleno: NEGRO });
+          c = fin + 1;
+        }
+      });
+    });
+    y += lado + 2;
+    centrado(`Folio ${ticket.Folio || ''}`, 8, true, NEGRO, 1);
+  }
+  if (textoParaPDF(tienda.mensaje)) {
+    y += 3;
+    centrado(tienda.mensaje, 8, false, NEGRO, 8);
+  }
+  if (cancelado) {
+    y += 4;
+    centrado('*** TICKET CANCELADO ***', 10, true, NEGRO, 1);
+  }
+  y += 16;
+
+  const pagina = new PaginaPDF(ancho, Math.max(y, 150));
+  pasos.forEach((paso) => paso(pagina));
+  return pagina;
+}
+
+// Un PDF con uno o varios tickets (cada uno en su propia hoja, del largo
+// que necesite). "lista" = [{ ticket, tienda, enlace }]. Regresa los bytes.
+export function crearTicketPDF(lista) {
+  const tickets = Array.isArray(lista) ? lista : [lista];
+  const paginas = tickets.map(paginaDeTicket);
+  const primero = (tickets[0] && tickets[0].ticket) || {};
+  return armarPDF(paginas, {
+    titulo: tickets.length === 1 ? `Ticket ${primero.Folio || ''}` : `${tickets.length} tickets`,
+    autor: (tickets[0] && tickets[0].tienda && tickets[0].tienda.nombre) || '',
+  });
+}
+
+export function descargarTicketPDF(nombreArchivo, lista) {
+  bajarArchivo(`${nombreDeArchivoSeguro(nombreArchivo)}.pdf`, crearTicketPDF(lista), 'application/pdf');
+}
