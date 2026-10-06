@@ -4469,3 +4469,246 @@ td.mov-piezas.mov-salida { color: #b91c1c; }
 .ayuda-minimizable-abrir { display: inline-block; margin-bottom: 0.7rem; }
 .ayuda-minimizable-cerrar:hover,
 .ayuda-minimizable-abrir:hover { background: #dfe9f8; }
+
+/* ==== Tickets (2026-10-06) ====
+   Pestaña "🎫 Tickets", el botón 🎫 de cada pedido pagado, la ventana de
+   un ticket (con su vista tipo recibo) y la de "Generar ticket". */
+.ticket-listo {
+  margin: 0.5rem 0 0.7rem;
+  padding: 0.55rem 0.8rem;
+  border-radius: 8px;
+  background: #ecfdf5;
+  border: 1px solid #a7e3c4;
+  color: var(--brand-dark);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+.ticket-listo-boton { margin-left: 0.6rem; }
+.info-msg.ticket-msg { padding: 0.5rem 0; text-align: left; }
+.ticket-chip {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.12rem 0.5rem;
+  border-radius: 999px;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.ticket-chip-vigente { background: #dff3e7; color: var(--brand-dark); }
+.ticket-chip-cancelado { background: #e5e7eb; color: #4b5563; }
+.ticket-chip-aviso { background: #fff4d6; color: #8a5a00; margin-left: 0.3rem; }
+.ticket-enlace-aviso {
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #8a5a00;
+  background: #fff4d6;
+  border: 1px solid #f0d78a;
+  border-radius: 999px;
+  padding: 0.1rem 0.6rem;
+  margin-left: 0.6rem;
+  cursor: pointer;
+}
+.tickets-table td { vertical-align: middle; }
+.tickets-table .ticket-piezas { display: block; font-size: 0.75rem; }
+.tickets-table tr.ticket-fila-cancelada td { color: var(--muted); }
+.tickets-table tr.ticket-fila-cancelada td strong { text-decoration: line-through; }
+.ticket-acciones-celda { white-space: nowrap; }
+.ticket-acciones-celda .btn + .btn { margin-left: 0.3rem; }
+.tickets-table tbody tr[data-fila-activa] td { background: #e8f1fc; }
+
+/* Por lote: pedidos pagados sin ticket, juntos por clienta. */
+.tickets-lote,
+.tickets-config {
+  margin-top: 1.6rem;
+  padding: 0.9rem 1rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #ffffff;
+}
+.tickets-lote h3,
+.tickets-config h3 { margin: 0 0 0.5rem; font-size: 1.05rem; color: var(--brand-dark); }
+.tickets-lote-grupos { list-style: none; margin: 0.6rem 0 0; padding: 0; }
+.tickets-lote-grupo {
+  border: 1px solid #d7e6dd;
+  border-radius: 8px;
+  padding: 0.5rem 0.7rem;
+  margin-bottom: 0.5rem;
+  background: #f8fcf9;
+}
+.tickets-lote-cliente { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; cursor: pointer; }
+.tickets-lote-total { margin-left: auto; font-size: 0.85rem; font-weight: 600; color: var(--brand-dark); }
+.ticket-lote-lista { list-style: none; margin: 0.35rem 0 0; padding: 0; }
+.ticket-lote-lista li + li { border-top: 1px dashed #e5e7eb; }
+.ticket-lote-lista label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.1rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.ticket-lote-producto { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.ticket-lote-fecha { font-size: 0.78rem; color: var(--muted); white-space: nowrap; }
+.ticket-lote-importe { font-weight: 600; white-space: nowrap; min-width: 5.2rem; text-align: right; }
+.ticket-aviso-espera {
+  margin: 0.4rem 0;
+  padding: 0.45rem 0.7rem;
+  border-radius: 8px;
+  background: #fff8e1;
+  border: 1px solid #f0d78a;
+  color: #7a5200;
+  font-size: 0.85rem;
+}
+
+/* Interruptor de "automático" y datos de la tienda. */
+.tickets-interruptor {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #f9fafb;
+  cursor: pointer;
+}
+.tickets-interruptor input { width: 1.2rem; height: 1.2rem; margin-top: 0.15rem; flex-shrink: 0; }
+.tickets-interruptor-prendido { background: #ecfdf5; border-color: #a7e3c4; }
+.tickets-interruptor-nota { display: block; margin-top: 0.25rem; font-size: 0.82rem; font-weight: 400; }
+.tickets-tienda { display: grid; grid-template-columns: 1fr 1fr; gap: 0.2rem 1rem; margin-top: 0.9rem; }
+.tickets-tienda-ancho { grid-column: 1 / -1; }
+.tickets-tienda-botones { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-top: 0.3rem; }
+@media (max-width: 600px) {
+  .tickets-tienda { grid-template-columns: 1fr; }
+}
+
+/* 🎫 en la fila de un pedido (junto al menú de Estado). */
+.btn-ticket { display: inline-flex; align-items: center; gap: 0.15rem; border-color: #d1d5db; background: #ffffff; }
+.btn-ticket-hecho { border-color: #a7e3c4; background: #ecfdf5; }
+.btn-ticket-listo { font-size: 0.7rem; font-weight: 800; color: var(--brand-dark); }
+.ticket-filtro-pedidos {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0 0 0.7rem;
+  padding: 0.5rem 0.8rem;
+  border-radius: 8px;
+  background: #eef4ff;
+  border: 1px solid #b9cdf0;
+  color: #27457a;
+  font-size: 0.9rem;
+}
+
+/* Ventana de un ticket. */
+.modal-ticket,
+.modal-generar-ticket { max-width: 560px; }
+.ticket-datos-internos { font-size: 0.8rem; margin: 0 0 0.6rem; }
+.ticket-acciones { flex-wrap: wrap; }
+.ticket-aviso-cambio {
+  margin: 0 0 0.8rem;
+  padding: 0.6rem 0.8rem;
+  border-radius: 8px;
+  background: #fff8e1;
+  border: 1px solid #f0d78a;
+  color: #7a5200;
+  font-size: 0.88rem;
+}
+.ticket-aviso-cambio ul { margin: 0.3rem 0 0.5rem; padding-left: 1.2rem; }
+.ticket-aviso-cambio-botones { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.modal-aviso.ticket-aviso-rojo { background: #fdecec; color: #7f1d1d; }
+.ticket-edicion-campos { display: grid; grid-template-columns: 1fr 1fr; gap: 0 1rem; }
+@media (max-width: 520px) {
+  .ticket-edicion-campos { grid-template-columns: 1fr; }
+}
+.ticket-edicion textarea {
+  width: 100%;
+  font: inherit;
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  resize: vertical;
+}
+.ticket-edicion-tabla input {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  width: 100%;
+  min-width: 0;
+}
+.ticket-edicion-tabla .ticket-input-cant { width: 3.6rem; }
+.ticket-edicion-tabla .ticket-input-desc { min-width: 9rem; }
+.ticket-edicion-tabla .ticket-input-cod { width: 5.5rem; }
+.ticket-edicion-tabla .ticket-input-precio { width: 5.5rem; }
+.ticket-edicion-importe { white-space: nowrap; text-align: right; font-weight: 600; }
+.ticket-edicion-total { text-align: right; margin: 0.5rem 0; font-size: 1rem; }
+
+/* La vista del ticket: como el papel del recibo. */
+.ticket-papel {
+  width: 100%;
+  max-width: 320px;
+  margin: 0 auto 0.9rem;
+  padding: 0.9rem 0.9rem 1rem;
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  color: #111827;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 13px;
+  line-height: 1.35;
+}
+.ticket-papel p { margin: 0.12rem 0; overflow-wrap: anywhere; }
+.ticket-papel hr { border: none; border-top: 1px solid #6b7280; margin: 0.5rem 0; }
+.ticket-papel-tienda { text-align: center; font-size: 18px; font-weight: 700; }
+.ticket-papel-chico { text-align: center; font-size: 11px; color: #4b5563; }
+.ticket-papel-chico.ticket-papel-izquierda { text-align: left; }
+.ticket-papel-titulo { text-align: center; font-weight: 700; }
+.ticket-papel-folio { text-align: center; font-size: 16px; font-weight: 700; margin-bottom: 0.3rem !important; }
+.ticket-papel-tabla { width: 100%; border-collapse: collapse; }
+.ticket-papel-tabla th {
+  font-size: 10px;
+  text-transform: uppercase;
+  color: #4b5563;
+  text-align: left;
+  padding: 0 0 0.2rem;
+}
+.ticket-papel-tabla th:first-child { padding-right: 0.5rem; }
+.ticket-papel-tabla th:last-child,
+.ticket-papel-tabla td:last-child { text-align: right; white-space: nowrap; font-weight: 700; }
+.ticket-papel-tabla td { padding: 0.2rem 0; vertical-align: top; overflow-wrap: anywhere; }
+.ticket-papel-tabla td:first-child { white-space: nowrap; font-weight: 700; padding-right: 0.5rem; }
+.ticket-papel-detalle { display: block; font-size: 10.5px; color: #4b5563; }
+.ticket-papel-total { display: flex; justify-content: space-between; font-size: 19px; font-weight: 700; }
+.ticket-papel-qr { text-align: center; margin-top: 0.3rem; }
+.ticket-qr { display: block; margin: 0 auto; }
+.ticket-papel-folio-chico { text-align: center; font-weight: 700; font-size: 12px; }
+.ticket-papel-mensaje { text-align: center; margin-top: 0.4rem !important; }
+.ticket-papel-sello { text-align: center; font-weight: 700; letter-spacing: 0.03em; }
+.ticket-papel-cancelado { opacity: 0.75; }
+
+/* Las ventanas de tickets van por encima del aviso flotante de "cambios sin
+   guardar" (que si no, en celular tapaba sus botones). */
+.modal-overlay.modal-overlay-ticket { z-index: 300; }
+/* El folio de la tabla también abre el ticket. */
+.ticket-folio-boton {
+  font: inherit;
+  color: var(--brand-dark);
+  background: none;
+  border: none;
+  padding: 0.2rem 0.1rem;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: #a7e3c4;
+  text-underline-offset: 3px;
+}
+.tickets-table tr.ticket-fila-cancelada .ticket-folio-boton { color: var(--muted); }
+/* Renglón del ticket al que le falta algo para poder guardarse. */
+.ticket-edicion-tabla input.ticket-input-mal { border-color: #dc2626; background: #fef2f2; }
+/* En celular, el 🎫 de Pedidos con tamaño para el dedo. */
+@media (max-width: 700px) {
+  .btn-ticket { min-width: 34px; min-height: 28px; justify-content: center; font-size: 16px; }
+  .ticket-acciones-celda .btn { min-height: 28px; }
+}
