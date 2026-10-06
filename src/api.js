@@ -509,3 +509,39 @@ export function actualizarCatalogoPropio({ sesionToken, usuarioId, activo }) {
 export function actualizarCatalogoSucursal({ sesionToken, usuarioId, productoId, operacion }) {
   return post({ action: 'actualizarCatalogoSucursal', sesionToken, productoId, operacion, ...(usuarioId ? { usuarioId } : {}) });
 }
+
+// ---- Tickets (2026-10-06): recibos de los pedidos pagados. Ver "TICKETS"
+// en Code.gs. Los tickets, los pedidos pagados que todavía no tienen y los
+// datos de la tienda llegan junto con todo lo demás en "cargarPanelCompleto".
+
+// Genera tickets para esos pedidos: uno por clienta (junta los de la misma).
+// "porLote": true cuando salen de la lista de la pestaña Tickets (solo para
+// que el ticket diga cómo se generó).
+export function crearTickets({ sesionToken, pedidoIds, porLote }) {
+  return post({ action: 'crearTickets', sesionToken, pedidoIds, ...(porLote ? { porLote: true } : {}) });
+}
+
+// Cambia lo escrito en un ticket (no mueve pedidos, stock ni dinero).
+export function actualizarTicket({ sesionToken, ticketId, cliente, telefono, notas, items }) {
+  return post({ action: 'actualizarTicket', sesionToken, ticketId, cliente, telefono, notas, items });
+}
+
+// Vuelve a armar el ticket con sus pedidos que siguen pagados.
+export function rehacerTicket({ sesionToken, ticketId }) {
+  return post({ action: 'rehacerTicket', sesionToken, ticketId });
+}
+
+export function cancelarTicket({ sesionToken, ticketId, motivo }) {
+  return post({ action: 'cancelarTicket', sesionToken, ticketId, motivo });
+}
+
+// Datos de la tienda que salen en el ticket y el interruptor de "automático".
+// Solo se manda lo que cambia. Solo Administradores.
+export function guardarConfiguracionTickets({ sesionToken, tienda, automaticos }) {
+  return post({
+    action: 'guardarConfiguracionTickets',
+    sesionToken,
+    ...(tienda ? { tienda } : {}),
+    ...(automaticos === undefined ? {} : { automaticos: !!automaticos }),
+  });
+}
