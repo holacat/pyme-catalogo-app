@@ -2,7 +2,26 @@ import { useEffect, useRef, useState } from 'react';
 import ProductCard, { obtenerInfoOferta } from '../components/ProductCard.jsx';
 import SolicitudModal from '../components/SolicitudModal.jsx';
 import CarritoModal from '../components/CarritoModal.jsx';
-import { listarProductos, crearPedidoCarrito } from '../api.js';
+import { listarProductos, crearPedidoCarrito, consultarMarcaDeCambios } from '../api.js';
+
+// Refresco del catálogo (2026-10-06). Antes, cada catálogo abierto (cada
+// pestaña, cada celular) le pedía TODOS los productos al servidor cada 5
+// segundos, hubiera cambios o no, sin esperar a que contestara la vez
+// anterior y aunque la página ni se estuviera viendo. Con varias clientas
+// (más el panel) eso mantenía al servidor ocupado y todo se volvía lento.
+// Ahora cada 5 s solo se pregunta "¿hay algo nuevo?" (el servidor lo contesta
+// casi al instante); los productos se vuelven a pedir solo cuando algo
+// cambió, o cada 2 minutos por si acaso. Con la página en segundo plano no
+// se pide nada, y al volver a verla se revisa de inmediato.
+const REVISION_CATALOGO_MS = 5000;
+const RECARGA_COMPLETA_CATALOGO_MS = 120000;
+// Con un servidor de antes (no sabe contestar "¿hay algo nuevo?") se piden
+// los productos como antes, pero más espaciado y nunca encimado.
+const RECARGA_SERVIDOR_VIEJO_MS = 10000;
+// Una petición que lleva más de esto sin contestar se da por perdida.
+const PETICION_PERDIDA_CATALOGO_MS = 60000;
+// …pero si la clienta todavía no ve ningún producto, no se espera tanto.
+const PETICION_PERDIDA_SIN_CATALOGO_MS = 12000;
 
 const CLIENTE_STORAGE_KEY = 'pyme_cliente_info';
 
@@ -401,9 +420,31 @@ export default function Catalog() {
   //    en palabras simples que puede ser la conexión, aclara que se sigue
   //    intentando solo, y agrega un botón "🔄 Actualizar" para reintentar
   //    de inmediato sin tener que refrescar la página completa a mano.
+  // ---- Refresco de fondo (ver "REVISION_CATALOGO_MS" arriba) ----
+  const cargasEnVueloRef = useRef([]); // [{ desde }]
+  const numeroDeCargaRef = useRef(0);
+  const ultimaCargaAplicadaRef = useRef(0);
+  const ultimaCargaBuenaRef = useRef(0); // cuándo llegó bien la última
+  const ultimoIntentoRef = useRef(0);
+  const marcaVistaRef = useRef(''); // la "marca de cambios" de lo que se ve
+  const servidorSinMarcaRef = useRef(false);
+  const revisandoDesdeRef = useRef(0);
+  const latidoRef = useRef(null);
+
   function cargarProductos() {
+    const enVuelo = { desde: Date.now() };
+    cargasEnVueloRef.current = cargasEnVueloRef.current.concat([enVuelo]);
+    ultimoIntentoRef.current = enVuelo.desde;
+    numeroDeCargaRef.current += 1;
+    const miNumero = numeroDeCargaRef.current;
     listarProductos(sucursalId)
       .then((data) => {
+        // Una respuesta que llega después de otra más nueva ya no se aplica.
+        if (miNumero < ultimaCargaAplicadaRef.current) return;
+        ultimaCargaAplicadaRef.current = miNumero;
+        ultimaCargaBuenaRef.current = Date.now();
+        marcaVistaRef.current = typeof data.marca === 'string' ? data.marca : '';
+        servidorSinMarcaRef.current = !marcaVistaRef.current;
         setProductos(data.productos);
         setSucursal(data.sucursal || null);
         setSucursalNoDisponible(!!data.sucursalNoDisponible);
@@ -428,17 +469,77 @@ export default function Catalog() {
           setError(err.message);
           return 'error';
         });
+      })
+      .finally(() => {
+        cargasEnVueloRef.current = cargasEnVueloRef.current.filter((x) => x !== enVuelo);
       });
   }
+
+  // Cada REVISION_CATALOGO_MS: decide si toca pedir algo (ver arriba).
+  function latido() {
+    if (typeof document !== 'undefined' && document.hidden) return;
+    const ahora = Date.now();
+    const esperaPorPerdida = ultimaCargaBuenaRef.current === 0 ? PETICION_PERDIDA_SIN_CATALOGO_MS : PETICION_PERDIDA_CATALOGO_MS;
+    if (cargasEnVueloRef.current.some((x) => ahora - x.desde < esperaPorPerdida)) return;
+    const desdeLaBuena = ahora - ultimaCargaBuenaRef.current;
+    // Todavía no hay catálogo en pantalla (la primera carga falló): se
+    // reintenta completo, sin encimar.
+    if (ultimaCargaBuenaRef.current === 0) {
+      if (ahora - ultimoIntentoRef.current >= REVISION_CATALOGO_MS) cargarProductos();
+      return;
+    }
+    if (servidorSinMarcaRef.current) {
+      if (desdeLaBuena >= RECARGA_SERVIDOR_VIEJO_MS) cargarProductos();
+      return;
+    }
+    if (desdeLaBuena >= RECARGA_COMPLETA_CATALOGO_MS) {
+      cargarProductos();
+      return;
+    }
+    if (revisandoDesdeRef.current > 0 && ahora - revisandoDesdeRef.current < 20000) return;
+    revisandoDesdeRef.current = ahora;
+    consultarMarcaDeCambios()
+      .then((r) => {
+        const marca = r && typeof r.marca === 'string' ? r.marca : '';
+        if (!marca) {
+          servidorSinMarcaRef.current = true;
+          return;
+        }
+        const yaHayCarga = cargasEnVueloRef.current.some((x) => Date.now() - x.desde < PETICION_PERDIDA_CATALOGO_MS);
+        if (marca !== marcaVistaRef.current && !yaHayCarga) cargarProductos();
+      })
+      .catch((err) => {
+        // Un servidor de antes contesta "Acción no reconocida".
+        if (err && err.datos && err.datos.error === 'Acción no reconocida') servidorSinMarcaRef.current = true;
+        // Otra falla (se fue la señal un momento): se pregunta otra vez en
+        // el siguiente latido; el catálogo que ya se veía no se toca.
+      })
+      .finally(() => {
+        if (revisandoDesdeRef.current === ahora) revisandoDesdeRef.current = 0;
+      });
+  }
+  latidoRef.current = latido;
 
   useEffect(() => {
     cargarProductos();
 
-    // Vuelve a pedir el catálogo cada 5 segundos, en segundo plano, para
-    // que si el administrador cambia el stock, oculta o edita un producto,
-    // los clientes lo vean reflejado solos sin tener que recargar la página.
-    const intervalo = setInterval(cargarProductos, 5000);
-    return () => clearInterval(intervalo);
+    // En segundo plano se revisa si hay algo nuevo, para que si el
+    // administrador cambia el stock, oculta o edita un producto, los
+    // clientes lo vean reflejado solos sin tener que recargar la página.
+    const intervalo = setInterval(() => {
+      if (latidoRef.current) latidoRef.current();
+    }, REVISION_CATALOGO_MS);
+    // Al volver a ver la página (por ejemplo, al regresar de WhatsApp) se
+    // revisa de una vez.
+    function alVolver() {
+      if (!document.hidden && latidoRef.current) latidoRef.current();
+    }
+    document.addEventListener('visibilitychange', alVolver);
+    return () => {
+      clearInterval(intervalo);
+      document.removeEventListener('visibilitychange', alVolver);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ---- Carrito con varios productos ----
