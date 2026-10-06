@@ -139,6 +139,17 @@ export function cargarPanelCompleto(sesionToken) {
   return get('cargarPanelCompleto', { sesionToken });
 }
 
+// "¿Hay algo nuevo?" (2026-10-06). Antes el panel pedía TODO cada 6 segundos
+// y el catálogo cada 5, hubiera cambios o no; con varias pantallas abiertas
+// eso mantenía al servidor ocupado y todo se volvía lento. Ahora preguntan
+// solo por la "marca de cambios" (el servidor la contesta casi al instante,
+// sin abrir la hoja de cálculo) y piden los datos completos únicamente
+// cuando la marca cambió. Un servidor de antes no conoce esta pregunta y
+// contesta "Acción no reconocida": quien llama lo detecta y sigue como antes.
+export function consultarMarcaDeCambios() {
+  return get('marcaDeCambios');
+}
+
 export function listarProductosAdmin(sesionToken) {
   return get('listarProductosAdmin', { sesionToken });
 }
