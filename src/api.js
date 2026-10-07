@@ -174,6 +174,17 @@ export function actualizarPedido({ sesionToken, pedidoId, estado, cantidad, tele
   return post({ action: 'actualizarPedido', sesionToken, pedidoId, estado, cantidad, telefono, notas, montoReembolso });
 }
 
+// Guarda VARIOS pedidos de un jalón (2026-10-06): los renglones de un mismo
+// pedido de varios productos. "cambios" es una lista de
+// { pedidoId, estado, cantidad, telefono, notas, montoReembolso }. El
+// servidor los guarda uno tras otro en una sola petición y contesta, por
+// cada uno, si se guardó o por qué no ("resultados"). Un servidor de antes
+// no conoce esta acción ("Acción no reconocida"): quien llama los guarda
+// entonces uno por uno, como siempre.
+export function actualizarPedidosJuntos({ sesionToken, cambios }) {
+  return post({ action: 'actualizarPedidosJuntos', sesionToken, cambios });
+}
+
 // ---- Movimientos (abonos y cargos) para el "Estado de cuenta" ----
 // Solo lo puede ver un Administrador (el backend lo revisa también).
 export function listarMovimientos(sesionToken) {
