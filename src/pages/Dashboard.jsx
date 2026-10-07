@@ -14,6 +14,7 @@ import {
   eliminarOpcion,
   actualizarStock,
   actualizarPedido,
+  actualizarPedidosJuntos,
   crearProducto,
   actualizarProducto,
   cambiarDisponibilidad,
@@ -474,6 +475,77 @@ const SIGUIENTE_ESTADO_VALIDO_PEDIDO = {
   Cancelado: ['Cancelado', 'En proceso'],
   Reembolsado: ['Reembolsado'],
 };
+
+// ---- Pedidos de hoy, pedidos nuevos y pedidos de varios productos (2026-10-06) ----
+// ¿La fecha es de HOY (día del calendario de quien mira el panel)?
+function esFechaDeHoy(valor) {
+  if (!valor) return false;
+  const fecha = new Date(valor);
+  if (Number.isNaN(fecha.getTime())) return false;
+  const hoy = new Date();
+  return fecha.getFullYear() === hoy.getFullYear() && fecha.getMonth() === hoy.getMonth() && fecha.getDate() === hoy.getDate();
+}
+
+// Cuándo se hizo un pedido, en milisegundos (0 si no tiene fecha legible).
+function momentoDelPedido(pedido) {
+  const ms = pedido && pedido.Fecha ? new Date(pedido.Fecha).getTime() : NaN;
+  return Number.isNaN(ms) ? 0 : ms;
+}
+
+// Cuando una clienta pide varios productos en el mismo pedido (el carrito
+// del catálogo), cada producto queda en su propio renglón, todos con la
+// misma fecha y hora. Aquí se juntan: mismos datos de clienta (teléfono; si
+// no tiene, nombre), mismo catálogo (Global o la misma sucursal) y hechos
+// con menos de SEGUNDOS_MISMO_PEDIDO de diferencia uno del siguiente.
+// Regresa { porPedidoId: { id: compra }, compras: { clave: compra } }, donde
+// compra = { clave, ids: [...], cliente }. Solo salen las de 2 o más renglones.
+const SEGUNDOS_MISMO_PEDIDO = 90;
+function juntarPedidosDeVariosProductos(pedidos) {
+  const porClienta = {};
+  pedidos.forEach((ped) => {
+    const momento = momentoDelPedido(ped);
+    if (!momento) return;
+    const telefono = String(ped.Telefono === null || ped.Telefono === undefined ? '' : ped.Telefono).replace(/\D/g, '');
+    const nombre = String(ped.Cliente || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    const quien = telefono.length >= 7 ? `t:${telefono.slice(-10)}` : (nombre ? `n:${nombre}` : '');
+    if (!quien) return;
+    const llave = `${quien}|${String(ped.Sucursal || '').trim()}`;
+    if (!porClienta[llave]) porClienta[llave] = [];
+    porClienta[llave].push({ ped, momento });
+  });
+  const porPedidoId = {};
+  const compras = {};
+  Object.keys(porClienta).forEach((llave) => {
+    const lista = porClienta[llave].sort((a, b) => a.momento - b.momento);
+    let grupo = [];
+    const cerrar = () => {
+      if (grupo.length >= 2) {
+        const compra = {
+          clave: `${llave}|${grupo[0].momento}`,
+          ids: grupo.map((x) => String(x.ped.ID)),
+          cliente: String(grupo[0].ped.Cliente || '').trim() || 'Cliente sin nombre',
+        };
+        compras[compra.clave] = compra;
+        compra.ids.forEach((id) => { porPedidoId[id] = compra; });
+      }
+      grupo = [];
+    };
+    lista.forEach((x) => {
+      if (grupo.length > 0 && x.momento - grupo[grupo.length - 1].momento > SEGUNDOS_MISMO_PEDIDO * 1000) cerrar();
+      grupo.push(x);
+    });
+    cerrar();
+  });
+  return { porPedidoId, compras };
+}
+
+// Hasta qué pedido ya vio esta persona la pestaña Pedidos (se guarda en el
+// navegador, por cuenta): lo más nuevo que había la última vez que entró.
+const LLAVE_PEDIDOS_VISTOS = 'pyme_pedidos_vistos_';
+// Las alertas que esta persona ya vio (por cuenta, en este navegador).
+const LLAVE_ALERTAS_VISTAS = 'pyme_alertas_vistas_';
+// Cuánto dura el destello amarillo de un pedido nuevo (2 pasadas).
+const DURACION_DESTELLO_PEDIDO_MS = 3800;
 
 // Si el Estado guardado no es ninguno de los 5 conocidos (dato viejo o
 // atípico), se muestran los 5 sin restringir — mismo respaldo que ya usa
@@ -995,6 +1067,82 @@ export default function Dashboard() {
   // desde el aviso de una solicitud de reembolso en Alertas).
   const [pedidoResaltadoId, setPedidoResaltadoId] = useState(null);
 
+  // ---- Pedidos (2026-10-06, pedido por Claudia) ----
+  // Pedidos que en este momento hacen el "destello" amarillo: los nuevos que
+  // todavía no se habían visto, y los de un ticket al dar "Mostrar en pedidos".
+  const [pedidosConDestello, setPedidosConDestello] = useState(() => new Set());
+  // El pedido de varios productos que se está atendiendo (se tocó uno de sus
+  // renglones): su clave, o null. Ver "juntarPedidosDeVariosProductos".
+  const [compraActivaClave, setCompraActivaClave] = useState(null);
+  // "Estatus para todos": cada vez que se elige uno, cambia la ficha y los
+  // renglones de ese pedido ponen ese estatus en su propio menú (los que
+  // pueden). estado null = regresar cada renglón a como está guardado.
+  const [ordenGeneralDeCompra, setOrdenGeneralDeCompra] = useState({ ficha: 0, clave: null, estado: null });
+  const [guardandoCompra, setGuardandoCompra] = useState(false);
+  // Pedidos que se están guardando EN ESTE MOMENTO (por su propio "Guardar"
+  // o de un jalón): para no mandar el mismo dos veces.
+  const [pedidosGuardandose, setPedidosGuardandose] = useState(() => new Set());
+  const pedidosGuardandoseRef = useRef(new Set());
+  function marcarGuardandose(ids, guardando) {
+    const siguiente = new Set(pedidosGuardandoseRef.current);
+    ids.forEach((id) => { if (guardando) siguiente.add(String(id)); else siguiente.delete(String(id)); });
+    pedidosGuardandoseRef.current = siguiente;
+    setPedidosGuardandose(siguiente);
+  }
+  // Deja sin efecto el "Estatus para todos" que se hubiera elegido (se llama
+  // cada vez que ese pedido deja de estarse atendiendo: se cierra su
+  // barrita, se toca otro pedido, se cancelan los cambios, se cambia de
+  // pestaña o de cuenta). Así una orden vieja nunca se aplica después.
+  function soltarEstatusParaTodos() {
+    setOrdenGeneralDeCompra((antes) => (antes.clave === null ? antes : { ficha: antes.ficha, clave: null, estado: null }));
+  }
+  // true mientras la pestaña del navegador está a la vista (un pedido o una
+  // alerta no cuentan como "vistos" si llegaron con el panel en segundo plano).
+  const [paginaALaVista, setPaginaALaVista] = useState(() => typeof document === 'undefined' || !document.hidden);
+  useEffect(() => {
+    function alCambiar() {
+      setPaginaALaVista(!document.hidden);
+    }
+    document.addEventListener('visibilitychange', alCambiar);
+    return () => document.removeEventListener('visibilitychange', alCambiar);
+  }, []);
+  // Lo ya visto, por si el navegador no deja guardar nada (modo privado,
+  // almacenamiento lleno): se recuerda mientras la pestaña siga abierta.
+  const vistosEnMemoriaRef = useRef({});
+  // Sucursales que ya no pueden atender sus propios pedidos (lo manda el
+  // servidor). null = servidor de antes, que todavía no aplica el candado
+  // de sucursal.
+  const [sucursalesQueNoAtienden, setSucursalesQueNoAtienden] = useState(null);
+  // Para no volver a juntar los pedidos de varios productos en cada dibujo.
+  const comprasMemoRef = useRef({ pedidos: null, valor: null });
+  // Puntito rojo de las pestañas (2026-10-06, Claudia): cuántos pedidos
+  // nuevos hay sin ver, y si hay alertas sin ver. "Ver" = abrir su pestaña.
+  const [pedidosSinVer, setPedidosSinVer] = useState(0);
+  const [hayAlertasSinVer, setHayAlertasSinVer] = useState(false);
+  // Cada renglón de Pedidos deja aquí cómo leer lo que tiene escrito (para
+  // poder guardar varios con un solo botón): { idDelPedido: () => datos }.
+  const pendientesDePedidosRef = useRef({});
+  function registrarPendienteDePedido(pedidoId, leer) {
+    if (leer) pendientesDePedidosRef.current[String(pedidoId)] = leer;
+    else delete pendientesDePedidosRef.current[String(pedidoId)];
+  }
+  const destellosRef = useRef([]);
+  function destellarPedidos(ids) {
+    const lista = (ids || []).map(String);
+    if (lista.length === 0) return;
+    setPedidosConDestello((antes) => new Set([...antes, ...lista]));
+    const reloj = setTimeout(() => {
+      setPedidosConDestello((antes) => {
+        const siguiente = new Set(antes);
+        lista.forEach((id) => siguiente.delete(id));
+        return siguiente;
+      });
+      destellosRef.current = destellosRef.current.filter((otro) => otro !== reloj);
+    }, DURACION_DESTELLO_PEDIDO_MS);
+    destellosRef.current.push(reloj);
+  }
+  useEffect(() => () => { destellosRef.current.forEach((reloj) => clearTimeout(reloj)); }, []);
+
   // 'todo' muestra el stock completo (con el dueño de cada quien); 'mio'
   // filtra solo los productos donde yo tengo algo asignado.
   const [filtroStockPersonal, setFiltroStockPersonal] = useState('todo');
@@ -1215,6 +1363,7 @@ export default function Dashboard() {
   }
 
   function cancelarCambios() {
+    soltarEstatusParaTodos();
     setResetToken((t) => t + 1);
     setSinGuardar(new Map());
   }
@@ -1337,6 +1486,7 @@ export default function Dashboard() {
         setPapelera(r.papelera || []);
         if (r.papeleraDias) setPapeleraDias(r.papeleraDias);
         setSucursales(r.sucursales || []);
+        setSucursalesQueNoAtienden(Array.isArray(r.sucursalesQueNoAtienden) ? r.sucursalesQueNoAtienden.map(String) : null);
         // Si la parte de tickets falló en el servidor ("errorTickets"), se
         // conserva lo que ya se tenía en vez de vaciar la pestaña.
         if (!r.errorTickets) {
@@ -1472,6 +1622,124 @@ export default function Dashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autenticado]);
 
+  // ---- Lo que ya se vio (pedidos y alertas), por cuenta, en este navegador ----
+  function leerVistos(llave) {
+    // Si la última vez no se pudo guardar en el navegador, vale lo que se
+    // recuerda en esta pestaña (lo guardado estaría atrasado).
+    if (vistosEnMemoriaRef.current[`${llave}:sinGuardar`]) return vistosEnMemoriaRef.current[llave] || null;
+    try {
+      const guardado = JSON.parse(window.localStorage.getItem(llave) || 'null');
+      if (guardado !== null && typeof guardado === 'object') return guardado;
+    } catch {
+      // Sin almacenamiento: vale lo que se recuerde mientras la pestaña siga abierta.
+    }
+    return vistosEnMemoriaRef.current[llave] || null;
+  }
+  function guardarVistos(llave, valor) {
+    vistosEnMemoriaRef.current[llave] = valor;
+    try {
+      window.localStorage.setItem(llave, JSON.stringify(valor));
+      vistosEnMemoriaRef.current[`${llave}:sinGuardar`] = false;
+    } catch {
+      // Ya quedó en memoria (ver "leerVistos").
+      vistosEnMemoriaRef.current[`${llave}:sinGuardar`] = true;
+    }
+  }
+
+  // Pedidos NUEVOS sin ver (2026-10-06, pedido por Claudia). Un pedido se
+  // "ve" cuando su renglón sale en la tabla de Pedidos con la pestaña del
+  // navegador a la vista. Mientras no se haya visto, la pestaña Pedidos lleva
+  // un puntito rojo; en cuanto se ve, hace su destello amarillo (dos
+  // pasadas, de izquierda a derecha) y ya cuenta como visto: ni el puntito
+  // ni el destello vuelven a salir por él. Si un filtro lo tiene escondido,
+  // sigue contando como "sin ver" hasta que de verdad aparezca.
+  // Se guarda: hasta qué fecha se conocen los pedidos ("hasta"), cuáles son
+  // de esa misma fecha ("enLaMarca": un carrito anota todos sus renglones
+  // con la misma fecha y hora) y cuáles siguen sin verse ("sinVer"). La
+  // primera vez, todo lo que ya había cuenta como visto.
+  useEffect(() => {
+    if (!autenticado || !panelYaCargo || !usuarioId || !permisos.pedidos) {
+      setPedidosSinVer(0);
+      return;
+    }
+    const llave = LLAVE_PEDIDOS_VISTOS + usuarioId;
+    const guardado = leerVistos(llave);
+    const masNuevo = pedidos.reduce((mayor, ped) => Math.max(mayor, momentoDelPedido(ped)), 0);
+    const idsDeEseMomento = (ms) => pedidos.filter((ped) => momentoDelPedido(ped) === ms).map((ped) => String(ped.ID));
+    if (!guardado || typeof guardado.hasta !== 'number') {
+      guardarVistos(llave, { hasta: masNuevo, enLaMarca: idsDeEseMomento(masNuevo), sinVer: [] });
+      setPedidosSinVer(0);
+      return;
+    }
+    const queExisten = new Set(pedidos.map((ped) => String(ped.ID)));
+    const enLaMarca = new Set((Array.isArray(guardado.enLaMarca) ? guardado.enLaMarca : []).map(String));
+    const sinVer = (Array.isArray(guardado.sinVer) ? guardado.sinVer : []).map(String).filter((id) => queExisten.has(id));
+    pedidos.forEach((ped) => {
+      const momento = momentoDelPedido(ped);
+      const id = String(ped.ID);
+      if (!momento) return;
+      if ((momento > guardado.hasta || (momento === guardado.hasta && !enLaMarca.has(id))) && !sinVer.includes(id)) sinVer.push(id);
+    });
+    let quedan = sinVer;
+    if (tab === 'pedidos' && paginaALaVista && sinVer.length > 0) {
+      // Los que de verdad están dibujados en la tabla en este momento.
+      const vistosAhora = sinVer.filter((id) => !!document.getElementById(`pedido-fila-${id}`));
+      if (vistosAhora.length > 0) {
+        destellarPedidos(vistosAhora);
+        quedan = sinVer.filter((id) => !vistosAhora.includes(id));
+      }
+    }
+    const hasta = Math.max(guardado.hasta, masNuevo);
+    const siguiente = { hasta, enLaMarca: idsDeEseMomento(hasta), sinVer: quedan };
+    if (JSON.stringify(siguiente) !== JSON.stringify(guardado)) guardarVistos(llave, siguiente);
+    setPedidosSinVer(quedan.length);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    autenticado, panelYaCargo, usuarioId, tab, pedidos, paginaALaVista, permisos.pedidos,
+    filtroEstado, filtroPedidoDesde, filtroPedidoHasta, filtroPedidoDueno, filtroPedidosDeTicket, limiteFilasPedidos,
+  ]);
+
+  // Alertas sin ver (2026-10-06, Claudia: "lo mismo en Alertas, solo si
+  // están sin ver; si ya los viste ya no deben salir"). Cada alerta tiene su
+  // clave; al abrir la pestaña Alertas (con el navegador a la vista) todas
+  // las que hay quedan vistas. Una alerta que desaparece y vuelve a salir
+  // cuenta otra vez como nueva. Las solicitudes que uno mismo mandó ("en
+  // proceso") no cuentan: ya las conoce.
+  const clavesDeAlertas = []
+    .concat(alertas.map((x) => `bajo:${x.ID}`))
+    .concat(transferenciasPendientes.map((x) => `tp:${x.ID}`))
+    .concat(transferenciasResueltas.map((x) => `tr:${x.ID}`))
+    .concat(transferenciasAplicadas.map((x) => `ta:${x.ID}`))
+    .concat(solicitudesReembolsoPendientes.filter((x) => String(x.SolicitanteID) !== String(usuarioId)).map((x) => `rp:${x.ID}`))
+    .concat(solicitudesReembolsoResueltas.map((x) => `rr:${x.ID}`));
+  const textoDeClavesDeAlertas = clavesDeAlertas.join('|');
+  useEffect(() => {
+    if (!autenticado || !panelYaCargo || !usuarioId || !permisos.alertas) {
+      setHayAlertasSinVer(false);
+      return;
+    }
+    const llave = LLAVE_ALERTAS_VISTAS + usuarioId;
+    const guardado = leerVistos(llave);
+    const vistas = guardado && Array.isArray(guardado.claves) ? guardado.claves.map(String) : null;
+    const actuales = textoDeClavesDeAlertas ? textoDeClavesDeAlertas.split('|') : [];
+    // La primera vez, y cada vez que se está VIENDO la pestaña Alertas: todo
+    // lo que hay queda visto. Si no: se olvidan las que ya no existen.
+    const viendolas = tab === 'alertas' && paginaALaVista;
+    const quedan = vistas === null || viendolas ? actuales : vistas.filter((clave) => actuales.includes(clave));
+    if (vistas === null || quedan.join('|') !== vistas.join('|')) guardarVistos(llave, { claves: quedan });
+    setHayAlertasSinVer(!viendolas && actuales.some((clave) => !quedan.includes(clave)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autenticado, panelYaCargo, usuarioId, tab, textoDeClavesDeAlertas, paginaALaVista, permisos.alertas]);
+
+  // Al salir de Pedidos se suelta el pedido de varios productos que se
+  // estaba atendiendo.
+  useEffect(() => {
+    if (tab !== 'pedidos') {
+      setCompraActivaClave(null);
+      soltarEstatusParaTodos();
+    }
+  }, [tab]);
+
   // Refresco automático en segundo plano: así los pedidos nuevos y los
   // cambios de stock se ven casi al instante, sin tener que darle
   // "Actualizar" a mano. Se pausa si hay cambios sin guardar o si está
@@ -1583,7 +1851,12 @@ export default function Dashboard() {
   useEffect(() => {
     alTerminarTarde_ = (etiqueta, salioBien, dato) => {
       if (!autenticado) return;
-      if (salioBien) {
+      if (salioBien && dato && Array.isArray(dato.resultados)) {
+        // El guardado de varios pedidos de un jalón.
+        pintarGuardadoJunto(dato.resultados);
+        soltarEstatusParaTodos();
+        setMensaje(`El servidor tardó en contestar, pero ya contestó. ${resumenDeGuardadoJunto(dato.resultados, 'esa clienta')}`);
+      } else if (salioBien) {
         setMensaje(dato && dato.solicitudReembolsoCreada
           ? '✓ Tu solicitud de reembolso sí se envió al Administrador: el servidor tardó en contestar, pero ya quedó. No hace falta repetirla.'
           : `✓ "${etiqueta}" sí se guardó: el servidor tardó en contestar, pero el cambio ya quedó. No hace falta repetirlo.`);
@@ -1670,6 +1943,10 @@ export default function Dashboard() {
     function handleLogout() {
            sesionIdRef.current += 1;
     numeroDeSesion_ += 1;
+    soltarEstatusParaTodos();
+    setCompraActivaClave(null);
+    setSucursalesQueNoAtienden(null);
+    marcarGuardandose(Array.from(pedidosGuardandoseRef.current), false);
     cargaNecesariaRef.current = 0;
     marcaVistaRef.current = '';
     servidorSinMarcaRef.current = false;
@@ -1794,6 +2071,7 @@ export default function Dashboard() {
   }
 
   function handleGuardarPedido(pedidoId, { cantidad, telefono, notas, estado, montoReembolso }) {
+    marcarGuardandose([pedidoId], true);
     iniciarCarga();
     return conLimiteDeTiempo(
       actualizarPedido({ sesionToken, pedidoId, cantidad, telefono, notas, estado, montoReembolso }),
@@ -1838,7 +2116,10 @@ export default function Dashboard() {
         }
       })
       .catch((err) => setMensaje(`Error al actualizar pedido: ${conEtiquetasDeEstado(err.message)}`))
-      .finally(terminarCarga);
+      .finally(() => {
+        marcarGuardandose([pedidoId], false);
+        terminarCarga();
+      });
   }
 
   // ---- Tickets (2026-10-06) ----
@@ -1925,6 +2206,8 @@ export default function Dashboard() {
     }
     setTicketAbiertoId(null);
     setFiltroPedidosDeTicket({ folio: ticket.Folio, ids: new Set((ticket.PedidoIDs || []).map(String)) });
+    // …y se iluminan (2026-10-06), para ubicarlos de un vistazo.
+    destellarPedidos(ticket.PedidoIDs || []);
     setFiltroEstado('');
     setFiltroPedidoDesde('');
     setFiltroPedidoHasta('');
@@ -2574,6 +2857,189 @@ export default function Dashboard() {
     (ped) => sinGuardar.has(`pedido:${ped.ID}`) || String(ped.ID) === String(pedidoFijadoId)
   );
 
+  // ---- Pedido de varios productos (2026-10-06) ----
+  // Al tocar un renglón que es parte de un pedido de varios productos, los
+  // demás renglones de ese pedido se iluminan y sale una barrita para
+  // cambiarles el estatus a todos y guardarlos con un solo botón. Cada
+  // renglón conserva su propio menú y su propio "Guardar".
+  if (comprasMemoRef.current.pedidos !== pedidos) {
+    comprasMemoRef.current = { pedidos, valor: juntarPedidosDeVariosProductos(pedidos) };
+  }
+  const comprasDePedidos = comprasMemoRef.current.valor;
+  // ¿Hay algún pedido de varios productos a la vista? (Para dejarle su
+  // lugar a la barrita aunque todavía no se haya tocado ninguno.)
+  const hayComprasALaVista = pedidosVisibles.some((ped) => !!comprasDePedidos.porPedidoId[String(ped.ID)]);
+  const compraActiva = compraActivaClave ? comprasDePedidos.compras[compraActivaClave] || null : null;
+  const idsDeCompraActiva = compraActiva ? new Set(compraActiva.ids) : null;
+  const filasDeCompraActiva = compraActiva ? pedidosVisibles.filter((ped) => idsDeCompraActiva.has(String(ped.ID))) : [];
+  const fueraDeVistaDeCompra = compraActiva ? compraActiva.ids.length - filasDeCompraActiva.length : 0;
+  const totalDeCompraActiva = filasDeCompraActiva.reduce((suma, ped) => suma + (Number(ped.Precio) || 0) * (Number(ped.Cantidad) || 0), 0);
+  const conCambiosEnCompra = filasDeCompraActiva.filter((ped) => sinGuardar.has(`pedido:${ped.ID}`));
+  // Los estatus que se le pueden poner "a todos": cualquiera que sea el paso
+  // siguiente de al menos un renglón (cada renglón solo lo toma si le toca).
+  // "Reembolsado" no: lleva un monto por pedido, se hace uno por uno.
+  const estatusParaTodos = ESTADOS_PEDIDO.filter((opcion) => opcion !== 'Reembolsado' && filasDeCompraActiva.some((ped) => (
+    estadoCanonicoPedido(ped.Estado) !== opcion && opcionesEstadoPedido(ped.Estado).includes(opcion)
+  )));
+  const estatusGeneralElegido = compraActiva && ordenGeneralDeCompra.clave === compraActiva.clave && ordenGeneralDeCompra.estado
+    ? ordenGeneralDeCompra.estado
+    : '';
+
+  // Candado de SUCURSAL (2026-10-07, regla de Claudia): un pedido que llegó
+  // por el catálogo de una persona solo lo puede atender ESA persona — ni el
+  // Admin Central ni quien tenga el permiso de saltarse el candado. (El
+  // servidor es quien manda; aquí solo se deja de ofrecer "Desbloquear".)
+  // Única salida: si esa persona ya no existe, está inhabilitada o ya no
+  // tiene la pestaña Pedidos (el servidor avisa cuáles, en
+  // "sucursalesQueNoAtienden"), vuelve a valer el candado normal, para que
+  // el pedido no se quede atorado.
+  function pedidoEsSoloDeOtraSucursal(ped) {
+    // Un servidor de antes (no manda la lista) todavía no aplica esta regla.
+    if (sucursalesQueNoAtienden === null) return false;
+    const idSucursal = String(ped.Sucursal || '').trim();
+    if (!idSucursal || idSucursal === String(usuarioId)) return false;
+    return !sucursalesQueNoAtienden.includes(idSucursal);
+  }
+
+  function alTocarFilaDePedido(e) {
+    marcarFilaActiva(e);
+    const fila = e.target && e.target.closest ? e.target.closest('tr') : null;
+    if (!fila || fila.parentElement !== e.currentTarget) return;
+    const compra = comprasDePedidos.porPedidoId[String(fila.getAttribute('data-pedido-id') || '')];
+    const clave = compra ? compra.clave : null;
+    if (clave !== compraActivaClave) {
+      // Se cambió de pedido: lo que se hubiera elegido en "Estatus para
+      // todos" para el anterior ya no vale.
+      soltarEstatusParaTodos();
+      setCompraActivaClave(clave);
+    }
+  }
+  function cerrarCompraActiva() {
+    soltarEstatusParaTodos();
+    setCompraActivaClave(null);
+  }
+
+  function elegirEstatusParaTodos(estadoElegido) {
+    if (!compraActiva) return;
+    setOrdenGeneralDeCompra((antes) => ({ ficha: antes.ficha + 1, clave: compraActiva.clave, estado: estadoElegido || null }));
+  }
+
+  // En palabras, cómo salió el guardado de varios pedidos.
+  function resumenDeGuardadoJunto(resultados, cliente) {
+    const bien = resultados.filter((r) => r.ok);
+    const mal = resultados.filter((r) => !r.ok);
+    const nombreDe = (id) => {
+      const ped = pedidos.find((x) => String(x.ID) === String(id));
+      return ped ? String(ped.Producto || 'un producto') : 'un producto';
+    };
+    const partes = [];
+    if (mal.length === 0) {
+      partes.push(bien.length === 1
+        ? `✓ Se guardó el producto del pedido de ${cliente}.`
+        : `✓ Se guardaron los ${bien.length} productos del pedido de ${cliente}.`);
+    } else if (bien.length === 0) {
+      partes.push(`Error: no se guardó ningún producto del pedido de ${cliente}.`);
+    } else {
+      partes.push(`Se guardaron ${bien.length} de ${resultados.length} productos del pedido de ${cliente}.`);
+    }
+    if (mal.length > 0) {
+      partes.push(`No se guardó: ${mal.map((r) => `${nombreDe(r.pedidoId)} — ${conEtiquetasDeEstado(r.error || 'el servidor lo rechazó')}`).join(' · ')}`);
+    }
+    if (bien.some((r) => r.solicitudReembolsoCreada)) {
+      partes.push('La solicitud de reembolso se envió al Administrador.');
+    }
+    const folios = [];
+    bien.forEach((r) => (r.ticketsCreados || []).forEach((folio) => { if (!folios.includes(folio)) folios.push(folio); }));
+    const enEspera = bien.reduce((mayor, r) => Math.max(mayor, Number(r.ticketEnEspera) || 0), 0);
+    if (folios.length > 0) partes.push(`🎫 Se generó solo el ticket ${folios.join(', ')} (modo automático).`);
+    else if (enEspera > 0) partes.push(`⏳ El ticket saldrá solo cuando se resuelva${enEspera === 1 ? '' : 'n'} ${enEspera === 1 ? 'el otro pedido' : `los otros ${enEspera} pedidos`} de esta compra.`);
+    return partes.join(' ');
+  }
+
+  // Pinta lo que sí se guardó; regresa true si además hace falta esperar la
+  // recarga (solicitud de reembolso o "Reembolsado": dependen de ella).
+  function pintarGuardadoJunto(resultados) {
+    let faltaRecarga = false;
+    (resultados || []).forEach((r) => {
+      if (!r || !r.ok) return;
+      if (r.pedido && !r.solicitudReembolsoCreada && r.pedido.Estado !== 'Reembolsado') pintarPedidoGuardado(r.pedido);
+      else faltaRecarga = true;
+    });
+    return faltaRecarga;
+  }
+
+  // "Guardar de un jalón": manda, en una sola petición, todos los renglones
+  // de este pedido que tienen cambios, cada uno con lo que tiene escrito.
+  function handleGuardarCompra() {
+    if (!compraActiva || guardandoCompra) return undefined;
+    const cambios = [];
+    const sinMonto = [];
+    conCambiosEnCompra.forEach((ped) => {
+      // Uno que ya se está guardando con su propio botón no se manda otra vez.
+      if (pedidosGuardandoseRef.current.has(String(ped.ID))) return;
+      const leer = pendientesDePedidosRef.current[String(ped.ID)];
+      const dato = leer ? leer() : null;
+      if (!dato) return;
+      if (!dato.listo) {
+        sinMonto.push(String(ped.Producto || 'un producto'));
+        return;
+      }
+      cambios.push({ pedidoId: ped.ID, ...dato.cambio });
+    });
+    if (cambios.length === 0) {
+      setMensaje(sinMonto.length > 0
+        ? `Falta escribir el monto a reembolsar en: ${sinMonto.join(', ')}.`
+        : 'Este pedido no tiene cambios que guardar.');
+      return undefined;
+    }
+    const cliente = compraActiva.cliente;
+    const idsDelLote = cambios.map((c) => String(c.pedidoId));
+    setMensaje('');
+    setGuardandoCompra(true);
+    marcarGuardandose(idsDelLote, true);
+    iniciarCarga();
+    return conLimiteDeTiempo(actualizarPedidosJuntos({ sesionToken, cambios }), 'Guardar pedido completo', { ms: TIEMPO_MAXIMO_CARGA_INICIAL_MS })
+      .catch((err) => {
+        // Un servidor de antes no sabe guardar varios de un jalón: se
+        // guardan uno por uno, como siempre.
+        if (!(err && err.datos && err.datos.error === 'Acción no reconocida')) throw err;
+        return cambios
+          .reduce((cadena, cambio) => cadena.then((hechos) => (
+            conLimiteDeTiempo(actualizarPedido({ sesionToken, ...cambio }), 'Actualizar pedido').then(
+              (r) => hechos.concat([{
+                pedidoId: String(cambio.pedidoId), ok: true, error: '', pedido: r.pedido || null,
+                solicitudReembolsoCreada: !!r.solicitudReembolsoCreada, ticketsCreados: r.ticketsCreados || [], ticketEnEspera: r.ticketEnEspera || 0,
+              }]),
+              (errUno) => hechos.concat([{ pedidoId: String(cambio.pedidoId), ok: false, error: errUno.message || 'No se pudo guardar' }])
+            )
+          )), Promise.resolve([]))
+          .then((resultados) => ({ ok: true, resultados, deUnoPorUno: true }));
+      })
+      .then((res) => {
+        const resultados = Array.isArray(res.resultados) ? res.resultados : [];
+        // Con un servidor de antes no llega cómo quedó cada pedido: se espera la recarga.
+        const faltaRecarga = pintarGuardadoJunto(resultados) || !!res.deUnoPorUno;
+        const recarga = cargarTodo(sesionToken, { silencioso: true, sinAviso: !faltaRecarga });
+        return (faltaRecarga ? recarga : Promise.resolve()).then(() => resultados);
+      })
+      .then((resultados) => {
+        setMensaje(resumenDeGuardadoJunto(resultados, cliente));
+        if (sinMonto.length > 0) {
+          setMensaje((previo) => `${previo} Falta escribir el monto a reembolsar en: ${sinMonto.join(', ')}.`);
+        }
+        // Lo elegido en "Estatus para todos" ya se usó: el menú de la
+        // barrita vuelve a "— elegir —" (los renglones que no se guardaron
+        // conservan lo que tienen escrito).
+        soltarEstatusParaTodos();
+      })
+      .catch((err) => setMensaje(`Error al guardar el pedido completo: ${conEtiquetasDeEstado(err.message)}`))
+      .finally(() => {
+        setGuardandoCompra(false);
+        marcarGuardandose(idsDelLote, false);
+        terminarCarga();
+      });
+  }
+
   const filtroPedidoFechaActivo = !!(filtroPedidoDesde || filtroPedidoHasta);
 
   function limpiarFiltroPedidoFecha() {
@@ -2922,11 +3388,16 @@ export default function Dashboard() {
       {(() => {
         const todas = [
           { clave: 'stock', texto: 'Stock', visible: puedeVer('stock') },
-          { clave: 'pedidos', texto: `Pedidos (${pedidos.length})`, visible: puedeVer('pedidos') },
+          {
+            clave: 'pedidos', texto: `Pedidos (${pedidos.length})`, visible: puedeVer('pedidos'),
+            punto: pedidosSinVer > 0
+              ? `${pedidosSinVer} pedido${pedidosSinVer === 1 ? ' nuevo' : 's nuevos'} sin ver${tab === 'pedidos' ? ' (no se ve' + (pedidosSinVer === 1 ? '' : 'n') + ' en la tabla: revisa los filtros o cuántos renglones se muestran)' : ''}`
+              : '',
+          },
           // 2026-10-06: tickets de los pedidos pagados. Solo sale si el
           // servidor ya la conoce (manda su permiso).
           { clave: 'tickets', texto: '🎫 Tickets', visible: puedeVerTickets },
-          { clave: 'alertas', texto: `Alertas (${conteoAlertasPestana})`, visible: puedeVer('alertas') },
+          { clave: 'alertas', texto: `Alertas (${conteoAlertasPestana})`, visible: puedeVer('alertas'), punto: hayAlertasSinVer ? 'Hay alertas nuevas sin ver' : '' },
           { clave: 'cuenta', texto: '📄 Estado de cuenta', visible: puedeVer('cuenta') },
           { clave: 'bitacora', texto: '🗒️ Bitácora', visible: puedeVer('bitacora') },
           // 2026-10-05: historial de entradas y salidas de piezas. Solo sale
@@ -2992,6 +3463,9 @@ export default function Dashboard() {
               ) : (
                 <button key={p.clave} className={tab === p.clave ? 'active' : ''} onClick={() => cambiarTab(p.clave)}>
                   {p.texto}
+                  {/* (2026-10-06) Puntito rojo: hay algo nuevo sin ver ahí.
+                      Se quita al abrir la pestaña. */}
+                  {p.punto ? <span className="tab-punto" title={p.punto} aria-label={p.punto} data-tab-punto={p.clave} /> : null}
                 </button>
               )
             )}
@@ -3420,6 +3894,83 @@ export default function Dashboard() {
             ))}
           </div>
 
+          {/* Pedido de varios productos (2026-10-06). La barrita tiene su
+              lugar apartado arriba de la tabla siempre que hay algún pedido
+              de varios productos a la vista, y mide SIEMPRE lo mismo (título
+              en un renglón, controles en otro, nota en otro): así, al tocar
+              un renglón la tabla no se mueve ni un pixel (si se moviera, el
+              clic que se estaba dando caería en otro lado) y la barrita
+              nunca tapa nada. Sin tocar nada, explica para qué es el 🧺. */}
+          {(hayComprasALaVista || compraActiva) && (() => {
+            const activa = !!compraActiva && filasDeCompraActiva.length >= 2;
+            if (!activa) {
+              return (
+                <div className="compra-barra compra-barra-reposo" data-compra-reposo>
+                  <span className="compra-barra-titulo">🧺 Pedidos de varios productos</span>
+                  <span className="compra-barra-controles" aria-hidden="true" />
+                  <span className="compra-barra-nota">Toca un renglón con 🧺 para iluminar todo ese pedido, cambiarle el estatus a todos sus productos y guardarlos de un jalón.</span>
+                </div>
+              );
+            }
+            const sinCambiar = filasDeCompraActiva.length - conCambiosEnCompra.length;
+            const notas = [];
+            if (estatusParaTodos.length === 0) notas.push('Estos productos ya no tienen un estatus que se les pueda poner a todos de una vez.');
+            if (estatusGeneralElegido && sinCambiar > 0) {
+              notas.push(`${sinCambiar} no cambi${sinCambiar === 1 ? 'ó' : 'aron'}: ya estaba${sinCambiar === 1 ? '' : 'n'} así, ese estatus no le${sinCambiar === 1 ? '' : 's'} toca o tiene${sinCambiar === 1 ? '' : 'n'} candado 🔒.`);
+            }
+            if (fueraDeVistaDeCompra > 0) {
+              notas.push(`${fueraDeVistaDeCompra} producto${fueraDeVistaDeCompra === 1 ? '' : 's'} más de este pedido no se ve${fueraDeVistaDeCompra === 1 ? '' : 'n'} ahorita en la tabla (por los filtros o por cuántos renglones se muestran).`);
+            }
+            if (notas.length === 0) notas.push('Cada producto conserva su propio menú y su propio "Guardar": esto es solo para hacerlo de un jalón.');
+            const textoDeNotas = notas.join(' ');
+            const titulo = `Pedido de ${compraActiva.cliente} · ${filasDeCompraActiva.length} productos · ${formatearMoneda(totalDeCompraActiva)}`;
+            return (
+              <div className="compra-barra" role="group" aria-label={`Pedido de ${compraActiva.cliente}, ${filasDeCompraActiva.length} productos`} data-compra-barra>
+                <span className="compra-barra-titulo" title={titulo}>
+                  🧺 Pedido de <strong>{compraActiva.cliente}</strong> · {filasDeCompraActiva.length} productos · {formatearMoneda(totalDeCompraActiva)}
+                </span>
+                <span className="compra-barra-controles">
+                  {estatusParaTodos.length > 0 && (
+                    <label className="compra-barra-estado">
+                      <span className="compra-barra-etiqueta">Estatus para todos</span>
+                      <span className="compra-barra-etiqueta-corta">Para todos:</span>
+                      <select
+                        value={estatusGeneralElegido}
+                        onChange={(e) => elegirEstatusParaTodos(e.target.value)}
+                        disabled={guardandoCompra}
+                        aria-label="Estatus para todos los productos de este pedido"
+                        data-compra-estatus
+                      >
+                        <option value="">— elegir —</option>
+                        {estatusParaTodos.map((opcion) => (
+                          <option key={opcion} value={opcion}>{etiquetaEstadoPedido(opcion)}</option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-small"
+                    onClick={handleGuardarCompra}
+                    disabled={guardandoCompra || conCambiosEnCompra.length === 0}
+                    title={conCambiosEnCompra.length === 0 ? 'Cambia algo en los productos de este pedido (o elige un "Estatus para todos") y aquí los guardas juntos' : 'Guarda en un solo paso todos los productos de este pedido que tienen cambios'}
+                    data-compra-guardar
+                  >
+                    {guardandoCompra
+                      ? 'Guardando…'
+                      : conCambiosEnCompra.length === 0
+                        ? '💾 Guardar todos'
+                        : conCambiosEnCompra.length === 1 ? '💾 Guardar el que cambió' : `💾 Guardar los ${conCambiosEnCompra.length} de un jalón`}
+                  </button>
+                  <button type="button" className="compra-barra-cerrar" onClick={cerrarCompraActiva} title="Dejar de ver este pedido junto" aria-label="Cerrar">
+                    ✕
+                  </button>
+                </span>
+                <span className="compra-barra-nota" title={textoDeNotas}>{textoDeNotas}</span>
+              </div>
+            );
+          })()}
+
           <div className="table-scroll table-scroll-fijo">
             <table className="data-table pedidos-table">
               <thead>
@@ -3428,17 +3979,24 @@ export default function Dashboard() {
                   <th>Cant.</th><th>Precio</th><th>Total</th><th>Notas</th><th>Estado</th><th>Dueño(s)</th><th>Guardar</th>
                 </tr>
               </thead>
-              <tbody onClickCapture={marcarFilaActiva} onFocusCapture={marcarFilaActiva}>
+              <tbody onClickCapture={alTocarFilaDePedido} onFocusCapture={alTocarFilaDePedido}>
                 {pedidosVisibles.map((ped) => (
                   <PedidoRow
                     key={`${ped.ID}-${resetToken}`}
                     pedido={ped}
+                    destello={pedidosConDestello.has(String(ped.ID))}
+                    productosDeLaCompra={comprasDePedidos.porPedidoId[String(ped.ID)] ? comprasDePedidos.porPedidoId[String(ped.ID)].ids.length : 0}
+                    enCompraActiva={!!idsDeCompraActiva && idsDeCompraActiva.has(String(ped.ID))}
+                    ordenGeneral={idsDeCompraActiva && idsDeCompraActiva.has(String(ped.ID)) && ordenGeneralDeCompra.clave === compraActivaClave ? ordenGeneralDeCompra : null}
+                    guardandoJunto={guardandoCompra && pedidosGuardandose.has(String(ped.ID))}
+                    onRegistrarPendiente={registrarPendienteDePedido}
                     categoria={categoriaPorProductoId[ped.ProductoID] || '—'}
                     codigo={codigoPorProductoId[ped.ProductoID] || '—'}
                     duenos={duenosDelPedido(ped)}
                     sucursalNombre={String(ped.Sucursal || '').trim() ? (ped.SucursalNombre || 'Sucursal') : ''}
                     usuarioId={usuarioId}
-                    puedeSaltarCandado={esAdminCentral || !!permisos[CLAVE_CANDADO_PEDIDOS]}
+                    puedeSaltarCandado={(esAdminCentral || !!permisos[CLAVE_CANDADO_PEDIDOS]) && !pedidoEsSoloDeOtraSucursal(ped)}
+                    soloDeSuSucursal={pedidoEsSoloDeOtraSucursal(ped)}
                     puedeReembolsar={puedeResponderReembolso}
                     montoReembolsado={montoReembolsadoPorPedidoId[ped.ID]}
                     solicitudReembolsoPendiente={solicitudReembolsoPendientePorPedidoId[ped.ID]}
@@ -3590,6 +4148,7 @@ export default function Dashboard() {
           onFolioAtendido={atenderFolioDeTicket}
           onCrear={handleCrearTickets}
           onAbrirTicket={(t) => setTicketAbiertoId(t.ID)}
+          onVerPedidos={puedeVer('pedidos') ? verPedidosDeTicket : null}
           onGuardarConfiguracion={handleGuardarConfiguracionTickets}
         />
       )}
@@ -3600,6 +4159,7 @@ export default function Dashboard() {
           productos={productos}
           nombreSesion={nombreSesion}
           onCambio={() => cargarTodo(sesionToken, { silencioso: true, deFondo: true })}
+          onVerFoto={setFotoAmpliada}
         />
       )}
 
@@ -3627,6 +4187,7 @@ export default function Dashboard() {
             iniciarCarga={iniciarCarga}
             terminarCarga={terminarCarga}
             onPedirMas={puedeVer('stock') ? irAStockParaPedirMas : null}
+            onVerFoto={setFotoAmpliada}
           />
         ) : (
           <p className="info-msg">Tu cuenta ya no tiene catálogo propio. Elige otra pestaña de arriba.</p>
@@ -5762,7 +6323,25 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
         ) : (
           <div className="orden-thumb orden-thumb-vacia">Sin foto</div>
         )}
-        <span className="orden-nombre">{p.Nombre}</span>
+        {/* (2026-10-06, Claudia) El nombre va en un renglón, recortado con
+            "…" (clic para verlo completo, igual que en Stock); debajo, en
+            chiquito, el código, las piezas disponibles y el precio, para
+            saber qué producto se está acomodando. */}
+        <span className="orden-nombre">
+          <CeldaTruncada texto={p.Nombre} />
+          <span className="orden-datos" data-orden-datos>
+            {p.CodigoPropio !== undefined && p.CodigoPropio !== null && String(p.CodigoPropio).trim() !== '' && (
+              <span className="orden-dato orden-dato-codigo" title="Código del producto">{String(p.CodigoPropio)}</span>
+            )}
+            <span className={`orden-dato ${Number(p.Stock) > 0 ? '' : 'orden-dato-agotado'}`} title="Piezas disponibles en Stock">
+              {Number(p.Stock) > 0 ? `${Number(p.Stock).toLocaleString('es-MX')} pza${Number(p.Stock) === 1 ? '' : 's'}` : 'Agotado'}
+            </span>
+            <span className="orden-dato" title={productoEnOferta(p) && Number(p.PrecioOferta) > 0 && Number(p.PrecioOferta) < Number(p.Precio) ? `Precio de oferta (normal: ${formatearMoneda(Number(p.Precio) || 0)})` : 'Precio'}>
+              {formatearMoneda(productoEnOferta(p) && Number(p.PrecioOferta) > 0 && Number(p.PrecioOferta) < Number(p.Precio) ? Number(p.PrecioOferta) : Number(p.Precio) || 0)}
+              {productoEnOferta(p) && Number(p.PrecioOferta) > 0 && Number(p.PrecioOferta) < Number(p.Precio) ? ' 🔥' : ''}
+            </span>
+          </span>
+        </span>
         {!esProductoVisible(p) && <span className="badge badge-oculto">Oculto</span>}
         <button type="button" className="orden-al-inicio" onClick={() => onMover(i, 0)} disabled={i === 0 || guardando} title="Mandarlo al primer lugar">
           ↑ Al inicio
@@ -6664,7 +7243,20 @@ function BotonesDescarga({ que, onExcel, onPDF, cuantos }) {
 //     los que ya se eliminaron), para saber qué clave era de qué.
 const MOTIVO_INVENTARIO_INICIAL = 'Inventario inicial';
 
-function InventarioTab({ sesionToken, productos, nombreSesion, onCambio }) {
+// "Quedaron" de un movimiento (2026-10-06): las piezas que quedaron EN LA
+// TIENDA después de él — las disponibles más las apartadas en pedidos "En
+// proceso" ("EnTienda", lo manda el servidor). Con un servidor de antes se
+// usa lo que había: solo las disponibles. Regresa '' si no se sabe.
+function quedaronDeMovimiento(m) {
+  const valor = m.EnTienda !== undefined ? m.EnTienda : m.Existencia;
+  return valor === '' || valor === undefined || valor === null || Number.isNaN(Number(valor)) ? '' : Number(valor);
+}
+
+function InventarioTab({ sesionToken, productos, nombreSesion, onCambio, onVerFoto }) {
+  // (2026-10-06) Foto de cada producto, para la miniatura de "Movimientos"
+  // (igual que en Stock). Un producto que ya se eliminó no tiene foto.
+  const fotoPorProductoId = {};
+  (productos || []).forEach((prod) => { fotoPorProductoId[String(prod.ID)] = primeraFoto(prod.FotoURL); });
   const [movimientos, setMovimientos] = useState(null); // null = todavía cargando
   const [error, setError] = useState('');
   const [cargando, setCargando] = useState(false);
@@ -6855,7 +7447,7 @@ function InventarioTab({ sesionToken, productos, nombreSesion, onCambio }) {
           ],
           filas: filtrados.map((m) => [
             m.Fecha || '', m.Tipo || '', m.Motivo || '', m.Producto || '', m.Codigo === undefined ? '' : String(m.Codigo),
-            m.Categoria || '', piezas(m), m.Existencia === '' || m.Existencia === undefined ? '' : Number(m.Existencia),
+            m.Categoria || '', piezas(m), quedaronDeMovimiento(m),
             m.Precio === '' || m.Precio === undefined ? '' : Number(m.Precio), m.Usuario || '', m.Cliente || '', m.Detalle || '',
           ]),
         },
@@ -6887,7 +7479,7 @@ function InventarioTab({ sesionToken, productos, nombreSesion, onCambio }) {
       ],
       filas: filtrados.map((m) => [
         m.Fecha || '', m.Tipo || '', m.Motivo || '', m.Producto || '', m.Codigo === undefined ? '' : String(m.Codigo), piezas(m),
-        m.Existencia === '' || m.Existencia === undefined ? '' : Number(m.Existencia),
+        quedaronDeMovimiento(m),
         m.Precio === '' || m.Precio === undefined ? '' : Number(m.Precio), m.Usuario || '', m.Cliente || '', m.Detalle || '',
       ]),
     });
@@ -6925,7 +7517,8 @@ function InventarioTab({ sesionToken, productos, nombreSesion, onCambio }) {
         <strong>salida</strong> (ventas pagadas, piezas que se bajan a mano, productos eliminados). Se anota solo y{' '}
         <strong>nunca se borra</strong>: un producto sigue saliendo aquí aunque ya no lo tengas o lo hayas eliminado.
         Las piezas de un pedido "En proceso" solo están apartadas: la salida se anota hasta que se paga.
-        "Quedaron" son las piezas disponibles en Stock justo después de ese movimiento.
+        "Quedaron" son las piezas que quedaron en la tienda justo después de ese movimiento (contando las apartadas en
+        pedidos "En proceso", que siguen ahí hasta que se pagan).
       </p>
 
       <div className="stock-personal-toggle">
@@ -7028,7 +7621,7 @@ function InventarioTab({ sesionToken, productos, nombreSesion, onCambio }) {
                   <th>Código</th>
                   <th>Categoría</th>
                   <th>Piezas</th>
-                  <th title="Piezas disponibles en Stock justo después de este movimiento (sin contar las apartadas en pedidos En proceso)">Quedaron</th>
+                  <th title="Piezas que quedaron en la tienda justo después de este movimiento: las disponibles más las apartadas en pedidos En proceso">Quedaron</th>
                   <th>Precio</th>
                   <th>Quién</th>
                   <th>Clienta</th>
@@ -7046,13 +7639,29 @@ function InventarioTab({ sesionToken, productos, nombreSesion, onCambio }) {
                         <span className={`mov-tipo ${esEntrada ? 'mov-entrada' : 'mov-salida'}`}>{esEntrada ? '▲ Entrada' : '▼ Salida'}</span>
                       </td>
                       <td><CeldaTruncada texto={m.Motivo || '—'} /></td>
-                      <td><CeldaTruncada texto={m.Producto || '—'} /></td>
+                      <td>
+                        <div className="stock-nombre-con-foto">
+                          {fotoPorProductoId[String(m.ProductoID)] ? (
+                            <img
+                              src={fotoPorProductoId[String(m.ProductoID)]}
+                              alt=""
+                              className="stock-thumb"
+                              loading="lazy"
+                              title="Clic para ver la foto en grande"
+                              onClick={() => onVerFoto && onVerFoto(fotoPorProductoId[String(m.ProductoID)])}
+                            />
+                          ) : (
+                            <div className="stock-thumb stock-thumb-vacia">Sin foto</div>
+                          )}
+                          <span className="stock-nombre-texto"><CeldaTruncada texto={m.Producto || '—'} /></span>
+                        </div>
+                      </td>
                       <td><CeldaTruncada texto={m.Codigo === '' || m.Codigo === undefined ? '—' : String(m.Codigo)} /></td>
                       <td><CeldaTruncada texto={m.Categoria || '—'} /></td>
                       <td className={`mov-piezas ${esEntrada ? 'mov-entrada' : 'mov-salida'}`}>
                         {esEntrada ? '+' : '−'}{piezas(m).toLocaleString('es-MX')}
                       </td>
-                      <td className="mov-numero">{m.Existencia === '' || m.Existencia === undefined ? '—' : Number(m.Existencia).toLocaleString('es-MX')}</td>
+                      <td className="mov-numero">{quedaronDeMovimiento(m) === '' ? '—' : quedaronDeMovimiento(m).toLocaleString('es-MX')}</td>
                       <td className="mov-numero">{m.Precio === '' || m.Precio === undefined ? '—' : formatearMoneda(Number(m.Precio) || 0)}</td>
                       <td><CeldaTruncada texto={m.Usuario || '—'} /></td>
                       <td><CeldaTruncada texto={m.Cliente || '—'} /></td>
@@ -8084,7 +8693,7 @@ function BotonConComentario({ comentario, onClick, children, ...resto }) {
 // Pestaña "🏪 Mi sucursal": lo que cada quien decide de SU catálogo. No
 // mueve piezas ni toca el catálogo Global — solo qué se ve en el de esa
 // sucursal. El Admin Central puede revisar (y ayudar con) el de cualquiera.
-function SucursalTab({ sucursales, usuarioId, esAdminCentral, sesionToken, onCambio, iniciarCarga, terminarCarga, onPedirMas }) {
+function SucursalTab({ sucursales, usuarioId, esAdminCentral, sesionToken, onCambio, iniciarCarga, terminarCarga, onPedirMas, onVerFoto }) {
   const [elegidaId, setElegidaId] = useState('');
   const [filtro, setFiltro] = useState('todos'); // todos | catalogo | agotados | ocultos
   const [ocupadoId, setOcupadoId] = useState('');
@@ -8304,7 +8913,14 @@ function SucursalTab({ sucursales, usuarioId, esAdminCentral, sesionToken, onCam
                   <td className="sucursal-celda-nombre">
                     <div className="stock-nombre-con-foto">
                       {p.foto ? (
-                        <img src={p.foto} alt="" className="stock-thumb" loading="lazy" />
+                        <img
+                          src={p.foto}
+                          alt=""
+                          className="stock-thumb"
+                          loading="lazy"
+                          title="Clic para ver la foto en grande"
+                          onClick={() => onVerFoto && onVerFoto(p.foto)}
+                        />
                       ) : (
                         <div className="stock-thumb stock-thumb-vacia">Sin foto</div>
                       )}
@@ -10699,6 +11315,7 @@ function TicketsTab({
   onFolioAtendido,
   onCrear,
   onAbrirTicket,
+  onVerPedidos,
   onGuardarConfiguracion,
 }) {
   const [buscar, setBuscar] = useState('');
@@ -10971,6 +11588,17 @@ function TicketsTab({
                   <td><CeldaTruncada texto={t.Vendedor || t.CreadoPor || '—'} /></td>
                   <td className="ticket-acciones-celda">
                     <button type="button" className="btn btn-small" onClick={() => onAbrirTicket(t)} data-ticket-accion="ver">Ver</button>
+                    {onVerPedidos && (t.PedidoIDs || []).length > 0 && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-small"
+                        onClick={() => onVerPedidos(t)}
+                        data-ticket-accion="mostrar-en-pedidos"
+                        title={`Ir a Pedidos y ver iluminado${(t.PedidoIDs || []).length === 1 ? ' el pedido' : 's los ' + (t.PedidoIDs || []).length + ' pedidos'} del ticket ${t.Folio}`}
+                      >
+                        📋 Mostrar en pedidos
+                      </button>
+                    )}
                     <button type="button" className="btn btn-secondary btn-small" onClick={() => descargarVarios([t], `el ticket ${t.Folio}`)} data-ticket-accion="pdf-fila" title={`Descargar el ticket ${t.Folio} en PDF`}>
                       ⬇ PDF
                     </button>
@@ -11154,10 +11782,17 @@ function PedidoRow({
   sucursalNombre = '',
   usuarioId,
   puedeSaltarCandado,
+  soloDeSuSucursal = false,
   puedeReembolsar,
   montoReembolsado,
   solicitudReembolsoPendiente,
   resaltado,
+  destello = false,
+  productosDeLaCompra = 0,
+  enCompraActiva = false,
+  ordenGeneral = null,
+  guardandoJunto = false,
+  onRegistrarPendiente,
   ticket,
   puedeGenerarTicket = false,
   onTicket,
@@ -11355,12 +11990,59 @@ function PedidoRow({
     onGuardar(pedido.ID, payload).finally(() => setGuardando(false));
   }
 
+  // ---- Pedido de varios productos (2026-10-06) ----
+  // Lo que este renglón tiene escrito, para cuando se guardan varios con un
+  // solo botón (el panel lo lee en ese momento). "listo": false si todavía
+  // falta el monto del reembolso.
+  const datosParaGuardarRef = useRef(null);
+  datosParaGuardarRef.current = {
+    listo: !montoReembolsoInvalido,
+    cambio: { cantidad, telefono, notas, estado, ...(estado === 'Reembolsado' ? { montoReembolso } : {}) },
+  };
+  useEffect(() => {
+    if (!onRegistrarPendiente) return undefined;
+    onRegistrarPendiente(pedido.ID, () => datosParaGuardarRef.current);
+    return () => onRegistrarPendiente(pedido.ID, null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pedido.ID]);
+  // "Estatus para todos": cuando el panel elige uno para este pedido de
+  // varios productos, este renglón lo pone en su menú — solo si lo puede
+  // editar y si ese estatus es un paso válido desde como está guardado.
+  // (Elegir "— elegir —" lo regresa a como está guardado.)
+  const fichaDeOrdenGeneral = ordenGeneral ? ordenGeneral.ficha : 0;
+  const fichaAtendidaRef = useRef(fichaDeOrdenGeneral);
+  useEffect(() => {
+    if (!ordenGeneral || fichaAtendidaRef.current === ordenGeneral.ficha) return;
+    fichaAtendidaRef.current = ordenGeneral.ficha;
+    if (!puedoEditarPedido) return;
+    const destino = ordenGeneral.estado;
+    if (!destino) {
+      setEstado(pedido.Estado);
+      setAvisoAbierto(null);
+      return;
+    }
+    if (destino === 'Reembolsado' || estadoCanonicoPedido(pedido.Estado) === destino) return;
+    if (!opcionesEstadoPedido(pedido.Estado).includes(destino)) return;
+    if (estadoCanonicoPedido(pedido.Estado) === 'Cancelado' && destino === 'En proceso' && !puedeReabrirCancelado) return;
+    setAvisoAbierto(null);
+    setEstado(destino);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fichaDeOrdenGeneral]);
+
   const fecha = new Date(pedido.Fecha);
+  const deHoy = esFechaDeHoy(pedido.Fecha);
 
   return (
     <tr
       id={`pedido-fila-${pedido.ID}`}
-      className={[sinGuardar && 'fila-sin-guardar', resaltado && 'fila-resaltada'].filter(Boolean).join(' ')}
+      data-pedido-id={pedido.ID}
+      className={[
+        sinGuardar && 'fila-sin-guardar',
+        resaltado && 'fila-resaltada',
+        deHoy && 'fila-de-hoy',
+        enCompraActiva && 'fila-misma-compra',
+        destello && 'fila-nueva-destello',
+      ].filter(Boolean).join(' ')}
     >
       <td>{fecha.toLocaleDateString('es-MX')}</td>
       <td>{fecha.toLocaleTimeString('es-MX')}</td>
@@ -11372,7 +12054,21 @@ function PedidoRow({
           "CeldaTruncada" aquí para Cliente, Producto, Categoría y Código,
           que son los 4 campos de texto libre de este renglón (no deben
           romper la tabla bajo ninguna circunstancia). */}
-      <td><CeldaTruncada texto={pedido.Cliente} /></td>
+      <td>
+        {productosDeLaCompra >= 2 ? (
+          <span className="pedido-cliente-celda">
+            <span
+              className="pedido-compra-chip"
+              title={`Es parte de un pedido de ${productosDeLaCompra} productos de esta clienta. Toca el renglón para verlos juntos y cambiarles el estatus de un jalón.`}
+            >
+              🧺{productosDeLaCompra}
+            </span>
+            <CeldaTruncada texto={pedido.Cliente} />
+          </span>
+        ) : (
+          <CeldaTruncada texto={pedido.Cliente} />
+        )}
+      </td>
       <td>
         <input
           type="tel"
@@ -11560,6 +12256,8 @@ function PedidoRow({
                     🔓 Desbloquear
                   </button>
                 </div>
+              ) : soloDeSuSucursal && sucursalNombre ? (
+                <> Solo {sucursalNombre} lo puede atender.</>
               ) : (
                 <> Solo su dueño (o el Admin Central) lo puede cambiar.</>
               )}
@@ -11608,7 +12306,7 @@ function PedidoRow({
         <button
           className="btn btn-small"
           onClick={handleGuardar}
-          disabled={!sinGuardar || guardando || montoReembolsoInvalido}
+          disabled={!sinGuardar || guardando || guardandoJunto || montoReembolsoInvalido}
           title={
             haySolicitudPendienteReembolso
               ? 'Ya enviaste una solicitud de reembolso — pendiente de que el Administrador la confirme o la cancele'
@@ -11617,7 +12315,7 @@ function PedidoRow({
                 : undefined
           }
         >
-          {haySolicitudPendienteReembolso ? 'Esperando…' : guardando ? 'Guardando…' : 'Guardar'}
+          {haySolicitudPendienteReembolso ? 'Esperando…' : guardando || (guardandoJunto && sinGuardar) ? 'Guardando…' : 'Guardar'}
         </button>
       </td>
     </tr>
