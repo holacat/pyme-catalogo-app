@@ -21,9 +21,28 @@ function errorDelServidor_(data) {
   return err;
 }
 
+// (2026-10-07) Claudia vio una vez "Error al calcular la analítica: Error de
+// red: 404" y al rato "ya agarró": a veces Google contesta mal UNA petición
+// (404, 429 o 5xx) aunque todo esté bien, por ejemplo justo mientras se
+// publica una versión nueva del servidor. Una LECTURA se puede repetir sin
+// riesgo (no cambia nada), así que se reintenta sola hasta dos veces antes
+// de enseñar el error. Los guardados (post) NO se reintentan aquí.
+const ESPERAS_REINTENTO_LECTURA_MS = [900, 2200];
+function esperar_(ms) {
+  return new Promise((resolver) => setTimeout(resolver, ms));
+}
+
 async function get(action, extraParams = {}) {
   const params = new URLSearchParams({ action, key: PUBLIC_KEY, ...extraParams });
-  const res = await fetch(`${API_URL}?${params.toString()}`);
+  let res = await fetch(`${API_URL}?${params.toString()}`);
+  // (2026-10-08) No se reintenta la "marca de cambios" (ya se pregunta sola
+  // cada pocos segundos) ni un 429 ("demasiadas peticiones": reintentar
+  // solo lo empeora).
+  const reintentable = action !== 'marcaDeCambios';
+  for (let i = 0; reintentable && !res.ok && res.status !== 429 && i < ESPERAS_REINTENTO_LECTURA_MS.length; i += 1) {
+    await esperar_(ESPERAS_REINTENTO_LECTURA_MS[i]);
+    res = await fetch(`${API_URL}?${params.toString()}`);
+  }
   if (!res.ok) throw new Error(`Error de red: ${res.status}`);
   const data = await res.json();
   if (!data.ok) throw errorDelServidor_(data);
@@ -68,6 +87,14 @@ async function post(body, opciones = {}) {
 // Sin él, todo funciona como siempre (catálogo Global).
 export function listarProductos(sucursal) {
   return get('listarProductos', sucursal ? { sucursal } : {});
+}
+
+// ---- El ticket que ve la clienta (2026-10-07) ----
+// El QR de un ticket ya NO abre el panel: abre una página pública que solo
+// enseña ese ticket. Hace falta el folio Y su clave larga (las dos vienen en
+// el enlace del QR); sin la clave correcta el servidor no enseña nada.
+export function verTicketPublico({ folio, clave }) {
+  return get('verTicket', { folio, c: clave });
 }
 
 export function crearPedido({ cliente, telefono, producto, productoId, cantidad, notas, sucursal, idEnvio }) {
@@ -170,13 +197,15 @@ export function actualizarStock({ sesionToken, productoId, nuevoStock }) {
 // pedido. Solo manda los campos que le pases; los que omitas no se tocan.
 // `montoReembolso` solo se usa cuando `estado` es "Reembolsado": si no se
 // manda, el backend reembolsa el total del pedido por default.
-export function actualizarPedido({ sesionToken, pedidoId, estado, cantidad, telefono, notas, montoReembolso }) {
-  return post({ action: 'actualizarPedido', sesionToken, pedidoId, estado, cantidad, telefono, notas, montoReembolso });
+// `motivoReembolso` (2026-10-07): por qué se reembolsa. El servidor lo exige
+// al pasar un pedido a "Reembolsado" (o al pedir permiso para hacerlo).
+export function actualizarPedido({ sesionToken, pedidoId, estado, cantidad, telefono, notas, montoReembolso, motivoReembolso }) {
+  return post({ action: 'actualizarPedido', sesionToken, pedidoId, estado, cantidad, telefono, notas, montoReembolso, motivoReembolso });
 }
 
 // Guarda VARIOS pedidos de un jalón (2026-10-06): los renglones de un mismo
 // pedido de varios productos. "cambios" es una lista de
-// { pedidoId, estado, cantidad, telefono, notas, montoReembolso }. El
+// { pedidoId, estado, cantidad, telefono, notas, montoReembolso, motivoReembolso }. El
 // servidor los guarda uno tras otro en una sola petición y contesta, por
 // cada uno, si se guardó o por qué no ("resultados"). Un servidor de antes
 // no conoce esta acción ("Acción no reconocida"): quien llama los guarda
@@ -338,6 +367,13 @@ export function actualizarOrdenMultiple({ sesionToken, cambios, resumen }) {
 // visibles, ya en el orden nuevo completo — así se guarda de un jalón.
 export function actualizarOrdenCategorias({ sesionToken, categorias, resumen }) {
   return post({ action: 'actualizarOrdenCategorias', sesionToken, categorias, resumen });
+}
+
+// Guarda el orden del catálogo de UNA sucursal (2026-10-08): la lista
+// completa de productos y de categorías, ya en el orden nuevo. No toca el
+// catálogo general.
+export function guardarOrdenSucursal({ sesionToken, sucursalId, productos, categorias, resumen }) {
+  return post({ action: 'guardarOrdenSucursal', sesionToken, sucursalId, productos, categorias, resumen });
 }
 
 // Guarda el orden del carrusel de la zona "🔥 Ofertas" del catálogo
