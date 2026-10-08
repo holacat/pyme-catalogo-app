@@ -623,6 +623,9 @@ const CLAVE_CANDADO_PEDIDOS = 'candadoPedidos';
 // Igual que el de arriba, APAGADO por default si algo falla al cargar los
 // permisos reales.
 const CLAVE_CANDADO_REEMBOLSOS = 'candadoReembolsos';
+// (2026-10-08) Permiso especial "Acomodar el catálogo general" (misma llave
+// que CLAVE_ORDEN_GENERAL en Code.gs).
+const CLAVE_ORDEN_GENERAL = 'ordenGeneral';
 
 // Respaldo seguro: si por lo que sea no hay permisos guardados (una sesión
 // vieja de antes de que existiera esta función, o un error al leerlos), se
@@ -785,6 +788,9 @@ export default function Dashboard() {
   const [pedidos, setPedidos] = useState([]);
   const [alertas, setAlertas] = useState([]);
   const [movimientos, setMovimientos] = useState([]);
+  // (2026-10-08) Pagos y reembolsos recientes ({ f, m, u, p }) para el
+  // resumen "Vendido hoy / semana / mes". Ver "ResumenDeVentas".
+  const [ventasRecientes, setVentasRecientes] = useState([]);
   const [bitacora, setBitacora] = useState([]);
   // Papelera (P1, 2026-10-02): qué renglones de la Bitácora se pueden
   // restaurar todavía (o ya se restauraron). Solo le llega al Admin Central;
@@ -1102,7 +1108,7 @@ export default function Dashboard() {
   // "Estatus para todos": cada vez que se elige uno, cambia la ficha y los
   // renglones de ese pedido ponen ese estatus en su propio menú (los que
   // pueden). estado null = regresar cada renglón a como está guardado.
-  const [ordenGeneralDeCompra, setOrdenGeneralDeCompra] = useState({ ficha: 0, clave: null, estado: null });
+  const [ordenGeneralDeCompra, setOrdenGeneralDeCompra] = useState({ ficha: 0, clave: null, estado: null, motivo: '' });
   const [guardandoCompra, setGuardandoCompra] = useState(false);
   // Pedidos que se están guardando EN ESTE MOMENTO (por su propio "Guardar"
   // o de un jalón): para no mandar el mismo dos veces.
@@ -1119,7 +1125,7 @@ export default function Dashboard() {
   // barrita, se toca otro pedido, se cancelan los cambios, se cambia de
   // pestaña o de cuenta). Así una orden vieja nunca se aplica después.
   function soltarEstatusParaTodos() {
-    setOrdenGeneralDeCompra((antes) => (antes.clave === null ? antes : { ficha: antes.ficha, clave: null, estado: null }));
+    setOrdenGeneralDeCompra((antes) => (antes.clave === null ? antes : { ficha: antes.ficha, clave: null, estado: null, motivo: '' }));
   }
   // true mientras la pestaña del navegador está a la vista (un pedido o una
   // alerta no cuentan como "vistos" si llegaron con el panel en segundo plano).
@@ -1524,6 +1530,7 @@ export default function Dashboard() {
         setSolicitudesReembolsoResueltas(r.solicitudesReembolsoResueltas || []);
         setOpciones(r.opciones || {});
         setMovimientos(r.movimientos || []);
+        setVentasRecientes(Array.isArray(r.ventasRecientes) ? r.ventasRecientes : []);
         setBitacora(r.bitacora || []);
         setPapelera(r.papelera || []);
         if (r.papeleraDias) setPapeleraDias(r.papeleraDias);
@@ -2029,6 +2036,7 @@ export default function Dashboard() {
     setPedidos([]);
     setAlertas([]);
     setMovimientos([]);
+    setVentasRecientes([]);
     setBitacora([]);
     setPapelera([]);
     setSucursales([]);
@@ -2602,6 +2610,7 @@ export default function Dashboard() {
   const pedidosQueYoCobre = new Set(
     nombreSesion
       ? movimientos.filter((m) => m.Tipo === 'Abono' && String(m.Usuario || '') === nombreSesion).map((m) => String(m.PedidoID))
+          .concat(ventasRecientes.filter((v) => v.m > 0 && v.u === nombreSesion).map((v) => String(v.p)))
       : []
   );
 
@@ -2981,8 +2990,11 @@ export default function Dashboard() {
   const conCambiosEnCompra = filasDeCompraActiva.filter((ped) => sinGuardar.has(`pedido:${ped.ID}`));
   // Los estatus que se le pueden poner "a todos": cualquiera que sea el paso
   // siguiente de al menos un renglón (cada renglón solo lo toma si le toca).
-  // "Reembolsado" no: lleva un monto por pedido, se hace uno por uno.
-  const estatusParaTodos = ESTADOS_PEDIDO.filter((opcion) => opcion !== 'Reembolsado' && filasDeCompraActiva.some((ped) => (
+  // (2026-10-08, Claudia: "cuando intento reembolsar no me da la opción de
+  // todos, solo uno por uno") "Reembolsado" también: cada renglón se llena
+  // con SU total (se puede cambiar en su renglón) y el motivo se escribe una
+  // vez en la barrita para todos.
+  const estatusParaTodos = ESTADOS_PEDIDO.filter((opcion) => filasDeCompraActiva.some((ped) => (
     estadoCanonicoPedido(ped.Estado) !== opcion && opcionesEstadoPedido(ped.Estado).includes(opcion)
   )));
   const estatusGeneralElegido = compraActiva && ordenGeneralDeCompra.clave === compraActiva.clave && ordenGeneralDeCompra.estado
@@ -3027,7 +3039,12 @@ export default function Dashboard() {
 
   function elegirEstatusParaTodos(estadoElegido) {
     if (!compraActiva) return;
-    setOrdenGeneralDeCompra((antes) => ({ ficha: antes.ficha + 1, clave: compraActiva.clave, estado: estadoElegido || null }));
+    setOrdenGeneralDeCompra((antes) => ({ ficha: antes.ficha + 1, clave: compraActiva.clave, estado: estadoElegido || null, motivo: estadoElegido === 'Reembolsado' ? antes.motivo || '' : '' }));
+  }
+  // El motivo del reembolso "para todos": se copia a cada renglón que se
+  // está reembolsando (sin tocar el monto que cada uno tenga escrito).
+  function escribirMotivoParaTodos(texto) {
+    setOrdenGeneralDeCompra((antes) => ({ ...antes, motivo: String(texto || '').slice(0, 500) }));
   }
 
   // En palabras, cómo salió el guardado de varios pedidos.
@@ -3961,6 +3978,19 @@ export default function Dashboard() {
             >
               Mis pedidos (Yo)
             </button>
+            <ResumenDeVentas
+              ventas={ventasRecientes}
+              nombre={
+                esAdministrador
+                  ? (duenoPedidosElegido === ''
+                    ? null
+                    : duenoPedidosElegido === String(usuarioId)
+                      ? nombreSesion
+                      : ((usuarios.find((u) => String(u.ID) === duenoPedidosElegido) || {}).Nombre || ''))
+                  : nombreSesion
+              }
+              esMio={!esAdministrador || duenoPedidosElegido === String(usuarioId)}
+            />
             {esAdministrador && (
               <label className="pedidos-filtro-dueno-admin">
                 Ver pedidos de:
@@ -4051,6 +4081,19 @@ export default function Dashboard() {
                   </span>
                   <span className="compra-barra-nota" title={textoDeNotas || undefined} data-compra-nota>{textoDeNotas}</span>
                   <span className="compra-barra-controles">
+                    {estatusGeneralElegido === 'Reembolsado' && (
+                      <input
+                        type="text"
+                        className="compra-barra-motivo"
+                        value={ordenGeneralDeCompra.motivo || ''}
+                        onChange={(e) => escribirMotivoParaTodos(e.target.value)}
+                        placeholder="¿Por qué se reembolsa? (para todos)"
+                        aria-label="Motivo del reembolso para todos los productos de este pedido"
+                        disabled={guardandoCompra}
+                        maxLength={500}
+                        data-compra-motivo
+                      />
+                    )}
                     {estatusParaTodos.length > 0 && (
                       <label className="compra-barra-estado">
                         <span className="compra-barra-etiqueta">Estatus para todos</span>
@@ -4304,6 +4347,7 @@ export default function Dashboard() {
         esAdminCentral || sucursales.length > 0 ? (
           <SucursalTab
             sucursales={sucursales}
+            ventasRecientes={ventasRecientes}
             usuarioId={usuarioId}
             esAdminCentral={esAdminCentral}
             sesionToken={sesionToken}
@@ -4323,7 +4367,8 @@ export default function Dashboard() {
           key={`orden-${resetToken}`}
           sucursales={sucursales}
           usuarioId={usuarioId}
-          puedeOrdenarGeneral={esAdministrador || esAdminCentral}
+          puedeOrdenarGeneral={esAdminCentral || !!permisos[CLAVE_ORDEN_GENERAL]}
+          puedeAyudarSucursales={esAdministrador || esAdminCentral}
           hayCambiosSinGuardar={sinGuardar.has('orden-catalogo')}
           onDirtyChange={marcarSucio}
           productos={productos}
@@ -5693,12 +5738,15 @@ function categoriasEnOrdenDeAparicion(productos) {
 //    (para ayudarle).
 // El servidor manda los productos de cada sucursal ya en el orden en que
 // salen en su catálogo (ver "sucursales" en cargarPanelCompleto).
-function OrdenDelCatalogo({ productos, opciones, sucursales = [], usuarioId, puedeOrdenarGeneral, hayCambiosSinGuardar, ...resto }) {
+function OrdenDelCatalogo({ productos, opciones, sucursales = [], usuarioId, puedeOrdenarGeneral, puedeAyudarSucursales, hayCambiosSinGuardar, ...resto }) {
   const propia = sucursales.find((s) => String(s.id) === String(usuarioId)) || null;
+  // (2026-10-08, Claudia: "por default todos tienen el orden de su catálogo
+  // personal") Primero va SIEMPRE el de mi sucursal (si tengo); después, en
+  // el carrusel, el general (con permiso) y las demás sucursales (Admin).
   const vistas = [];
-  if (puedeOrdenarGeneral) vistas.push({ clave: 'general', texto: '🌐 Catálogo general' });
   if (propia) vistas.push({ clave: `s:${propia.id}`, texto: `🏪 Mi sucursal (Yo)`, sucursal: propia });
-  if (puedeOrdenarGeneral) {
+  if (puedeOrdenarGeneral) vistas.push({ clave: 'general', texto: '🌐 Catálogo general' });
+  if (puedeAyudarSucursales) {
     sucursales
       .filter((s) => !propia || String(s.id) !== String(propia.id))
       .forEach((s) => vistas.push({ clave: `s:${s.id}`, texto: `🏪 ${s.nombre}`, sucursal: s }));
@@ -5725,7 +5773,7 @@ function OrdenDelCatalogo({ productos, opciones, sucursales = [], usuarioId, pue
   if (!vista) {
     return (
       <p className="info-msg">
-        Tu cuenta no tiene catálogo propio, así que aquí no hay nada que acomodar. El catálogo general solo lo acomodan los Administradores.
+        Tu cuenta no tiene catálogo propio, así que aquí no hay nada que acomodar. Para acomodar el catálogo general hace falta el permiso "Acomodar el catálogo general" (se da en 🔐 Permisos).
       </p>
     );
   }
@@ -8964,7 +9012,7 @@ function BotonConComentario({ comentario, onClick, children, ...resto }) {
 // Pestaña "🏪 Mi sucursal": lo que cada quien decide de SU catálogo. No
 // mueve piezas ni toca el catálogo Global — solo qué se ve en el de esa
 // sucursal. El Admin Central puede revisar (y ayudar con) el de cualquiera.
-function SucursalTab({ sucursales, usuarioId, esAdminCentral, sesionToken, onCambio, iniciarCarga, terminarCarga, onPedirMas, onVerFoto }) {
+function SucursalTab({ sucursales, ventasRecientes = [], usuarioId, esAdminCentral, sesionToken, onCambio, iniciarCarga, terminarCarga, onPedirMas, onVerFoto }) {
   const [elegidaId, setElegidaId] = useState('');
   const [filtro, setFiltro] = useState('todos'); // todos | catalogo | agotados | ocultos
   const [ocupadoId, setOcupadoId] = useState('');
@@ -9099,6 +9147,11 @@ function SucursalTab({ sucursales, usuarioId, esAdminCentral, sesionToken, onCam
       </div>
 
       <div className="pedidos-resumen-fila sucursal-filtros">
+        <ResumenDeVentas
+          ventas={ventasRecientes}
+          nombre={sucursal.nombre}
+          esMio={String(sucursal.id) === String(usuarioId)}
+        />
         {filtros.map((f) => (
           <button
             key={f.clave}
@@ -10185,6 +10238,7 @@ function PermisosTab({ sesionToken, usuarios, iniciarCarga, terminarCarga }) {
     clave: CLAVE_CANDADO_REEMBOLSOS,
     etiqueta: 'Marcar pedidos como Reembolsado (con candado)',
   });
+  const [permisoOrdenGeneral, setPermisoOrdenGeneral] = useState({ clave: CLAVE_ORDEN_GENERAL, etiqueta: 'Acomodar el catálogo general' });
   const [cargando, setCargando] = useState(true);
   const [mensaje, setMensaje] = useState('');
   const [celdaGuardando, setCeldaGuardando] = useState(''); // "Rol:pestana" en curso, o ''
@@ -10203,6 +10257,7 @@ function PermisosTab({ sesionToken, usuarios, iniciarCarga, terminarCarga }) {
         setOverrides(res.overrides || []);
         if (res.permisoCandadoPedidos) setPermisoCandadoPedidos(res.permisoCandadoPedidos);
         if (res.permisoCandadoReembolsos) setPermisoCandadoReembolsos(res.permisoCandadoReembolsos);
+        if (res.permisoOrdenGeneral) setPermisoOrdenGeneral(res.permisoOrdenGeneral);
         setMensaje('');
       })
       .catch((err) => setMensaje(`Error al cargar permisos: ${err.message}`))
@@ -10269,6 +10324,7 @@ function PermisosTab({ sesionToken, usuarios, iniciarCarga, terminarCarga }) {
   function etiquetaDe(pestanaClave) {
     if (pestanaClave === CLAVE_CANDADO_PEDIDOS) return permisoCandadoPedidos.etiqueta;
     if (pestanaClave === CLAVE_CANDADO_REEMBOLSOS) return permisoCandadoReembolsos.etiqueta;
+    if (pestanaClave === CLAVE_ORDEN_GENERAL) return permisoOrdenGeneral.etiqueta;
     const encontrada = pestanas.find((p) => p.clave === pestanaClave);
     return encontrada ? encontrada.etiqueta : pestanaClave;
   }
@@ -10413,6 +10469,47 @@ function PermisosTab({ sesionToken, usuarios, iniciarCarga, terminarCarga }) {
         </table>
       </div>
 
+      {/* (2026-10-08) Quién puede acomodar el catálogo GENERAL en "Orden del
+          catálogo". Cada quien siempre puede acomodar el de su sucursal. */}
+      <h3>Permiso especial: acomodar el catálogo general</h3>
+      <p className="muted">
+        En "Orden del catálogo" cada persona acomoda siempre el catálogo de SU sucursal. El catálogo general solo lo
+        acomoda quien tenga este permiso (tú, como Admin Central, siempre). De entrada lo tienen los Administradores y
+        no los Vendedores; para dárselo a una vendedora en concreto, usa "Excepciones por persona".
+      </p>
+      <div className="table-scroll">
+        <table className="data-table permisos-tabla-roles">
+          <thead>
+            <tr>
+              <th>Rol</th>
+              <th>{permisoOrdenGeneral.etiqueta}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {['Administrador', 'Vendedor'].map((rol) => {
+              const guardado = rolDefaults[rol] ? rolDefaults[rol][CLAVE_ORDEN_GENERAL] : undefined;
+              const valor = guardado === undefined ? rol === 'Administrador' : !!guardado;
+              const guardandoEstaCelda = celdaGuardando === `${rol}:${CLAVE_ORDEN_GENERAL}`;
+              return (
+                <tr key={rol}>
+                  <td>{rol}</td>
+                  <td className="permisos-celda-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={valor}
+                      disabled={guardandoEstaCelda}
+                      onChange={() => toggleRolPermiso(rol, CLAVE_ORDEN_GENERAL, valor)}
+                      title={`${rol} — ${permisoOrdenGeneral.etiqueta}: ${valor ? 'permitido' : 'restringido'}`}
+                      data-permiso-orden-general={rol}
+                    />
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
       <h3>Excepciones por persona</h3>
       <p className="muted">
         Usa esto solo para casos especiales: dar o quitar UNA pestaña
@@ -10438,6 +10535,7 @@ function PermisosTab({ sesionToken, usuarios, iniciarCarga, terminarCarga }) {
             ))}
             <option value={CLAVE_CANDADO_PEDIDOS}>🔒 {permisoCandadoPedidos.etiqueta}</option>
             <option value={CLAVE_CANDADO_REEMBOLSOS}>🔒 {permisoCandadoReembolsos.etiqueta}</option>
+            <option value={CLAVE_ORDEN_GENERAL}>🌐 {permisoOrdenGeneral.etiqueta}</option>
           </select>
         </label>
         <label>
@@ -12187,6 +12285,50 @@ function MensajeDelPanel({ texto, onQuitar }) {
   );
 }
 
+// ---- Lo vendido hoy / esta semana / este mes (2026-10-08) ----
+// Claudia: "quiero que podamos ver rápidamente por vendedor cuánto hemos
+// vendido en el día, en la semana y en el mes, en Pedidos y Sucursales, a
+// lado de los filtros… eso es personal por usuario". Suma los pagos de
+// pedidos menos sus reembolsos (lo que el servidor manda en
+// "ventasRecientes"). "nombre": de quién (null = de todos, solo para
+// Admin). La semana empieza el lunes; todo con la hora de esta computadora.
+function sumaDeVentas(ventas, nombre) {
+  const ahora = new Date();
+  const inicioDia = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate()).getTime();
+  const diaSemana = (ahora.getDay() + 6) % 7; // 0 = lunes
+  const inicioSemana = inicioDia - diaSemana * 24 * 3600 * 1000;
+  const inicioMes = new Date(ahora.getFullYear(), ahora.getMonth(), 1).getTime();
+  const suma = { hoy: 0, semana: 0, mes: 0 };
+  (ventas || []).forEach((v) => {
+    if (nombre !== null && v.u !== nombre) return;
+    const t = new Date(v.f).getTime();
+    if (Number.isNaN(t)) return;
+    const monto = Number(v.m) || 0;
+    if (t >= inicioDia) suma.hoy += monto;
+    if (t >= inicioSemana) suma.semana += monto;
+    if (t >= inicioMes) suma.mes += monto;
+  });
+  return suma;
+}
+function ResumenDeVentas({ ventas, nombre, esMio }) {
+  if (nombre === undefined || nombre === '') return null;
+  const suma = sumaDeVentas(ventas, nombre);
+  const quien = nombre === null ? 'Todos' : esMio ? 'Yo' : nombre;
+  const dinero = (n) => formatearMoneda(Math.round(n * 100) / 100);
+  return (
+    <span
+      className="resumen-ventas"
+      title={`Lo vendido por ${nombre === null ? 'todos' : esMio ? `ti (${nombre})` : nombre}: pagos de pedidos menos reembolsos. La semana cuenta desde el lunes.`}
+      data-resumen-ventas
+    >
+      <span className="resumen-ventas-quien">💰 {quien}:</span>
+      <span>Hoy <strong data-venta-hoy>{dinero(suma.hoy)}</strong></span>
+      <span>Semana <strong data-venta-semana>{dinero(suma.semana)}</strong></span>
+      <span>Mes <strong data-venta-mes>{dinero(suma.mes)}</strong></span>
+    </span>
+  );
+}
+
 // Para los avisos de adentro de una pestaña: los quita solos pasado "ms"
 // (0 = no se quita por tiempo).
 function useQuitarSolo(valor, quitar, ms) {
@@ -12546,13 +12688,27 @@ function PedidoRow({
       setAvisoAbierto(null);
       return;
     }
-    if (destino === 'Reembolsado' || estadoCanonicoPedido(pedido.Estado) === destino) return;
+    if (estadoCanonicoPedido(pedido.Estado) === destino) return;
     if (!opcionesEstadoPedido(pedido.Estado).includes(destino)) return;
     if (estadoCanonicoPedido(pedido.Estado) === 'Cancelado' && destino === 'En proceso' && !puedeReabrirCancelado) return;
     setAvisoAbierto(null);
+    if (destino === 'Reembolsado') {
+      // Con una solicitud ya enviada no se pide otra.
+      if (haySolicitudPendienteReembolso) return;
+      setMontoReembolso(String(topeReembolso));
+      setMotivoReembolso(ordenGeneral.motivo || '');
+    }
     setEstado(destino);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fichaDeOrdenGeneral]);
+  // El motivo "para todos" que se va escribiendo en la barrita.
+  const motivoDeOrdenGeneral = ordenGeneral && ordenGeneral.estado === 'Reembolsado' ? ordenGeneral.motivo || '' : null;
+  useEffect(() => {
+    if (motivoDeOrdenGeneral === null || !puedoEditarPedido) return;
+    if (estado !== 'Reembolsado' || pedido.Estado === 'Reembolsado' || haySolicitudPendienteReembolso) return;
+    setMotivoReembolso(motivoDeOrdenGeneral);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [motivoDeOrdenGeneral]);
 
   const fecha = new Date(pedido.Fecha);
   const deHoy = esFechaDeHoy(pedido.Fecha);
