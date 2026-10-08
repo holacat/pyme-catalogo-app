@@ -1,0 +1,236 @@
+import { useEffect, useState } from 'react';
+import { verTicketPublico } from '../api.js';
+import { crearQR, descargarTicketPDF } from '../exportar.js';
+
+// ============================================================================
+// EL TICKET QUE VE LA CLIENTA (2026-10-07)
+// ============================================================================
+// Claudia: "el QR de los tickets me lleva al panel de admin, eso es
+// inconcebible… para el cliente debe acceder al ticket en digital, digamos
+// en PDF de nuevo, pero ni de chiste al panel".
+// Ahora el QR de un ticket abre ESTA página: se ve el ticket tal como salió
+// impreso y se puede volver a descargar en PDF. No pide usuario ni
+// contraseña, y desde aquí no se puede llegar a nada del panel.
+// El enlace lleva el folio y una clave larga que no se puede adivinar
+// (`/?ticket=T-00012&c=…`): sin la clave correcta el servidor no enseña
+// nada, así que nadie puede ver tickets ajenos probando folios.
+// La abre Catalog.jsx cuando la dirección trae "?ticket=".
+
+// Lo que trae el enlace: { folio, clave } (o null si no es un enlace de ticket).
+export function leerTicketDelLink() {
+  try {
+    const parametros = new URLSearchParams(window.location.search);
+    const folio = (parametros.get('ticket') || '').trim();
+    if (!folio) return null;
+    return { folio, clave: (parametros.get('c') || '').trim() };
+  } catch {
+    return null;
+  }
+}
+
+// El enlace público de un ticket (lo que lleva su QR). Lo usa también el
+// panel para armar el QR. Sin clave no hay enlace: regresa ''.
+export function enlacePublicoDeTicket(folio, clave) {
+  if (!folio || !clave) return '';
+  try {
+    return `${window.location.origin}/?ticket=${encodeURIComponent(folio)}&c=${encodeURIComponent(clave)}`;
+  } catch {
+    return '';
+  }
+}
+
+function dinero(numero) {
+  return `$${(Number(numero) || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function fechaConHora(valor) {
+  if (!valor) return '—';
+  const fecha = new Date(valor);
+  if (Number.isNaN(fecha.getTime())) return '—';
+  return `${fecha.toLocaleDateString('es-MX')} ${fecha.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}`;
+}
+
+function CodigoQR({ texto, lado = 132 }) {
+  const qr = texto ? crearQR(texto) : null;
+  if (!qr) return null;
+  const n = qr.lado + 8; // con su orilla blanca
+  let trazo = '';
+  qr.celdas.forEach((fila, y) => {
+    fila.forEach((oscura, x) => {
+      if (oscura) trazo += `M${x + 4} ${y + 4}h1v1h-1z`;
+    });
+  });
+  return (
+    <svg className="ticket-qr" width={lado} height={lado} viewBox={`0 0 ${n} ${n}`} shapeRendering="crispEdges" role="img" aria-label="Código QR de este ticket">
+      <rect width={n} height={n} fill="#ffffff" />
+      <path d={trazo} fill="#000000" />
+    </svg>
+  );
+}
+
+// El ticket en pantalla, con el mismo acomodo que el PDF.
+function PapelDelTicket({ ticket, tienda, enlace }) {
+  const cancelado = ticket.Estado === 'Cancelado';
+  const items = (Array.isArray(ticket.Items) ? ticket.Items : []).filter((it) => it && typeof it === 'object');
+  const piezas = items.reduce((suma, it) => suma + (Number(it.cantidad) || 0), 0);
+  const diaDe = (valor) => (valor ? new Date(valor).toDateString() : '');
+  const otroDia = !!(ticket.FechaCompra && ticket.Fecha && diaDe(ticket.FechaCompra) !== diaDe(ticket.Fecha));
+  return (
+    <div className={`ticket-papel ${cancelado ? 'ticket-papel-cancelado' : ''}`} data-ticket-publico-papel>
+      {cancelado && <p className="ticket-papel-sello">*** TICKET CANCELADO ***</p>}
+      {tienda.nombre && <p className="ticket-papel-tienda">{tienda.nombre}</p>}
+      {tienda.direccion && <p className="ticket-papel-chico">{tienda.direccion}</p>}
+      {tienda.telefono && <p className="ticket-papel-chico">Tel. {tienda.telefono}</p>}
+      {(tienda.nombre || tienda.direccion || tienda.telefono) && <hr />}
+      <p className="ticket-papel-titulo">TICKET DE COMPRA</p>
+      <p className="ticket-papel-folio">Folio {ticket.Folio}</p>
+      <p><strong>{otroDia ? 'Fecha de compra:' : 'Fecha:'}</strong> {fechaConHora(ticket.FechaCompra || ticket.Fecha)}</p>
+      {otroDia && <p><strong>Ticket emitido:</strong> {fechaConHora(ticket.Fecha)}</p>}
+      <p><strong>Cliente:</strong> {ticket.Cliente || 'Público en general'}</p>
+      {ticket.Telefono && <p><strong>Tel.:</strong> {ticket.Telefono}</p>}
+      {ticket.Vendedor && <p><strong>Le atendió:</strong> {ticket.Vendedor}</p>}
+      <hr />
+      <table className="ticket-papel-tabla">
+        <thead>
+          <tr><th>Cant.</th><th>Descripción</th><th>Importe</th></tr>
+        </thead>
+        <tbody>
+          {items.map((it, i) => (
+            <tr key={i}>
+              <td>{Number(it.cantidad) || 0} x</td>
+              <td>
+                {it.descripcion}
+                <span className="ticket-papel-detalle">
+                  {it.codigo ? `Cód. ${it.codigo} · ` : ''}{dinero(it.precio)} c/u
+                </span>
+              </td>
+              <td>{dinero(it.importe)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <hr />
+      <p className="ticket-papel-total"><span>TOTAL</span><span>{dinero(ticket.Total)}</span></p>
+      <p className="ticket-papel-chico ticket-papel-izquierda">
+        {piezas} pieza{piezas === 1 ? '' : 's'} en {items.length} producto{items.length === 1 ? '' : 's'}
+      </p>
+      {ticket.Notas && (
+        <>
+          <hr />
+          <p><strong>Nota:</strong> {ticket.Notas}</p>
+        </>
+      )}
+      <hr />
+      <div className="ticket-papel-qr">
+        <CodigoQR texto={enlace} />
+        <p className="ticket-papel-folio-chico">Folio {ticket.Folio}</p>
+      </div>
+      {tienda.mensaje && <p className="ticket-papel-mensaje">{tienda.mensaje}</p>}
+    </div>
+  );
+}
+
+export default function TicketPublico({ folio, clave }) {
+  // 'cargando' | 'listo' | 'noEsta' | 'sinConexion'
+  const [estado, setEstado] = useState('cargando');
+  const [datos, setDatos] = useState(null); // { ticket, tienda }
+  const [intento, setIntento] = useState(0);
+  const [avisoDescarga, setAvisoDescarga] = useState('');
+
+  useEffect(() => {
+    // Un QR de antes (sin clave) o un enlace recortado: ni se pregunta.
+    if (!folio || !clave) {
+      setEstado('noEsta');
+      return undefined;
+    }
+    let vigente = true;
+    setEstado('cargando');
+    verTicketPublico({ folio, clave })
+      .then((res) => {
+        if (!vigente) return;
+        setDatos({ ticket: res.ticket, tienda: res.tienda || {} });
+        setEstado('listo');
+      })
+      .catch((err) => {
+        if (!vigente) return;
+        // El servidor contestó que ese ticket no existe (o que la clave del
+        // enlace no es la suya)…
+        if (err && err.datos && err.datos.ticketNoEncontrado) setEstado('noEsta');
+        // …o no contestó, o contestó otra cosa (sin internet, servidor
+        // ocupado): eso se puede volver a intentar.
+        else setEstado('sinConexion');
+      });
+    return () => {
+      vigente = false;
+    };
+  }, [folio, clave, intento]);
+
+  useEffect(() => {
+    const tituloAnterior = document.title;
+    document.title = folio ? `Ticket ${folio}` : 'Ticket';
+    return () => {
+      document.title = tituloAnterior;
+    };
+  }, [folio]);
+
+  const enlace = enlacePublicoDeTicket(folio, clave);
+
+  function descargar() {
+    if (!datos) return;
+    setAvisoDescarga('');
+    try {
+      descargarTicketPDF(`ticket-${datos.ticket.Folio}`, [{ ticket: datos.ticket, tienda: datos.tienda, enlace }]);
+      setAvisoDescarga('Listo: revisa tus descargas.');
+    } catch (err) {
+      setAvisoDescarga(`No se pudo armar el PDF: ${err.message || err}`);
+    }
+  }
+
+  return (
+    <div className="ticket-publico" data-ticket-publico={estado}>
+      {estado === 'cargando' && <p className="info-msg">Buscando tu ticket…</p>}
+
+      {estado === 'noEsta' && (
+        <div className="ticket-publico-aviso">
+          <h2>🎫 No encontramos este ticket</h2>
+          <p>
+            {clave
+              ? 'Revisa que el enlace esté completo. Si lo copiaste de un mensaje, cópialo de nuevo entero.'
+              : 'Este código es de una versión anterior del ticket y ya no se puede abrir en línea.'}
+          </p>
+          <p>Pídele a la tienda que te comparta tu ticket otra vez.</p>
+        </div>
+      )}
+
+      {estado === 'sinConexion' && (
+        <div className="ticket-publico-aviso">
+          <h2>🎫 No se pudo cargar tu ticket</h2>
+          <p>Puede ser tu conexión a internet. Inténtalo de nuevo en un momento.</p>
+          <button type="button" className="btn btn-primary" onClick={() => setIntento((n) => n + 1)}>
+            🔄 Volver a intentar
+          </button>
+        </div>
+      )}
+
+      {estado === 'listo' && datos && (
+        <>
+          <h2 className="ticket-publico-titulo">Tu ticket de compra</h2>
+          <PapelDelTicket ticket={datos.ticket} tienda={datos.tienda} enlace={enlace} />
+          <div className="ticket-publico-botones">
+            <button type="button" className="btn btn-primary" onClick={descargar} data-ticket-publico-pdf>
+              📄 Descargar en PDF
+            </button>
+          </div>
+          {avisoDescarga && <p className="muted ticket-publico-nota" role="status">{avisoDescarga}</p>}
+          <p className="muted ticket-publico-nota">
+            Este enlace es solo de tu ticket. Guárdalo, o descarga el PDF, para tenerlo a la mano.
+          </p>
+        </>
+      )}
+
+      <p className="ticket-publico-pie">
+        <a href="/">🛍️ Ver el catálogo de la tienda</a>
+      </p>
+    </div>
+  );
+}
