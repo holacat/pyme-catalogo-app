@@ -853,9 +853,14 @@ main { flex: 1; padding: 1.5rem; max-width: 1800px; margin: 0 auto; width: 100%;
 .pedido-estado-linea {
   display: flex;
   align-items: center;
-  gap: 4px;
-  flex-wrap: nowrap;
+  gap: 2px 4px;
+  /* (2026-10-07, Claudia con captura: "se enciman algunos iconos, luego
+     igual los relojes".) Con el candado 🔒, el ticket 🎫✓ y el reloj ⏳ juntos
+     ya no cabían en un renglón y se salían encima de la columna de al lado.
+     Ahora, lo que no cabe baja a un segundo renglón dentro de su casilla. */
+  flex-wrap: wrap;
 }
+.pedido-estado-linea select { min-width: 0; max-width: 100%; }
 .btn-icono-aviso {
   background: none;
   border: 1px solid transparent;
@@ -4720,13 +4725,13 @@ td.mov-piezas.mov-salida { color: #b91c1c; }
    varios productos; Tickets; Orden del catálogo; fotos de Entradas y salidas
    ============================================================================ */
 
-/* ---- Pedidos de HOY: las rayas que delimitan su renglón van en verde ----
-   Claudia: "todos los pedidos que sean del día de hoy, las líneas que
-   delimitan sus filas deben colorearse del verde que se usa en ese mismo
-   panel, para distinguirlos fácil". Es el mismo verde de las pestañas. */
-.pedidos-table tbody tr.fila-de-hoy td {
-  border-top: 2px solid var(--brand);
-  border-bottom: 2px solid var(--brand);
+/* ---- Pedidos de HOY: un pedacito verde al PRINCIPIO del renglón ----
+   (2026-10-08, Claudia: "en lugar de que sea verde la fila, mejor que sea
+   verde un pedazo del principio de las filas"). Es el mismo verde de las
+   pestañas. Las reglas que lo combinan con el azul (renglón tocado) y el
+   amarillo (mismo pedido) están más abajo, en "RONDA 62 · Pedidos". */
+.pedidos-table tbody tr.fila-de-hoy td:first-child {
+  box-shadow: inset 5px 0 0 var(--brand);
 }
 
 /* ---- Pedido NUEVO que apenas se está viendo: destello amarillo ----
@@ -4774,57 +4779,91 @@ td.mov-piezas.mov-salida { color: #b91c1c; }
 .pedidos-table tbody tr.fila-misma-compra:not([data-fila-activa]):not(.fila-sin-guardar) td:first-child {
   box-shadow: inset 4px 0 0 #e6b800;
 }
-/* La marquita "🧺5" junto al nombre de la clienta: este renglón es parte de
-   un pedido de 5 productos. */
-.pedido-cliente-celda { display: flex; align-items: center; gap: 0.25rem; min-width: 0; }
-.pedido-cliente-celda .celda-texto-truncado { flex: 1; }
-.pedido-compra-chip {
-  flex-shrink: 0;
-  font-size: 0.66rem;
-  line-height: 1.5;
-  padding: 0 0.3rem;
-  border-radius: 999px;
-  background: #fff3b0;
-  border: 1px solid #e6c84a;
-  color: #6b5200;
-  white-space: nowrap;
-  cursor: help;
-}
-/* La barrita del pedido completo, arriba de la tabla. Mide SIEMPRE lo mismo
-   (título en un renglón, controles, y una nota en un renglón: lo que no
-   quepa se corta con "…"), esté en reposo o con un pedido tocado: así la
-   tabla no se mueve al tocar un renglón. */
-.compra-barra {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-rows: auto auto;
+/* (2026-10-07) Aquí estaban la marquita "🧺5" de cada renglón y la barrita
+   que siempre estaba a la vista. Claudia: "esos baldes no me gustan… solo
+   debe de aparecer al tocar… un aviso mini, minimizable y temporal… y ese
+   debe de ser fijo si llega a salir el banner amarillo".
+   Queda UNA franja delgada arriba de la tabla, que siempre mide lo mismo
+   (para que la tabla no se mueva al tocar un renglón) y que se queda pegada
+   arriba de la pantalla aunque se baje la página:
+     - en reposo: un aviso chiquito (o, minimizado, solo un 💡);
+     - al tocar un pedido de varios productos: la barrita amarilla. */
+.compra-franja {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  display: flex;
   align-items: center;
-  column-gap: 0.9rem;
-  row-gap: 0.2rem;
-  margin: 0 0 0.6rem;
-  padding: 0.4rem 0.75rem;
+  height: 42px;
+  margin: 0 0 0.35rem;
+  background: var(--bg);
+}
+.compra-aviso {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0.2rem 0.3rem 0.2rem 0.6rem;
+  border-radius: 999px;
+  background: #fffdf2;
+  border: 1px dashed #eadf9f;
+  color: #7a6a1f;
+  font-size: 0.76rem;
+  line-height: 1.25;
+}
+.compra-aviso-texto { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.compra-aviso-cerrar,
+.compra-aviso-mini {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 999px;
+  color: #7a6a1f;
+  line-height: 1;
+}
+.compra-aviso-cerrar { font-size: 0.8rem; padding: 0.25rem 0.4rem; }
+.compra-aviso-cerrar:hover { background: #f3e7a6; }
+.compra-aviso-mini {
+  font-size: 0.9rem;
+  padding: 0.25rem 0.4rem;
+  background: #fffdf2;
+  border: 1px dashed #eadf9f;
+  opacity: 0.75;
+}
+.compra-aviso-mini:hover, .compra-aviso-mini:focus-visible { opacity: 1; background: #fff6bf; }
+/* La barrita amarilla del pedido que se tocó: todo en UN renglón. */
+.compra-barra {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 0.8rem;
+  height: 100%;
+  padding: 0 0.7rem;
   border-radius: 8px;
   background: #fffbe0;
   border: 1px solid #e6c84a;
+  box-shadow: 0 2px 6px rgba(120, 90, 0, 0.12);
   font-size: 0.86rem;
 }
-.compra-barra-titulo { grid-column: 1; grid-row: 1; color: #4a3a00; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.compra-barra-controles { grid-column: 2; grid-row: 1; display: flex; align-items: center; gap: 0.5rem; min-height: 32px; }
-.compra-barra-estado { display: inline-flex; align-items: center; gap: 0.4rem; font-weight: 600; color: #4a3a00; white-space: nowrap; }
-.compra-barra-estado select { font-size: 0.82rem; padding: 0.3rem 0.4rem; border-radius: 6px; border: 1px solid #d9c463; background: white; }
-.compra-barra .btn-small { white-space: nowrap; }
-.compra-barra-etiqueta-corta { display: none; }
+.compra-barra-titulo { color: #4a3a00; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .compra-barra-nota {
-  grid-column: 1 / -1;
-  grid-row: 2;
-  font-size: 0.78rem;
-  line-height: 1.3;
+  font-size: 0.75rem;
+  line-height: 1.25;
   color: #6b5a12;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
 }
+.compra-barra-controles { display: flex; align-items: center; gap: 0.5rem; }
+.compra-barra-estado { display: inline-flex; align-items: center; gap: 0.4rem; font-weight: 600; color: #4a3a00; white-space: nowrap; }
+.compra-barra-estado select { font-size: 0.82rem; padding: 0.25rem 0.4rem; border-radius: 6px; border: 1px solid #d9c463; background: white; }
+.compra-barra .btn-small { white-space: nowrap; }
+.compra-barra-etiqueta-corta { display: none; }
 .compra-barra-cerrar {
   border: none;
   background: transparent;
@@ -4835,15 +4874,56 @@ td.mov-piezas.mov-salida { color: #b91c1c; }
   border-radius: 6px;
 }
 .compra-barra-cerrar:hover { background: #f3e7a6; }
-/* En reposo (no se ha tocado ningún pedido de varios productos): más tenue. */
-.compra-barra-reposo { background: #fffdf2; border-style: dashed; border-color: #eadf9f; }
-.compra-barra-reposo .compra-barra-titulo { color: #7a6a1f; }
-.compra-barra-reposo .compra-barra-nota { color: #8a7c3a; }
-/* En pantallas angostas: título, controles y nota, cada uno en su renglón. */
+/* En pantallas angostas la franja mide dos renglones: título arriba y
+   controles abajo (la nota no cabe: queda en el título del botón). */
+/* (2026-10-08) La barrita ya no aparta lugar: solo existe mientras hay un
+   pedido de varios productos tocado. El 💡 vive al final de "Pedidos por
+   estado". */
+.pedidos-resumen-fila .compra-aviso-mini,
+.pedidos-resumen-fila .compra-aviso { align-self: center; }
+.pedidos-resumen-fila .compra-aviso { max-width: min(100%, 34rem); }
+.pedidos-resumen-fila .compra-aviso-texto { white-space: normal; }
+
+/* ---- El verde de HOY detrás del azul y del amarillo ----
+   Claudia: "si llega a salir el principio amarillo y azul de cuando
+   seleccionamos filas, el principio verde debe de verse atrás de ellos y más
+   tenue, para no saturar la vista". La barrita azul/amarilla va encima (4px)
+   y el verde, más clarito, asoma justo detrás. */
+.pedidos-table tbody tr.fila-de-hoy[data-fila-activa]:not(.fila-sin-guardar) td:first-child {
+  box-shadow: inset 4px 0 0 #6f9fd8, inset 8px 0 0 rgba(31, 122, 77, 0.38);
+}
+.pedidos-table tbody tr.fila-de-hoy.fila-misma-compra:not([data-fila-activa]):not(.fila-sin-guardar) td:first-child {
+  box-shadow: inset 4px 0 0 #e6b800, inset 8px 0 0 rgba(31, 122, 77, 0.38);
+}
+
+/* Un renglón de hoy con cambios SIN GUARDAR: manda el naranja de siempre
+   (es el aviso más importante) y el verde asoma detrás, más clarito. */
+.pedidos-table tbody tr.fila-de-hoy.fila-sin-guardar td:first-child {
+  box-shadow: inset 4px 0 0 #d97706, inset 8px 0 0 rgba(31, 122, 77, 0.38);
+}
+
+/* ---- Filtro verde "De hoy" (junto a "Todos" en Pedidos por estado) ---- */
+.resumen-btn-hoy {
+  border-color: var(--brand);
+  color: var(--brand-dark);
+  background: #ecf7f0;
+}
+.resumen-btn-hoy::before {
+  content: '';
+  width: 4px;
+  height: 0.95em;
+  border-radius: 2px;
+  background: var(--brand);
+}
+.resumen-btn-hoy.activo::before { background: white; }
+
 @media (max-width: 760px) {
-  .compra-barra { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto; padding: 0.4rem 0.55rem; font-size: 0.8rem; }
-  .compra-barra-controles { grid-column: 1; grid-row: 2; justify-content: flex-start; min-height: 34px; gap: 0.4rem; }
-  .compra-barra-nota { grid-row: 3; }
+  .compra-franja { height: 78px; }
+  .compra-aviso { border-radius: 10px; align-items: flex-start; padding: 0.3rem 0.3rem 0.3rem 0.55rem; }
+  .compra-aviso-texto { white-space: normal; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; font-size: 0.72rem; }
+  .compra-barra { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto; row-gap: 0.25rem; align-content: center; padding: 0.3rem 0.55rem; font-size: 0.8rem; }
+  .compra-barra-nota { display: none; }
+  .compra-barra-controles { justify-content: flex-start; gap: 0.4rem; }
   .compra-barra-etiqueta { display: none; }
   .compra-barra-etiqueta-corta { display: inline; }
   .compra-barra-cerrar { margin-left: auto; }
@@ -4874,7 +4954,10 @@ td.mov-piezas.mov-salida { color: #b91c1c; }
    completo) y, debajo, código · piezas · precio en chiquito ---- */
 .orden-nombre { display: flex; flex-direction: column; gap: 1px; }
 /* Aunque sobre espacio, un nombre larguísimo se corta a este ancho. */
-.orden-nombre .celda-texto-truncado { line-height: 1.25; max-width: 26rem; }
+/* (2026-10-07, Claudia: "que recorte hasta donde dice 'desde…'".) Más corto
+   que antes: caben unas 27 letras y lo demás queda en "…" (clic para verlo
+   completo). */
+.orden-nombre .celda-texto-truncado { line-height: 1.25; max-width: 14.5rem; }
 .orden-nombre .celda-texto-truncado.expandida { max-width: 100%; }
 .orden-datos {
   display: flex;
@@ -4901,4 +4984,174 @@ td.mov-piezas.mov-salida { color: #b91c1c; }
   background: #e11d48;
   box-shadow: 0 0 0 2px rgba(225, 29, 72, 0.18);
   vertical-align: middle;
+}
+
+
+/* ============================================================================
+   RONDA 62 (2026-10-07)
+   Reembolsos con motivo; avisos que se quitan solos; texto que se puede
+   copiar en Orden del catálogo; formulario a la izquierda / centro / derecha;
+   periodos del Estado de cuenta; el ticket que ve la clienta.
+   ============================================================================ */
+
+/* ---- Reembolso: monto (ya con el total escrito) y motivo ---- */
+.pedido-reembolso-caja { display: flex; flex-direction: column; gap: 0.3rem; }
+.pedido-input-reembolso.pedido-reembolso-mal { border-color: var(--danger); background: var(--danger-bg); }
+.pedido-reembolso-error { font-size: 0.68rem; line-height: 1.25; color: var(--danger); white-space: normal; }
+.pedido-input-motivo {
+  width: 100%;
+  min-width: 130px;
+  box-sizing: border-box;
+  padding: 0.25rem 0.35rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  font: inherit;
+  font-size: 0.76rem;
+  line-height: 1.3;
+  color: var(--text);
+  resize: vertical;
+}
+.pedido-input-motivo.pedido-motivo-falta { border-color: #e0a800; background: #fffdf2; }
+/* El motivo ya guardado: un botoncito; al tocarlo se abre el texto. */
+.motivo-mini { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 0.2rem; max-width: 100%; vertical-align: middle; }
+.motivo-mini-boton {
+  border: 1px solid #d6dbe3;
+  background: #f8fafc;
+  color: #374151;
+  border-radius: 999px;
+  padding: 0.05rem 0.45rem;
+  font-size: 0.7rem;
+  line-height: 1.5;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.motivo-mini-boton:hover, .motivo-mini-boton:focus-visible { background: #eef2f7; border-color: #b6bfcc; }
+.motivo-mini-texto {
+  display: block;
+  max-width: 260px;
+  padding: 0.3rem 0.45rem;
+  border-radius: 6px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  color: #1f2937;
+  font-size: 0.74rem;
+  line-height: 1.35;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+/* ---- Avisos que se quitan solos (y al tocarlos) ---- */
+.mensaje-temporal {
+  cursor: pointer;
+  transition: opacity 0.38s ease, transform 0.38s ease;
+}
+.mensaje-temporal.mensaje-temporal-saliendo { opacity: 0; transform: translateY(-4px); }
+.mensaje-temporal-x { margin-left: 0.5rem; font-size: 0.75em; opacity: 0.45; }
+.mensaje-temporal:hover .mensaje-temporal-x { opacity: 0.9; }
+.aviso-tocable { cursor: pointer; }
+@media (prefers-reduced-motion: reduce) {
+  .mensaje-temporal { transition: none; }
+}
+
+/* ---- Orden del catálogo: el texto se puede seleccionar y copiar ---- */
+.orden-texto-copiable {
+  align-self: flex-start;
+  max-width: 100%;
+  min-width: 0;
+  cursor: text;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.orden-nombre > .orden-texto-copiable:first-child { display: block; }
+.orden-nombre .celda-texto-truncado { cursor: text; }
+
+/* ---- "+ Agregar producto": izquierda / centro / derecha ---- */
+.new-product-form.formulario-lado-centro { margin-left: auto; margin-right: auto; }
+.new-product-form.formulario-lado-derecha { margin-left: auto; margin-right: 0; }
+.formulario-lado-selector {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.3rem;
+  margin: -0.4rem 0 0.8rem;
+}
+.formulario-lado-etiqueta { font-size: 0.74rem; color: var(--muted); margin-right: 0.15rem; }
+.formulario-lado-btn {
+  border: 1px solid var(--border);
+  background: #f9fafb;
+  color: var(--text);
+  border-radius: 999px;
+  padding: 0.15rem 0.6rem;
+  font-size: 0.74rem;
+  cursor: pointer;
+}
+.formulario-lado-btn.activo { background: var(--brand); border-color: var(--brand); color: white; }
+/* En pantallas angostas el formulario ya ocupa todo el ancho: no hay lado que elegir. */
+@media (max-width: 780px) {
+  .formulario-lado-selector { display: none; }
+}
+
+/* ---- Estado de cuenta: periodos de un toque ---- */
+.periodos-rapidos { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin-bottom: 0.7rem; }
+.periodos-rapidos-titulo { font-size: 0.82rem; font-weight: 600; color: var(--muted); }
+.periodos-rapidos .analitica-rapido-btn { padding: 0.3rem 0.7rem; font-size: 0.8rem; }
+.periodos-rapidos-mes { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.8rem; color: var(--muted); }
+.periodos-rapidos-mes select { font-size: 0.8rem; padding: 0.3rem 0.4rem; border-radius: 8px; border: 1px solid var(--border); background: white; }
+
+/* ---- El ticket que ve la clienta (al leer el QR) ---- */
+.ticket-publico { max-width: 420px; margin: 0 auto; padding: 0.5rem 0 2rem; text-align: center; }
+.ticket-publico-titulo { margin: 0.4rem 0 0.9rem; font-size: 1.15rem; }
+.ticket-publico .ticket-papel { text-align: left; }
+.ticket-publico-botones { display: flex; justify-content: center; gap: 0.6rem; margin: 0.4rem 0 0.6rem; }
+.ticket-publico-nota { font-size: 0.82rem; margin: 0.3rem 0; }
+.ticket-publico-aviso {
+  margin: 2rem auto 1rem;
+  padding: 1.2rem 1.1rem;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.ticket-publico-aviso h2 { margin: 0 0 0.6rem; font-size: 1.1rem; }
+.ticket-publico-aviso p { margin: 0.35rem 0; color: #374151; }
+.ticket-publico-aviso .btn { margin-top: 0.7rem; }
+.ticket-publico-pie { margin-top: 1.6rem; font-size: 0.85rem; }
+.ticket-publico-pie a { color: var(--brand); }
+/* Un QR de antes que todavía apunta al panel: aviso sencillo, sin formulario. */
+.ticket-qr-viejo { text-align: center; }
+.ticket-qr-viejo h2 { margin: 0; font-size: 1.1rem; }
+.ticket-qr-viejo p { margin: 0; }
+.ticket-qr-viejo-equipo { margin-top: 0.6rem; font-size: 0.75rem; color: var(--muted); align-self: center; }
+
+/* ---- Orden del catálogo: general o de una sucursal (2026-10-08) ----
+   Arriba, solo para Administradores, un carrusel para elegir qué catálogo
+   se acomoda. Se desliza de lado si no caben todos. */
+.orden-vistas {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 0.6rem;
+  min-width: 0;
+}
+.orden-vistas-titulo { font-weight: 600; font-size: 0.85rem; white-space: nowrap; }
+.orden-vistas-carrusel {
+  display: flex;
+  gap: 0.4rem;
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+  padding: 2px 2px 4px;
+  min-width: 0;
+  scrollbar-width: thin;
+}
+.orden-vistas-carrusel .resumen-btn { flex-shrink: 0; scroll-snap-align: start; white-space: nowrap; }
+.orden-vistas-carrusel .resumen-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.orden-vista-nota {
+  margin: 0 0 0.6rem;
+  padding: 0.4rem 0.7rem;
+  border-left: 4px solid var(--brand);
+  background: #ecf7f0;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  color: var(--brand-dark);
 }
