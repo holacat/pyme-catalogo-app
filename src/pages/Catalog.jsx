@@ -3,6 +3,7 @@ import ProductCard, { obtenerInfoOferta } from '../components/ProductCard.jsx';
 import SolicitudModal from '../components/SolicitudModal.jsx';
 import CarritoModal from '../components/CarritoModal.jsx';
 import { listarProductos, crearPedidoCarrito, consultarMarcaDeCambios } from '../api.js';
+import TicketPublico, { leerTicketDelLink } from './TicketPublico.jsx';
 
 // Refresco del catálogo (2026-10-06). Antes, cada catálogo abierto (cada
 // pestaña, cada celular) le pedía TODOS los productos al servidor cada 5
@@ -74,7 +75,12 @@ function precioQueSeCobra(producto) {
 // todavía no está configurado (campo vacío), se usa la variable de entorno
 // vieja como respaldo, para no dejar el catálogo sin número de un día para
 // otro.
-function buildWhatsAppLinkCarrito(items, nombre, telefonoDinamico) {
+// "nombreSucursal" (2026-10-07): si el pedido se hace desde el catálogo de
+// una sucursal, el mensaje lo dice arriba. Claudia tenía dos sucursales con
+// el MISMO teléfono de pedidos y, al llegar el WhatsApp, no había forma de
+// saber de cuál de las dos era (parecía que el pedido "se pasaba" de una a
+// otra). En el catálogo Global el mensaje queda igual que siempre.
+function buildWhatsAppLinkCarrito(items, nombre, telefonoDinamico, nombreSucursal) {
   const phone = telefonoDinamico || import.meta.env.VITE_WHATSAPP_NUMBER;
   const lineas = items
     .map(({ producto, cantidad }) => {
@@ -90,6 +96,7 @@ function buildWhatsAppLinkCarrito(items, nombre, telefonoDinamico) {
   const piezas = items.reduce((acc, { cantidad }) => acc + cantidad, 0);
   const mensaje =
     `Hola, soy ${nombre}.\n` +
+    (nombreSucursal ? `🏪 Pedido del catálogo de la sucursal ${nombreSucursal}\n` : '') +
     `Me interesan estos productos:\n` +
     `${lineas}\n` +
     `📦 Total de piezas: ${piezas}\n` +
@@ -328,7 +335,16 @@ function TituloCategoria({ nombre, className }) {
   );
 }
 
+// (2026-10-07) La dirección del catálogo también sirve para el ticket de la
+// clienta: si trae "?ticket=…" (lo que lleva el QR de un ticket), en vez del
+// catálogo se enseña SOLO ese ticket (ver TicketPublico.jsx).
 export default function Catalog() {
+  const [ticketDelLink] = useState(leerTicketDelLink);
+  if (ticketDelLink) return <TicketPublico folio={ticketDelLink.folio} clave={ticketDelLink.clave} />;
+  return <CatalogoDeProductos />;
+}
+
+function CatalogoDeProductos() {
   const [productos, setProductos] = useState([]);
   const [estado, setEstado] = useState('cargando'); // cargando | listo | error
   const [error, setError] = useState('');
@@ -606,7 +622,7 @@ export default function Catalog() {
     let url = '';
     let envio = null;
     try {
-      url = buildWhatsAppLinkCarrito(items, nombre, telefonoPedidos);
+      url = buildWhatsAppLinkCarrito(items, nombre, telefonoPedidos, sucursalId && sucursal ? sucursal.nombre : '');
       const huella = huellaDelPedido(items, { nombre, telefono }, sucursalId);
       if (!envioRef.current || envioRef.current.huella !== huella) {
         envioRef.current = { id: nuevoIdEnvio(), huella, desde: Date.now(), whatsAppAbierto: false };
