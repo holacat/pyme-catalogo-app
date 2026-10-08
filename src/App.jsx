@@ -21,12 +21,22 @@ export default function App() {
   // catálogo de una sucursal (`/?sucursal=...`), el logo y "Catálogo" la
   // dejan EN ESA MISMA sucursal — antes la mandaban a "/" a secas, o sea,
   // al catálogo Global.
-  const destinoCatalogo = { pathname: '/', search: location.search };
+  // (2026-10-08) Pero SOLO la sucursal: desde la página de un ticket
+  // ("/?ticket=…&c=…") el logo y "Catálogo" llevan al catálogo, no otra vez
+  // al mismo ticket.
+  const sucursalDelLink = new URLSearchParams(location.search).get('sucursal');
+  const destinoCatalogo = { pathname: '/', search: sucursalDelLink ? `?sucursal=${encodeURIComponent(sucursalDelLink)}` : '' };
+  // En la página de un ticket los enlaces cargan la página de nuevo (un
+  // enlace "interno" cambiaba la dirección pero dejaba el ticket en pantalla).
+  const enTicket = new URLSearchParams(location.search).has('ticket');
+  const hrefCatalogo = `/${destinoCatalogo.search}`;
 
   return (
     <div className="app-shell">
       <header className="app-header">
-        {enCatalogo ? (
+        {enCatalogo && enTicket ? (
+          <a href={hrefCatalogo} className="brand">🛍️ Mi Comercio</a>
+        ) : enCatalogo ? (
           <Link to={destinoCatalogo} className="brand">🛍️ Mi Comercio</Link>
         ) : (
           <a href="/" target="_blank" rel="noopener noreferrer" className="brand" title="Abre el catálogo público en otra pestaña">
@@ -34,7 +44,9 @@ export default function App() {
           </a>
         )}
         <nav>
-          {enCatalogo ? (
+          {enCatalogo && enTicket ? (
+            <a href={hrefCatalogo}>Catálogo</a>
+          ) : enCatalogo ? (
             <Link to={destinoCatalogo} className="active">Catálogo</Link>
           ) : (
             <a href="/" target="_blank" rel="noopener noreferrer" title="Abre el catálogo público en otra pestaña">
