@@ -99,11 +99,13 @@ function bajarArchivo(nombreArchivo, bytes, tipoMime) {
   document.body.appendChild(enlace);
   enlace.click();
   // Se limpia un momento después (si se quita de inmediato, algunos
-  // navegadores de celular cancelan la descarga).
+  // navegadores de celular cancelan la descarga). (2026-10-08) 40 segundos:
+  // con 4, un celular lento a veces todavía no terminaba de guardar un PDF
+  // grande y la descarga salía vacía.
   setTimeout(() => {
     enlace.remove();
     URL.revokeObjectURL(url);
-  }, 4000);
+  }, 40000);
 }
 
 // Nombre de archivo sin caracteres que estorben en Windows / Android.
