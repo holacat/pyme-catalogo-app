@@ -42,19 +42,27 @@ function dinero(numero) {
 export default function CarritoModal({ items, onQuitar, onCambiarCantidad, onClose, onContinuar }) {
   const total = items.reduce((acc, { producto, cantidad }) => acc + precioQueSeCobra(producto) * cantidad, 0);
   const totalPiezas = items.reduce((acc, { cantidad }) => acc + cantidad, 0);
-  const sucursalesDelPedido = Array.from(new Set(items.filter((it) => it.sucursal).map((it) => String(it.sucursal.id))));
+  // (2026-10-09) Un pedido es de UNA sola sucursal: se dice arriba cuál es.
+  const sucursalDelPedido = (items.find((it) => it.sucursal) || {}).sucursal || null;
 
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-box" onClick={(e) => e.stopPropagation()}>
         <h3>Tu pedido</h3>
+        {sucursalDelPedido && (
+          <p className="carrito-sucursal" data-carrito-sucursal={sucursalDelPedido.id}>
+            🏪 Sucursal <strong>{sucursalDelPedido.nombre}</strong>
+            {sucursalDelPedido.zona ? ` · ${sucursalDelPedido.zona}` : ''}
+            <span className="muted"> — para pedir de otra sucursal, manda este pedido y haz otro.</span>
+          </p>
+        )}
 
         {items.length === 0 ? (
           <p className="muted">Todavía no has agregado productos a tu pedido.</p>
         ) : (
           <div className="carrito-lista">
             {items.map((item) => {
-              const { producto, cantidad, sucursal } = item;
+              const { producto, cantidad } = item;
               const clave = claveDeItem(item);
               const stockDisponible = Number(producto.Stock) || 0;
               const unitario = precioQueSeCobra(producto);
@@ -64,11 +72,7 @@ export default function CarritoModal({ items, onQuitar, onCambiarCantidad, onClo
                 <div key={clave} className="carrito-item">
                   <div className="carrito-item-info">
                     <strong>{producto.Nombre}</strong>
-                    {sucursal && (
-                      <span className="carrito-item-sucursal" data-carrito-sucursal={sucursal.id}>
-                        🏪 {sucursal.nombre}{sucursal.zona ? ` · ${sucursal.zona}` : ''}
-                      </span>
-                    )}
+
                     <span className="muted">
                       {conOferta && <s className="carrito-precio-antes">{dinero(normal)}</s>} {dinero(unitario)} c/u
                       {conOferta && <span className="carrito-etiqueta-oferta">Oferta</span>}
@@ -122,12 +126,7 @@ export default function CarritoModal({ items, onQuitar, onCambiarCantidad, onClo
             <p className="carrito-total">
               Total aproximado: <strong>{dinero(total)}</strong>
             </p>
-            {sucursalesDelPedido.length > 1 && (
-              <p className="carrito-varias-sucursales" data-carrito-varias>
-                🏪 Tu pedido es de <strong>{sucursalesDelPedido.length} sucursales</strong>: se anota un pedido para cada una y
-                a cada sucursal le mandas su propio WhatsApp.
-              </p>
-            )}
+
           </div>
         )}
 
