@@ -24,6 +24,12 @@ import BotonMantener from './BotonMantener.jsx';
 //   3. Total de piezas de todo el pedido (ej. 7 chamarras + 8 pantuflas +
 //      6 relojes = 21 piezas), además del total en dinero.
 
+// (2026-10-09) En el catálogo general el mismo producto puede venir de
+// varias sucursales: cada renglón del pedido es "producto + sucursal".
+export function claveDeItem(item) {
+  return `${item.producto.ID}|${item.sucursal ? item.sucursal.id : ''}`;
+}
+
 function precioQueSeCobra(producto) {
   const { precioOferta } = obtenerInfoOferta(producto);
   return precioOferta !== null ? precioOferta : Number(producto.Precio) || 0;
@@ -36,6 +42,7 @@ function dinero(numero) {
 export default function CarritoModal({ items, onQuitar, onCambiarCantidad, onClose, onContinuar }) {
   const total = items.reduce((acc, { producto, cantidad }) => acc + precioQueSeCobra(producto) * cantidad, 0);
   const totalPiezas = items.reduce((acc, { cantidad }) => acc + cantidad, 0);
+  const sucursalesDelPedido = Array.from(new Set(items.filter((it) => it.sucursal).map((it) => String(it.sucursal.id))));
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -46,15 +53,22 @@ export default function CarritoModal({ items, onQuitar, onCambiarCantidad, onClo
           <p className="muted">Todavía no has agregado productos a tu pedido.</p>
         ) : (
           <div className="carrito-lista">
-            {items.map(({ producto, cantidad }) => {
+            {items.map((item) => {
+              const { producto, cantidad, sucursal } = item;
+              const clave = claveDeItem(item);
               const stockDisponible = Number(producto.Stock) || 0;
               const unitario = precioQueSeCobra(producto);
               const normal = Number(producto.Precio) || 0;
               const conOferta = unitario < normal;
               return (
-                <div key={producto.ID} className="carrito-item">
+                <div key={clave} className="carrito-item">
                   <div className="carrito-item-info">
                     <strong>{producto.Nombre}</strong>
+                    {sucursal && (
+                      <span className="carrito-item-sucursal" data-carrito-sucursal={sucursal.id}>
+                        🏪 {sucursal.nombre}{sucursal.zona ? ` · ${sucursal.zona}` : ''}
+                      </span>
+                    )}
                     <span className="muted">
                       {conOferta && <s className="carrito-precio-antes">{dinero(normal)}</s>} {dinero(unitario)} c/u
                       {conOferta && <span className="carrito-etiqueta-oferta">Oferta</span>}
@@ -64,7 +78,7 @@ export default function CarritoModal({ items, onQuitar, onCambiarCantidad, onClo
                     {/* 2026-10-01: se pueden mantener presionados para
                         avanzar rápido (ver BotonMantener.jsx). */}
                     <BotonMantener
-                      onPaso={() => onCambiarCantidad(producto.ID, cantidad - 1)}
+                      onPaso={() => onCambiarCantidad(clave, cantidad - 1)}
                       disabled={cantidad <= 1}
                       aria-label="Quitar uno"
                     >
@@ -72,7 +86,7 @@ export default function CarritoModal({ items, onQuitar, onCambiarCantidad, onClo
                     </BotonMantener>
                     <span>{cantidad}</span>
                     <BotonMantener
-                      onPaso={() => onCambiarCantidad(producto.ID, cantidad + 1)}
+                      onPaso={() => onCambiarCantidad(clave, cantidad + 1)}
                       disabled={cantidad >= stockDisponible}
                       aria-label="Agregar uno"
                     >
@@ -85,7 +99,7 @@ export default function CarritoModal({ items, onQuitar, onCambiarCantidad, onClo
                   <button
                     type="button"
                     className="carrito-item-quitar"
-                    onClick={() => onQuitar(producto.ID)}
+                    onClick={() => onQuitar(clave)}
                     title="Quitar del pedido"
                     aria-label="Quitar del pedido"
                   >
@@ -108,6 +122,12 @@ export default function CarritoModal({ items, onQuitar, onCambiarCantidad, onClo
             <p className="carrito-total">
               Total aproximado: <strong>{dinero(total)}</strong>
             </p>
+            {sucursalesDelPedido.length > 1 && (
+              <p className="carrito-varias-sucursales" data-carrito-varias>
+                🏪 Tu pedido es de <strong>{sucursalesDelPedido.length} sucursales</strong>: se anota un pedido para cada una y
+                a cada sucursal le mandas su propio WhatsApp.
+              </p>
+            )}
           </div>
         )}
 
