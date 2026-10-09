@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import ProductCard, { obtenerInfoOferta } from '../components/ProductCard.jsx';
 import SolicitudModal from '../components/SolicitudModal.jsx';
-import CarritoModal from '../components/CarritoModal.jsx';
+import CarritoModal, { claveDeItem } from '../components/CarritoModal.jsx';
 import { listarProductos, crearPedidoCarrito, consultarMarcaDeCambios, verTicketPublico } from '../api.js';
 import { crearQR, descargarTicketPDF } from '../exportar.js';
 
@@ -80,6 +80,63 @@ function precioQueSeCobra(producto) {
 // el MISMO teléfono de pedidos y, al llegar el WhatsApp, no había forma de
 // saber de cuál de las dos era (parecía que el pedido "se pasaba" de una a
 // otra). En el catálogo Global el mensaje queda igual que siempre.
+// (2026-10-09) Un pedido del catálogo general puede ser de VARIAS
+// sucursales (Claudia: "se enviarán diferentes pedidos registrados con sus
+// diferentes sucursales"). Se arma un WhatsApp por cada número: si dos
+// sucursales comparten número, van juntas en el mismo mensaje, cada una con
+// su título. Regresa [{ etiqueta, url }] (la etiqueta dice a quién va).
+function enlacesDeWhatsAppDelPedido(items, nombre, telefonoGeneral, nombreSucursalDelLink) {
+  if (!items.some((it) => it.sucursal)) {
+    return [{ etiqueta: '', url: buildWhatsAppLinkCarrito(items, nombre, telefonoGeneral, nombreSucursalDelLink) }];
+  }
+  const porTelefono = new Map();
+  items.forEach((it) => {
+    const telefono = (it.sucursal && it.sucursal.telefono) || telefonoGeneral || '';
+    if (!porTelefono.has(telefono)) porTelefono.set(telefono, new Map());
+    const porSucursal = porTelefono.get(telefono);
+    const llave = it.sucursal ? String(it.sucursal.id) : '';
+    if (!porSucursal.has(llave)) porSucursal.set(llave, { sucursal: it.sucursal || null, items: [] });
+    porSucursal.get(llave).items.push(it);
+  });
+  return Array.from(porTelefono.entries()).map(([telefono, porSucursal]) => {
+    const secciones = Array.from(porSucursal.values());
+    const etiqueta = secciones.map((x) => (x.sucursal ? x.sucursal.nombre : 'la tienda')).join(' y ');
+    return { etiqueta, url: buildWhatsAppLinkSecciones(secciones, nombre, telefono) };
+  });
+}
+
+function lineaDeWhatsApp({ producto, cantidad }) {
+  const unitario = precioQueSeCobra(producto);
+  const normal = Number(producto.Precio) || 0;
+  const notaOferta = unitario < normal
+    ? ` (oferta: $${unitario.toLocaleString('es-MX')} c/u, antes $${normal.toLocaleString('es-MX')})`
+    : '';
+  return `🛍️ ${producto.Nombre} x${cantidad} — $${(unitario * cantidad).toLocaleString('es-MX')}${notaOferta}`;
+}
+
+function buildWhatsAppLinkSecciones(secciones, nombre, telefonoDinamico) {
+  const phone = telefonoDinamico || import.meta.env.VITE_WHATSAPP_NUMBER;
+  const todos = secciones.flatMap((x) => x.items);
+  const total = todos.reduce((acc, { producto, cantidad }) => acc + precioQueSeCobra(producto) * cantidad, 0);
+  const piezas = todos.reduce((acc, { cantidad }) => acc + cantidad, 0);
+  const cuerpo = secciones
+    .map((x) => {
+      const titulo = x.sucursal
+        ? `🏪 Sucursal ${x.sucursal.nombre}${x.sucursal.zona ? ` (${x.sucursal.zona})` : ''}:`
+        : '🏪 Tienda:';
+      return `${titulo}\n${x.items.map(lineaDeWhatsApp).join('\n')}`;
+    })
+    .join('\n');
+  const mensaje =
+    `Hola, soy ${nombre}.\n` +
+    `Me interesan estos productos:\n` +
+    `${cuerpo}\n` +
+    `📦 Total de piezas: ${piezas}\n` +
+    `💲 Total aproximado: $${total.toLocaleString('es-MX')}\n` +
+    `¿Siguen disponibles?`;
+  return `https://wa.me/${phone}?text=${encodeURIComponent(mensaje)}`;
+}
+
 function buildWhatsAppLinkCarrito(items, nombre, telefonoDinamico, nombreSucursal) {
   const phone = telefonoDinamico || import.meta.env.VITE_WHATSAPP_NUMBER;
   const lineas = items
@@ -191,7 +248,7 @@ function huellaDelPedido(items, cliente, sucursalId) {
     sucursalId || '',
     cliente.nombre || '',
     cliente.telefono || '',
-    items.map(({ producto, cantidad }) => [String(producto.ID), cantidad]),
+    items.map(({ producto, cantidad, sucursal }) => [String(producto.ID), cantidad, sucursal ? String(sucursal.id) : '']),
   ]);
 }
 
@@ -642,6 +699,9 @@ function CatalogoDeProductos() {
   // vez de estar fijo en una variable de entorno. Ver nota junto a
   // "buildWhatsAppLinkCarrito" arriba.
   const [telefonoPedidos, setTelefonoPedidos] = useState('');
+  // (2026-10-09) El servidor avisa si en el catálogo general se escoge
+  // sucursal por producto (ver ProductCard.jsx).
+  const [eligeSucursal, setEligeSucursal] = useState(false);
   // Zona "🔥 Ofertas" (2026-10-01, pendiente P11): desde "Orden del
   // catálogo" se puede ocultar completa y acomodar el orden de su carrusel;
   // el servidor manda las dos cosas junto con el catálogo.
@@ -709,6 +769,7 @@ function CatalogoDeProductos() {
         if (Array.isArray(data.ofertasOrden)) setOfertasOrden(data.ofertasOrden.map(String));
         if (data.ofertasTitulo !== undefined) setOfertasTitulo(String(data.ofertasTitulo || ''));
         if (data.aceptaIdEnvio !== undefined) servidorAceptaIdEnvioRef.current = !!data.aceptaIdEnvio;
+        setEligeSucursal(!sucursalId && !!data.eligeSucursal);
         setEstado('listo');
       })
       .catch((err) => {
@@ -798,30 +859,39 @@ function CatalogoDeProductos() {
 
   // Agrega un producto al carrito. Si ya estaba, le suma la cantidad
   // (sin pasarse del stock disponible).
-  function handleAgregarCarrito(producto, cantidad) {
+  // (2026-10-09) En el catálogo general cada renglón es "producto + la
+  // sucursal que se escogió": su tope es lo que tiene ESA sucursal.
+  function handleAgregarCarrito(producto, cantidad, sucursalElegida) {
+    const sucursal = sucursalElegida
+      ? { id: String(sucursalElegida.id), nombre: sucursalElegida.nombre, zona: sucursalElegida.zona || '', telefono: sucursalElegida.telefono || '' }
+      : null;
+    const productoDelRenglon = sucursalElegida ? { ...producto, Stock: Number(sucursalElegida.disponible) || 0 } : producto;
+    const nuevo = { producto: productoDelRenglon, cantidad, sucursal };
     setCarrito((prev) => {
-      const stockDisponible = Number(producto.Stock) || 0;
-      const idx = prev.findIndex((it) => it.producto.ID === producto.ID);
+      const stockDisponible = Number(productoDelRenglon.Stock) || 0;
+      const clave = claveDeItem(nuevo);
+      const idx = prev.findIndex((it) => claveDeItem(it) === clave);
       if (idx === -1) {
-        return [...prev, { producto, cantidad: Math.min(cantidad, stockDisponible) }];
+        return [...prev, { ...nuevo, cantidad: Math.min(cantidad, stockDisponible) }];
       }
       const copia = [...prev];
       copia[idx] = {
         ...copia[idx],
+        producto: productoDelRenglon,
         cantidad: Math.min(stockDisponible, copia[idx].cantidad + cantidad),
       };
       return copia;
     });
   }
 
-  function handleQuitarDelCarrito(productoId) {
-    setCarrito((prev) => prev.filter((it) => it.producto.ID !== productoId));
+  function handleQuitarDelCarrito(clave) {
+    setCarrito((prev) => prev.filter((it) => claveDeItem(it) !== clave));
   }
 
-  function handleCambiarCantidadCarrito(productoId, nuevaCantidad) {
+  function handleCambiarCantidadCarrito(clave, nuevaCantidad) {
     setCarrito((prev) =>
       prev.map((it) => {
-        if (it.producto.ID !== productoId) return it;
+        if (claveDeItem(it) !== clave) return it;
         const stockDisponible = Number(it.producto.Stock) || 0;
         const cantidad = Math.max(1, Math.min(stockDisponible, nuevaCantidad));
         return { ...it, cantidad };
@@ -856,9 +926,11 @@ function CatalogoDeProductos() {
     if (items.length === 0) return;
     enviandoRef.current = true;
     let url = '';
+    let enlaces = [];
     let envio = null;
     try {
-      url = buildWhatsAppLinkCarrito(items, nombre, telefonoPedidos, sucursalId && sucursal ? sucursal.nombre : '');
+      enlaces = enlacesDeWhatsAppDelPedido(items, nombre, telefonoPedidos, sucursalId && sucursal ? sucursal.nombre : '');
+      url = enlaces[0].url;
       const huella = huellaDelPedido(items, { nombre, telefono }, sucursalId);
       if (!envioRef.current || envioRef.current.huella !== huella) {
         envioRef.current = { id: nuevoIdEnvio(), huella, desde: Date.now(), whatsAppAbierto: false };
@@ -874,15 +946,16 @@ function CatalogoDeProductos() {
         // Con un servidor que reconoce repetidos se puede poner un límite
         // de espera: si se cuelga, se corta y se reintenta sin riesgo.
         limiteMs: servidorNuevo ? LIMITE_ESPERA_PEDIDO_MS : 0,
-        items: items.map(({ producto, cantidad }) => ({
+        items: items.map(({ producto, cantidad, sucursal: suc }) => ({
           productoId: producto.ID,
           producto: producto.Nombre,
           cantidad,
+          ...(suc ? { sucursal: suc.id } : {}),
         })),
       };
       setErrorRegistroPedido('');
       setRegistrandoPedido(true);
-      setEnvioPedido({ fase: 'enviando', url });
+      setEnvioPedido({ fase: 'enviando', url, enlaces });
 
       // 1) Sale la petición para anotar el pedido…
       let registro = crearPedidoCarrito(pedido);
@@ -916,11 +989,11 @@ function CatalogoDeProductos() {
       // Se quita del carrito SOLO lo que se envió (si mientras tanto la
       // clienta agregó algo más, eso se queda).
       const enviado = {};
-      items.forEach(({ producto, cantidad }) => { enviado[String(producto.ID)] = cantidad; });
+      items.forEach((it) => { enviado[claveDeItem(it)] = it.cantidad; });
       setCarrito((prev) =>
         prev
           .map((it) => {
-            const cuanto = enviado[String(it.producto.ID)];
+            const cuanto = enviado[claveDeItem(it)];
             return cuanto ? { ...it, cantidad: it.cantidad - cuanto } : it;
           })
           .filter((it) => it.cantidad > 0)
@@ -955,13 +1028,13 @@ function CatalogoDeProductos() {
           ? datos.faltantes
           : [{ productoId: datos.productoId, disponible: datos.disponible }];
         const queda = {};
-        faltantes.forEach((f) => { queda[String(f.productoId)] = Number(f.disponible) || 0; });
+        faltantes.forEach((f) => { queda[`${f.productoId}|${f.sucursal || ''}`] = Number(f.disponible) || 0; });
         setCarrito((prev) =>
           prev
             .map((it) => {
-              const id = String(it.producto.ID);
+              const id = claveDeItem(it);
               if (!(id in queda)) return it;
-              return { producto: { ...it.producto, Stock: queda[id] }, cantidad: Math.min(it.cantidad, queda[id]) };
+              return { ...it, producto: { ...it.producto, Stock: queda[id] }, cantidad: Math.min(it.cantidad, queda[id]) };
             })
             .filter((it) => it.cantidad > 0)
         );
@@ -978,7 +1051,7 @@ function CatalogoDeProductos() {
             (yaSalioWhatsApp ? ' No hace falta volver a mandar el WhatsApp.' : '')
         );
       }
-      setEnvioPedido({ fase: 'error', url });
+      setEnvioPedido({ fase: 'error', url, enlaces });
     } finally {
       enviandoRef.current = false;
       setRegistrandoPedido(false);
@@ -1042,6 +1115,25 @@ function CatalogoDeProductos() {
   // mano, por si el navegador de la clienta no lo abrió solo. Va en una
   // constante porque se dibuja en todas las salidas de esta pantalla
   // (también si el catálogo se quedó sin productos o se apagó a medio envío).
+  // (2026-10-09) Pedido de varias sucursales: un WhatsApp para cada una. El
+  // primero se abre solo; los demás, con su botón (un navegador solo deja
+  // abrir uno por toque).
+  const variosWhatsApps = !!(envioPedido && Array.isArray(envioPedido.enlaces) && envioPedido.enlaces.length > 1);
+  const masWhatsApps = variosWhatsApps ? (
+    <div className="aviso-envio-varias" data-aviso-varias-sucursales>
+      <p>
+        Tu pedido es de <strong>{envioPedido.enlaces.length} sucursales</strong>. Se abrió el WhatsApp de{' '}
+        <strong>{envioPedido.enlaces[0].etiqueta}</strong>; manda también el de cada una:
+      </p>
+      <div className="aviso-envio-botones">
+        {envioPedido.enlaces.slice(1).map((e) => (
+          <a key={e.url} className="btn btn-whatsapp" href={e.url} target="_blank" rel="noopener noreferrer" data-whatsapp-sucursal>
+            📲 Enviar a {e.etiqueta}
+          </a>
+        ))}
+      </div>
+    </div>
+  ) : null;
   const avisoEnvio = envioPedido ? (
     <div
       className="modal-overlay"
@@ -1061,6 +1153,7 @@ function CatalogoDeProductos() {
             <p>
               Se va a abrir WhatsApp con tu pedido ya escrito. Ahí solo dale <strong>Enviar</strong>.
             </p>
+            {masWhatsApps}
             <p className="aviso-envio-nota">Estamos anotando tu pedido en la tienda…</p>
             <a className="link-button aviso-envio-link" href={envioPedido.url} target="_blank" rel="noopener noreferrer">
               ¿No se abrió WhatsApp? Tócalo aquí
@@ -1078,9 +1171,10 @@ function CatalogoDeProductos() {
             <p>
               Si todavía no lo haces, dale <strong>Enviar</strong> al mensaje en WhatsApp para que te atiendan.
             </p>
+            {masWhatsApps}
             <div className="aviso-envio-botones">
               <a className="btn btn-whatsapp" href={envioPedido.url} target="_blank" rel="noopener noreferrer">
-                📲 Abrir WhatsApp
+                📲 Abrir WhatsApp{variosWhatsApps ? ` (${envioPedido.enlaces[0].etiqueta})` : ''}
               </a>
               <button type="button" className="btn btn-secondary" onClick={() => setEnvioPedido(null)}>
                 Seguir viendo el catálogo
@@ -1259,6 +1353,7 @@ function CatalogoDeProductos() {
         key={p.ID}
         producto={p}
         onAgregarCarrito={handleAgregarCarrito}
+        escogerSucursal={eligeSucursal}
       />
     ));
   }
