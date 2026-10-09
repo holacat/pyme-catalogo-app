@@ -5239,10 +5239,43 @@ td.mov-piezas.mov-salida { color: #b91c1c; }
    quitara. */
 .precio-tachado,
 .stock-precio-oferta s.precio-tachado {
-  text-decoration: line-through 2px #b91c1c !important;
+  /* (2026-10-09, Claudia: "el tachado en rojo está muy grueso, no alcanzo a
+     distinguir qué dato es") Línea delgada del mismo gris del número. */
+  text-decoration: line-through 1px #6b7280 !important;
   color: #4b5563;
   font-weight: 500;
 }
 .sucursal-oferta-precios { display: inline-flex; flex-direction: column; line-height: 1.15; }
 .sucursal-oferta-precios .precio-tachado { font-size: 0.85em; }
-.price-original { text-decoration: line-through 2px var(--danger) !important; }
+.price-original { text-decoration: line-through 1px currentColor !important; }
+
+/* (2026-10-09) Candado de Stock: la fila que no es tuya se ve en gris. */
+.stock-table tr.fila-ajena > td { background: #f3f4f6; color: #6b7280; }
+.stock-table tr.fila-ajena img.stock-thumb { opacity: 0.6; }
+.btn-candado-stock { cursor: pointer; }
+.btn-candado-stock:hover { background: #fef3c7; }
+/* Bitácora: nombre que tenía la cuenta ese día. */
+.bitacora-nombre-antes { font-size: 0.8em; }
+.ticket-sin-qr { font-size: 0.8rem; margin: 0.4rem 0; }
+
+/* (2026-10-09) "Escoger sucursal" en la tarjeta del catálogo general. */
+.sucursal-escoger { margin: 0.35rem 0 0.25rem; min-width: 0; }
+.sucursal-escoger-label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.8rem; font-weight: 600; color: var(--brand-dark, #1f7a4d); }
+.sucursal-escoger select {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  font-size: 0.8rem;
+  padding: 0.3rem 0.35rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #fff;
+  text-overflow: ellipsis;
+}
+.sucursal-escoger-info { font-size: 0.78rem; margin: 0.2rem 0 0; color: var(--muted); overflow-wrap: anywhere; }
+.stock-en-sucursales { white-space: nowrap; }
+.carrito-item-sucursal { display: block; font-size: 0.78rem; color: #1f7a4d; overflow-wrap: anywhere; }
+.carrito-varias-sucursales { font-size: 0.85rem; background: #ecfdf5; border-radius: 8px; padding: 0.5rem 0.65rem; margin: 0.5rem 0 0; }
+.aviso-envio-varias { background: #f0fdf4; border-radius: 10px; padding: 0.6rem 0.7rem; margin: 0.5rem 0; }
+.aviso-envio-varias p { margin: 0 0 0.45rem; }
