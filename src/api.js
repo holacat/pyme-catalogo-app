@@ -372,8 +372,8 @@ export function actualizarOrdenCategorias({ sesionToken, categorias, resumen }) 
 // Guarda el orden del catálogo de UNA sucursal (2026-10-08): la lista
 // completa de productos y de categorías, ya en el orden nuevo. No toca el
 // catálogo general.
-export function guardarOrdenSucursal({ sesionToken, sucursalId, productos, categorias, resumen }) {
-  return post({ action: 'guardarOrdenSucursal', sesionToken, sucursalId, productos, categorias, resumen });
+export function guardarOrdenSucursal({ sesionToken, sucursalId, productos, categorias, ofertas, resumen }) {
+  return post({ action: 'guardarOrdenSucursal', sesionToken, sucursalId, productos, categorias, ofertas, resumen });
 }
 
 // Guarda el orden del carrusel de la zona "🔥 Ofertas" del catálogo
@@ -564,8 +564,17 @@ export function actualizarCatalogoPropio({ sesionToken, usuarioId, activo }) {
 // sucursal"). "operacion": 'quitar' | 'poner' | 'borrar'. Sin "usuarioId"
 // es el catálogo de quien tiene la sesión; el Admin Central puede mandar el
 // de otra persona.
-export function actualizarCatalogoSucursal({ sesionToken, usuarioId, productoId, operacion }) {
-  return post({ action: 'actualizarCatalogoSucursal', sesionToken, productoId, operacion, ...(usuarioId ? { usuarioId } : {}) });
+// "precioOferta" (2026-10-08): con operacion 'oferta', la oferta PROPIA de
+// esa sucursal para ese producto ('' = quitarla).
+export function actualizarCatalogoSucursal({ sesionToken, usuarioId, productoId, operacion, precioOferta }) {
+  return post({
+    action: 'actualizarCatalogoSucursal',
+    sesionToken,
+    productoId,
+    operacion,
+    ...(usuarioId ? { usuarioId } : {}),
+    ...(precioOferta !== undefined ? { precioOferta } : {}),
+  });
 }
 
 // ---- Tickets (2026-10-06): recibos de los pedidos pagados. Ver "TICKETS"
