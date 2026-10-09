@@ -1075,13 +1075,12 @@ function CatalogoDeProductos() {
   }
 
   // Se llama al darle "Continuar" dentro del modal del carrito.
+  // (2026-10-09) Siempre se pasa por la ventana de nombre y teléfono: si ya
+  // había datos guardados, salen ya llenos para revisarlos (antes se mandaba
+  // directo con los de la vez anterior y no se notaba si eran otros).
   function handleContinuarCarrito() {
     setCarritoAbierto(false);
-    if (clienteGuardado) {
-      enviarPedidoPorWhatsApp(carrito, clienteGuardado);
-    } else {
-      setPidiendoDatosCarrito(true);
-    }
+    setPidiendoDatosCarrito(true);
   }
 
   // Se llama cuando el cliente confirma nombre/teléfono para el carrito
@@ -1674,6 +1673,7 @@ function CatalogoDeProductos() {
       {pidiendoDatosCarrito && (
         <SolicitudModal
           items={carrito}
+          inicial={clienteGuardado}
           onClose={() => setPidiendoDatosCarrito(false)}
           onConfirm={handleConfirmarCarritoDatos}
         />
