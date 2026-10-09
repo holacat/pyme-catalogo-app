@@ -8309,7 +8309,7 @@ function StockRow({
             oferta resaltado, que es el que de verdad se cobra. */}
         {Number(producto.PrecioOferta) > 0 && Number(producto.PrecioOferta) < Number(producto.Precio) ? (
           <span className="stock-precio-oferta" title="En oferta — este es el precio que se cobra">
-            <s>${Number(producto.Precio).toLocaleString('es-MX')}</s>
+            <s className="precio-tachado">${Number(producto.Precio).toLocaleString('es-MX')}</s>
             <strong>${Number(producto.PrecioOferta).toLocaleString('es-MX')}</strong>
           </span>
         ) : (
@@ -12381,8 +12381,14 @@ function OfertaDeSucursal({ producto, ocupado, onGuardar }) {
   if (!editando) {
     return (
       <span className="sucursal-oferta" data-oferta-sucursal={actual > 0 ? 'si' : 'no'}>
+        {/* (2026-10-09, Claudia: "no está mostrando correctamente los
+            tachados") El precio normal TACHADO junto al de oferta, igual que
+            en Stock y en el catálogo. */}
         {actual > 0 ? (
-          <span className="sucursal-oferta-precio" title={`Normal: ${formatearMoneda(normal)}`}>🔥 {formatearMoneda(actual)}</span>
+          <span className="sucursal-oferta-precios" title="En oferta en esta sucursal — este es el precio que se cobra aquí">
+            <s className="precio-tachado">{formatearMoneda(normal)}</s>
+            <span className="sucursal-oferta-precio">🔥 {formatearMoneda(actual)}</span>
+          </span>
         ) : (
           <span className="muted">—</span>
         )}
