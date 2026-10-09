@@ -55,11 +55,16 @@ export function obtenerInfoOferta(producto) {
 // sucursal". El servidor manda "producto.Sucursales" (solo en el general):
 // [{ id, nombre, zona, telefono, disponible }]. Con "escogerSucursal" en
 // false (catálogo de una sucursal) la tarjeta queda como siempre.
-export default function ProductCard({ producto, onAgregarCarrito, escogerSucursal = false }) {
+// "sucursalPreferida": la sucursal del pedido que ya se está armando (un
+// pedido es de una sola sucursal): si este producto también está ahí, ya
+// viene escogida.
+export default function ProductCard({ producto, onAgregarCarrito, escogerSucursal = false, sucursalPreferida = '' }) {
   const sucursales = escogerSucursal && Array.isArray(producto.Sucursales) ? producto.Sucursales : null;
   const [sucursalElegidaId, setSucursalElegidaId] = useState('');
   const sucursalElegida = sucursales
-    ? sucursales.find((x) => String(x.id) === String(sucursalElegidaId)) || (sucursales.length === 1 ? sucursales[0] : null)
+    ? sucursales.find((x) => String(x.id) === String(sucursalElegidaId)) ||
+      (sucursales.length === 1 ? sucursales[0] : null) ||
+      (sucursalPreferida ? sucursales.find((x) => String(x.id) === String(sucursalPreferida)) || null : null)
     : null;
   const faltaSucursal = !!sucursales && sucursales.length > 0 && !sucursalElegida;
   const stockDisponible = sucursalElegida ? Number(sucursalElegida.disponible) || 0 : Number(producto.Stock) || 0;
