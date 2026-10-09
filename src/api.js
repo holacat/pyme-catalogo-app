@@ -93,8 +93,12 @@ export function listarProductos(sucursal) {
 // El QR de un ticket ya NO abre el panel: abre una página pública que solo
 // enseña ese ticket. Hace falta el folio Y su clave larga (las dos vienen en
 // el enlace del QR); sin la clave correcta el servidor no enseña nada.
+// (2026-10-09) La clave viaja como "clave", NO como "c": Google Apps Script
+// tiene reservado el parámetro "c" y, con él, contesta "No se puede abrir el
+// archivo" (sin permiso para la página) — por eso el ticket digital nunca
+// cargaba. En la dirección del QR (la del catálogo) "c" sí se puede usar.
 export function verTicketPublico({ folio, clave }) {
-  return get('verTicket', { folio, c: clave });
+  return get('verTicket', { folio, clave });
 }
 
 export function crearPedido({ cliente, telefono, producto, productoId, cantidad, notas, sucursal, idEnvio }) {
