@@ -437,14 +437,14 @@ export function listarUsuarios(sesionToken) {
 // número de WhatsApp al que le llegan los pedidos de esta persona. Por
 // ahora solo se usa el de quien esté marcado 👑 Admin Central (para el
 // catálogo Global), pero ya se manda y se guarda por persona.
-export function crearUsuario({ sesionToken, nombre, usuario, contrasena, rol, telefonoPedidos }) {
-  return post({ action: 'crearUsuario', sesionToken, nombre, usuario, contrasena, rol, telefonoPedidos });
+export function crearUsuario({ sesionToken, nombre, usuario, contrasena, rol, telefonoPedidos, zona }) {
+  return post({ action: 'crearUsuario', sesionToken, nombre, usuario, contrasena, rol, telefonoPedidos, zona });
 }
 
 // "usuario" (2026-10-01): opcional — solo se manda cuando el Admin Central
 // le cambia a alguien el usuario con el que inicia sesión.
-export function actualizarUsuario({ sesionToken, usuarioId, nombre, rol, telefonoPedidos, usuario }) {
-  return post({ action: 'actualizarUsuario', sesionToken, usuarioId, nombre, rol, telefonoPedidos, usuario });
+export function actualizarUsuario({ sesionToken, usuarioId, nombre, rol, telefonoPedidos, usuario, zona }) {
+  return post({ action: 'actualizarUsuario', sesionToken, usuarioId, nombre, rol, telefonoPedidos, usuario, zona });
 }
 
 export function cambiarContrasenaUsuario({ sesionToken, usuarioId, contrasenaNueva }) {
