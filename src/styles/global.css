@@ -5233,3 +5233,16 @@ td.mov-piezas.mov-salida { color: #b91c1c; }
   font-size: 0.85rem;
 }
 .sucursal-celda-oferta { min-width: 7rem; }
+
+/* (2026-10-09) Precio normal tachado cuando hay oferta (Stock, Mi sucursal):
+   se fuerza la línea por si algún estilo del navegador o de la tabla la
+   quitara. */
+.precio-tachado,
+.stock-precio-oferta s.precio-tachado {
+  text-decoration: line-through 2px #b91c1c !important;
+  color: #4b5563;
+  font-weight: 500;
+}
+.sucursal-oferta-precios { display: inline-flex; flex-direction: column; line-height: 1.15; }
+.sucursal-oferta-precios .precio-tachado { font-size: 0.85em; }
+.price-original { text-decoration: line-through 2px var(--danger) !important; }
