@@ -34,9 +34,13 @@ function limitarTelefono(valorTexto) {
 // central ("Enviando tu pedido a WhatsApp…" → "¡Tu pedido quedó anotado!").
 // De paso, ese mensaje viejo decía "Registramos tu solicitud" cuando el
 // pedido todavía ni se había mandado a anotar.
-export default function SolicitudModal({ producto, items, cantidad = 1, onClose, onConfirm }) {
-  const [nombre, setNombre] = useState('');
-  const [telefono, setTelefono] = useState('');
+// "inicial" (2026-10-09): los datos que este celular ya recordaba. Claudia
+// hizo un pedido y quedó con el nombre y teléfono de la vez anterior sin que
+// lo notara; ahora, si ya hay datos guardados, se enseñan aquí YA LLENOS para
+// que la clienta los revise (o los cambie) antes de mandar cada pedido.
+export default function SolicitudModal({ producto, items, cantidad = 1, inicial = null, onClose, onConfirm }) {
+  const [nombre, setNombre] = useState(() => (inicial && inicial.nombre) || '');
+  const [telefono, setTelefono] = useState(() => limitarTelefono((inicial && inicial.telefono) || ''));
 
   // Si nos pasaron "items" (carrito) lo usamos tal cual; si no, armamos
   // una lista de un solo elemento a partir de "producto" + "cantidad"
@@ -60,14 +64,15 @@ export default function SolicitudModal({ producto, items, cantidad = 1, onClose,
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-box" onClick={(e) => e.stopPropagation()}>
-        <h3>Antes de continuar</h3>
+        <h3>{inicial ? '¿Tus datos están bien?' : 'Antes de continuar'}</h3>
         <p className="muted">
-          Déjanos tu nombre y teléfono para registrar tu solicitud de{' '}
+          {inicial ? 'Revisa tu nombre y teléfono para tu solicitud de' : 'Déjanos tu nombre y teléfono para registrar tu solicitud de'}{' '}
           <strong>{resumenTexto}</strong>. Te vamos a redirigir a WhatsApp enseguida.
         </p>
         <p className="modal-aviso">
-          🔒 Esto solo se pide <strong>una vez</strong> en este celular o computadora. La próxima
-          vez que pidas algo, ya no te lo volveremos a preguntar.
+          {inicial
+            ? '✏️ Son los datos de tu pedido anterior en este celular o computadora. Si no son los tuyos, cámbialos aquí.'
+            : '🔒 Se guardan en este celular o computadora para tu próximo pedido (te los volveremos a enseñar para que los revises).'}
         </p>
         <form onSubmit={handleSubmit}>
           <label className="modal-field">
@@ -78,7 +83,7 @@ export default function SolicitudModal({ producto, items, cantidad = 1, onClose,
               onChange={(e) => setNombre(e.target.value)}
               placeholder="Ej. María López"
               required
-              autoFocus
+              autoFocus={!inicial}
             />
           </label>
           <label className="modal-field">
