@@ -48,9 +48,22 @@ export function obtenerInfoOferta(producto) {
 // "onSolicitar" y su botón ya no existen; Catalog.jsx también se limpió
 // de la lógica que solo servía para este botón (handleSolicitar,
 // registrarYAbrirWhatsApp, el estado "solicitudActual" y su modal).
-export default function ProductCard({ producto, onAgregarCarrito }) {
-  const stockDisponible = Number(producto.Stock) || 0;
-  const sinStock = stockDisponible <= 0;
+// (2026-10-09) "Escoger sucursal" en el catálogo GENERAL. Claudia: "a lado
+// de Disponible algo que diga escoger sucursal, que muestre en cuántas
+// sucursales está dividido ese producto, cuánto tiene cada una y de qué
+// zona es; una vez escogida podemos pedir, y solo la cantidad que tenga esa
+// sucursal". El servidor manda "producto.Sucursales" (solo en el general):
+// [{ id, nombre, zona, telefono, disponible }]. Con "escogerSucursal" en
+// false (catálogo de una sucursal) la tarjeta queda como siempre.
+export default function ProductCard({ producto, onAgregarCarrito, escogerSucursal = false }) {
+  const sucursales = escogerSucursal && Array.isArray(producto.Sucursales) ? producto.Sucursales : null;
+  const [sucursalElegidaId, setSucursalElegidaId] = useState('');
+  const sucursalElegida = sucursales
+    ? sucursales.find((x) => String(x.id) === String(sucursalElegidaId)) || (sucursales.length === 1 ? sucursales[0] : null)
+    : null;
+  const faltaSucursal = !!sucursales && sucursales.length > 0 && !sucursalElegida;
+  const stockDisponible = sucursalElegida ? Number(sucursalElegida.disponible) || 0 : Number(producto.Stock) || 0;
+  const sinStock = sucursales ? sucursales.length === 0 || (Number(producto.Stock) || 0) <= 0 : stockDisponible <= 0;
   const fotos = obtenerFotos(producto.FotoURL);
   const { enOferta, precioOferta } = obtenerInfoOferta(producto);
   const [indice, setIndice] = useState(0);
@@ -202,10 +215,17 @@ export default function ProductCard({ producto, onAgregarCarrito }) {
     setCantidad((c) => Math.min(stockDisponible, c + 1));
   }
 
+  function elegirSucursal(id) {
+    setSucursalElegidaId(id);
+    const nueva = sucursales ? sucursales.find((x) => String(x.id) === String(id)) : null;
+    if (nueva) setCantidad((c) => Math.max(1, Math.min(c, Number(nueva.disponible) || 1)));
+  }
+
   // Al agregar al carrito reiniciamos la cantidad a 1, para que si el
   // cliente quiere agregar el mismo producto otra vez empiece de cero.
   function handleAgregarCarrito() {
-    onAgregarCarrito?.(producto, cantidad);
+    if (faltaSucursal) return;
+    onAgregarCarrito?.(producto, cantidad, sucursalElegida || null);
     setCantidad(1);
   }
 
@@ -256,7 +276,37 @@ export default function ProductCard({ producto, onAgregarCarrito }) {
             abajo están deshabilitados); "Disponible: N" (la cantidad exacta)
             se oculta hasta abrir "Ver más", igual que el resto del detalle. */}
         {sinStock && <p className="stock out">Agotado</p>}
-        {mostrarCampos && !sinStock && <p className="stock">Disponible: {producto.Stock}</p>}
+        {mostrarCampos && !sinStock && (
+          <p className="stock">
+            Disponible: {producto.Stock}
+            {sucursales && sucursales.length > 1 && <span className="stock-en-sucursales"> en {sucursales.length} sucursales</span>}
+          </p>
+        )}
+        {sucursales && !sinStock && (
+          <div className="sucursal-escoger" data-escoger-sucursal>
+            <label className="sucursal-escoger-label">
+              <span>🏪 {sucursales.length === 1 ? 'Sucursal' : `Escoge sucursal (${sucursales.length})`}</span>
+              <select
+                value={sucursalElegida ? String(sucursalElegida.id) : ''}
+                onChange={(e) => elegirSucursal(e.target.value)}
+                aria-label={`Escoge de qué sucursal quieres ${producto.Nombre}`}
+              >
+                {sucursales.length > 1 && <option value="">— ¿De qué sucursal? —</option>}
+                {sucursales.map((x) => (
+                  <option key={x.id} value={String(x.id)}>
+                    {x.nombre}{x.zona ? ` · ${x.zona}` : ''} — {x.disponible} disp.
+                  </option>
+                ))}
+              </select>
+            </label>
+            {sucursalElegida && (
+              <p className="sucursal-escoger-info" data-sucursal-elegida={sucursalElegida.id}>
+                📍 {sucursalElegida.zona || 'Zona sin especificar'} · <strong>{sucursalElegida.disponible}</strong> disponible
+                {Number(sucursalElegida.disponible) === 1 ? '' : 's'} aquí
+              </p>
+            )}
+          </div>
+        )}
 
         {mostrarCampos && descripcionCompleta && <p className="description">{descripcionMostrada}</p>}
         {mostrarCampos && producto.Talla && <p className="product-talla">Talla: {tallaMostrada}</p>}
@@ -291,10 +341,11 @@ export default function ProductCard({ producto, onAgregarCarrito }) {
           <button
             type="button"
             className="btn btn-carrito"
-            disabled={sinStock}
+            disabled={sinStock || faltaSucursal}
             onClick={handleAgregarCarrito}
+            title={faltaSucursal ? 'Primero escoge de qué sucursal lo quieres' : undefined}
           >
-            🛒 Agregar al pedido
+            {faltaSucursal ? '🏪 Escoge una sucursal' : '🛒 Agregar al pedido'}
           </button>
         </div>
       </div>
