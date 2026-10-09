@@ -1289,7 +1289,9 @@ function paginaDeTicket(datos) {
   raya();
 
   // ---- El QR con el folio ----
-  const qr = crearQR(datos.enlace || ticket.Folio || '');
+  // (2026-10-09) El QR SOLO lleva el enlace del ticket digital; sin enlace
+  // no se dibuja QR (antes llevaba el folio escrito).
+  const qr = datos.enlace ? crearQR(datos.enlace) : null;
   if (qr) {
     const MODULOS = qr.lado + 8; // con su orilla blanca de 4 cuadritos por lado
     const lado = 92;
