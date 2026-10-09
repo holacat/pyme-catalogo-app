@@ -5765,7 +5765,16 @@ function OrdenDelCatalogo({ productos, opciones, sucursales = [], usuarioId, pue
       const p = porId.get(String(x.productoId));
       // Las piezas que se ven son las de ESA sucursal, no las de toda la tienda.
       const piezas = x.disponible !== undefined ? x.disponible : x.cantidad;
-      if (p) lista.push({ ...p, Orden: lista.length + 1, Stock: piezas !== undefined ? piezas : p.Stock });
+      // (2026-10-08) Con la oferta de ESA sucursal (no la del general).
+      if (p) {
+        lista.push({
+          ...p,
+          Orden: lista.length + 1,
+          Stock: piezas !== undefined ? piezas : p.Stock,
+          PrecioOferta: Number(x.precioOferta) > 0 ? Number(x.precioOferta) : '',
+          EnOferta: false,
+        });
+      }
     });
     return lista;
   }, [productos, sucursalElegida]);
@@ -5814,6 +5823,7 @@ function OrdenDelCatalogo({ productos, opciones, sucursales = [], usuarioId, pue
         productosDeHoja={productos}
         opciones={opciones}
         sucursal={sucursalElegida ? { id: sucursalElegida.id, nombre: sucursalElegida.nombre } : null}
+        ofertasOrdenSucursal={sucursalElegida && Array.isArray(sucursalElegida.ofertasOrden) ? sucursalElegida.ofertasOrden : []}
       />
     </div>
   );
@@ -5824,15 +5834,17 @@ function OrdenDelCatalogo({ productos, opciones, sucursales = [], usuarioId, pue
 // de esa sucursal, no hay zona de Ofertas ni botones de renombrar / ocultar /
 // eliminar categorías (eso es del catálogo general, solo para Admin), y todo
 // se guarda de un jalón con "guardarOrdenSucursal".
-function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, terminarCarga, onDirtyChange, sucursal = null, productosDeHoja = null }) {
+function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, terminarCarga, onDirtyChange, sucursal = null, productosDeHoja = null, ofertasOrdenSucursal = [] }) {
   const modoSucursal = !!sucursal;
   const categoriasPredeterminadas = modoSucursal ? [] : (opciones.categoria || []);
   const categoriasOcultas = opciones.categoriaOculta || [];
   const categoriaOrdenExplicito = modoSucursal ? categoriasEnOrdenDeAparicion(productos) : (opciones.categoriaOrden || []);
-  const ofertasOrdenGuardado = opciones.ofertasOrden || [];
+  // (2026-10-08) En una sucursal, la zona de Ofertas es la SUYA: sus
+  // ofertas propias, en el orden que ella acomodó.
+  const ofertasOrdenGuardado = modoSucursal ? ofertasOrdenSucursal.map(String) : (opciones.ofertasOrden || []);
   const zonaOfertasOculta = !modoSucursal && (opciones.ofertasOculta || []).length > 0;
   const tituloOfertas = (opciones.ofertasTitulo || [])[0] || 'Ofertas';
-  const ofertasDe = (lista) => (modoSucursal ? [] : ordenarOfertas(lista, ofertasOrdenGuardado));
+  const ofertasDe = (lista) => ordenarOfertas(lista, ofertasOrdenGuardado);
 
   const [gruposLocal, setGruposLocal] = useState(() =>
     agruparParaOrden(productos, categoriasPredeterminadas, categoriasOcultas, categoriaOrdenExplicito)
@@ -6065,7 +6077,8 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
           sucursalId: sucursal.id,
           productos: gruposLocal.flatMap((g) => g.productos.map((p) => String(p.ID))),
           categorias: gruposLocal.map((g) => g.nombre),
-          resumen: [resumenDe('p'), resumenDe('c')].filter(Boolean).join(' | ') || undefined,
+          ofertas: ofertasLocal.map((p) => String(p.ID)),
+          resumen: [resumenDe('p'), resumenDe('c'), resumenDe('o')].filter(Boolean).join(' | ') || undefined,
         });
         limpiarCambios();
         await onCambio();
@@ -6179,7 +6192,10 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
           sucursalId: sucursal.id,
           productos: gruposLocal.flatMap((g) => (acomodadosPorCategoria[g.nombre] || g.productos).map((p) => String(p.ID))),
           categorias: gruposLocal.map((g) => g.nombre),
-          resumen: `Productos — ${categoriasCambiadas.length === 1 ? `"${categoriasCambiadas[0]}"` : `${categoriasCambiadas.length} categorías`}: acomodados ${frase}`,
+          ofertas: (ofertasAcomodadas || ofertasLocal).map((p) => String(p.ID)),
+          resumen: alcance === 'ofertas'
+            ? `Zona de Ofertas — acomodada ${frase}`
+            : `Productos — ${categoriasCambiadas.length === 1 ? `"${categoriasCambiadas[0]}"` : `${categoriasCambiadas.length} categorías`}: acomodados ${frase}`,
         });
       } else if (cambios.length > 0) {
         const cuales =
@@ -6192,7 +6208,7 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
           resumen: `Productos — ${cuales}: acomodados ${frase} (${cambios.length} producto${cambios.length === 1 ? '' : 's'})`,
         });
       }
-      if (ofertasAcomodadas) {
+      if (ofertasAcomodadas && !modoSucursal) {
         await actualizarOrdenOfertas({
           sesionToken,
           productoIds: ofertasAcomodadas.map((p) => p.ID),
@@ -6968,6 +6984,7 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
             </h3>
             <div className="orden-categoria-botones">
               {botonesOrdenRapidoJSX('ofertas', '', 'btn btn-secondary btn-small btn-orden-rapido', true)}
+              {!modoSucursal && (<>
               <button
                 type="button"
                 className="btn btn-secondary btn-small btn-icono"
@@ -7008,15 +7025,23 @@ function OrdenTab({ productos, opciones, sesionToken, onCambio, iniciarCarga, te
               >
                 <span aria-hidden="true">🗑️</span>
               </button>
+              </>)}
             </div>
           </div>
           {!ofertasContraida && (
             <>
+              {modoSucursal ? (
+                <p className="muted orden-ofertas-nota">
+                  Son las ofertas PROPIAS de esta sucursal (las del catálogo general no salen aquí). Aquí decides en qué
+                  orden van. Para poner o quitar una oferta, o cambiar su precio, ve a 🏪 Mi sucursal → 🔥 Oferta.
+                </p>
+              ) : (
               <p className="muted orden-ofertas-nota">
                 Es el carrusel de "🔥 {tituloOfertas}" que sale hasta arriba del catálogo. Aquí decides en qué orden van.
                 "Ocultar" NO quita los productos ni su precio de oferta: siguen saliendo en su categoría de siempre. Para
                 sacar UN producto de Ofertas, edítalo en Stock (quítale el precio de oferta).
               </p>
+              )}
               {ofertasLocal.length === 0 ? (
                 <p className="muted">Ahorita no hay ningún producto en oferta.</p>
               ) : (
@@ -9091,6 +9116,36 @@ function SucursalTab({ sucursales, ventasRecientes = [], usuarioId, esAdminCentr
       });
   }
 
+  // (2026-10-08) La oferta propia de esta sucursal para un producto.
+  function cambiarOferta(p, precioOferta) {
+    setOcupadoId(p.productoId);
+    setMensaje('');
+    setMensajeListo('');
+    iniciarCarga?.();
+    const quitar = String(precioOferta).trim() === '' || Number(precioOferta) === 0;
+    return actualizarCatalogoSucursal({
+      sesionToken,
+      usuarioId: esLaMia ? undefined : sucursal.id,
+      productoId: p.productoId,
+      operacion: 'oferta',
+      precioOferta: quitar ? '' : String(precioOferta).trim(),
+    })
+      .then(() => {
+        setMensajeListo(quitar
+          ? `"${p.nombre}" ya no tiene oferta en ${esLaMia ? 'tu' : 'este'} catálogo.`
+          : `"${p.nombre}" quedó en oferta a ${formatearMoneda(Number(precioOferta))} en ${esLaMia ? 'tu' : 'este'} catálogo (solo aquí, no en el general).`);
+        return onCambio();
+      })
+      .catch((err) => {
+        setMensaje(`No se pudo guardar la oferta: ${err.message}`);
+        throw err;
+      })
+      .finally(() => {
+        setOcupadoId('');
+        terminarCarga?.();
+      });
+  }
+
   const tus = esLaMia ? 'tus' : 'sus';
   const filtros = [
     { clave: 'todos', texto: 'Todos', cuantos: productos.length },
@@ -9210,6 +9265,19 @@ function SucursalTab({ sucursales, ventasRecientes = [], usuarioId, esAdminCentr
                 <TextoConComentario
                   comentario={
                     <>
+                      <strong>La oferta de {esLaMia ? 'tu' : 'esta'} sucursal.</strong> Solo sale en el catálogo de{' '}
+                      {esLaMia ? 'tu' : 'esta'} sucursal (no en el general), y el pedido se cobra a ese precio. Las ofertas del
+                      catálogo general no salen aquí.
+                    </>
+                  }
+                >
+                  🔥 Oferta
+                </TextoConComentario>
+              </th>
+              <th>
+                <TextoConComentario
+                  comentario={
+                    <>
                       <strong>Visible:</strong> las clientas lo ven y lo pueden pedir. <strong>Agotado:</strong> lo ven,
                       pero sin piezas para pedir. <strong>Oculto:</strong> no sale en este catálogo.
                     </>
@@ -9260,6 +9328,13 @@ function SucursalTab({ sucursales, ventasRecientes = [], usuarioId, esAdminCentr
                     {p.enProceso || 0}
                   </td>
                   <td><strong>{p.disponible}</strong></td>
+                  <td className="sucursal-celda-oferta">
+                    <OfertaDeSucursal
+                      producto={p}
+                      ocupado={ocupado}
+                      onGuardar={(precioOferta) => cambiarOferta(p, precioOferta)}
+                    />
+                  </td>
                   <td>
                     {estado === 'catalogo' && (
                       <span className="sucursal-sello sucursal-sello-ok" title="Las clientas lo ven y lo pueden pedir">Visible</span>
@@ -12282,6 +12357,69 @@ function MensajeDelPanel({ texto, onQuitar }) {
       {texto}
       <span className="mensaje-temporal-x" aria-hidden="true">✕</span>
     </p>
+  );
+}
+
+// ---- Oferta propia de una sucursal (2026-10-08) ----
+// En "Mi sucursal", por producto: "🔥 $250" (o "—") y un ✏️ para ponerla,
+// cambiarla o quitarla. Debe ser menor que el precio normal.
+function OfertaDeSucursal({ producto, ocupado, onGuardar }) {
+  const [editando, setEditando] = useState(false);
+  const [valor, setValor] = useState('');
+  const normal = Number(producto.precio) || 0;
+  const actual = Number(producto.precioOferta) || 0;
+  const escrito = String(valor).trim();
+  const numero = Number(escrito);
+  const malo = escrito !== '' && (!Number.isFinite(numero) || numero < 0 || (numero > 0 && !(numero < normal)));
+  function abrir() {
+    setValor(actual > 0 ? String(actual) : '');
+    setEditando(true);
+  }
+  function guardar(precio) {
+    Promise.resolve(onGuardar(precio)).then(() => setEditando(false), () => {});
+  }
+  if (!editando) {
+    return (
+      <span className="sucursal-oferta" data-oferta-sucursal={actual > 0 ? 'si' : 'no'}>
+        {actual > 0 ? (
+          <span className="sucursal-oferta-precio" title={`Normal: ${formatearMoneda(normal)}`}>🔥 {formatearMoneda(actual)}</span>
+        ) : (
+          <span className="muted">—</span>
+        )}
+        <button type="button" className="btn btn-secondary btn-chip" onClick={abrir} disabled={ocupado} data-oferta-editar>
+          {actual > 0 ? '✏️' : '+ Oferta'}
+        </button>
+      </span>
+    );
+  }
+  return (
+    <span className="sucursal-oferta sucursal-oferta-editando">
+      <input
+        type="text"
+        inputMode="decimal"
+        value={valor}
+        onChange={(e) => setValor(e.target.value.replace(/[^0-9.]/g, '').slice(0, 10))}
+        placeholder={`Menos de ${normal}`}
+        className={malo ? 'pedido-reembolso-mal' : ''}
+        aria-label="Precio de oferta en esta sucursal"
+        autoFocus
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && !malo && escrito !== '') guardar(escrito);
+          if (e.key === 'Escape') setEditando(false);
+        }}
+        data-oferta-precio
+      />
+      <button type="button" className="btn btn-primary btn-chip" disabled={ocupado || malo || escrito === ''} onClick={() => guardar(escrito)} data-oferta-guardar>
+        Guardar
+      </button>
+      {actual > 0 && (
+        <button type="button" className="btn btn-secondary btn-chip" disabled={ocupado} onClick={() => guardar('')} data-oferta-quitar>
+          Quitar
+        </button>
+      )}
+      <button type="button" className="btn btn-secondary btn-chip" onClick={() => setEditando(false)} aria-label="Cancelar">✕</button>
+      {malo && <span className="pedido-reembolso-error">Debe ser menor que {formatearMoneda(normal)}.</span>}
+    </span>
   );
 }
 
