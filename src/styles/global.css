@@ -5219,3 +5219,17 @@ td.mov-piezas.mov-salida { color: #b91c1c; }
   .compra-barra-cerrar { margin-left: 0; }
   .compra-barra-motivo { flex: 1 1 8rem; }
 }
+
+/* ---- (2026-10-08) Oferta propia de una sucursal ("Mi sucursal") ---- */
+.sucursal-oferta { display: inline-flex; align-items: center; flex-wrap: nowrap; gap: 0.3rem; white-space: nowrap; }
+.sucursal-oferta .btn-chip { padding: 0.15rem 0.45rem; width: auto; }
+.sucursal-oferta-editando { flex-wrap: wrap; white-space: normal; max-width: 15rem; }
+.sucursal-oferta-precio { color: #b91c1c; font-weight: 700; white-space: nowrap; }
+.sucursal-oferta-editando input {
+  width: 6.5rem;
+  padding: 0.25rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+.sucursal-celda-oferta { min-width: 7rem; }
