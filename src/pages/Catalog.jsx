@@ -859,15 +859,28 @@ function CatalogoDeProductos() {
 
   // Agrega un producto al carrito. Si ya estaba, le suma la cantidad
   // (sin pasarse del stock disponible).
-  // (2026-10-09) En el catálogo general cada renglón es "producto + la
-  // sucursal que se escogió": su tope es lo que tiene ESA sucursal.
-  function handleAgregarCarrito(producto, cantidad, sucursalElegida) {
+  // (2026-10-09) Un pedido es de UNA sola sucursal. Claudia: "solo debería
+  // dejarte escoger una sucursal: haces el pedido y, si quieres de otra,
+  // vuelves a hacer otro pedido seleccionando otra sucursal". La sucursal
+  // del pedido es la del primer producto que se agregó.
+  const sucursalDelCarrito = (carrito.find((it) => it.sucursal) || {}).sucursal || null;
+  // Se intentó agregar algo de OTRA sucursal: { producto, cantidad, sucursalElegida }.
+  const [avisoOtraSucursal, setAvisoOtraSucursal] = useState(null);
+
+  // En el catálogo general cada renglón es "producto + la sucursal que se
+  // escogió": su tope es lo que tiene ESA sucursal.
+  function handleAgregarCarrito(producto, cantidad, sucursalElegida, empezarDeNuevo = false) {
+    if (!empezarDeNuevo && sucursalElegida && sucursalDelCarrito && String(sucursalElegida.id) !== String(sucursalDelCarrito.id)) {
+      setAvisoOtraSucursal({ producto, cantidad, sucursalElegida });
+      return;
+    }
     const sucursal = sucursalElegida
       ? { id: String(sucursalElegida.id), nombre: sucursalElegida.nombre, zona: sucursalElegida.zona || '', telefono: sucursalElegida.telefono || '' }
       : null;
     const productoDelRenglon = sucursalElegida ? { ...producto, Stock: Number(sucursalElegida.disponible) || 0 } : producto;
     const nuevo = { producto: productoDelRenglon, cantidad, sucursal };
-    setCarrito((prev) => {
+    setCarrito((anterior) => {
+      const prev = empezarDeNuevo ? [] : anterior;
       const stockDisponible = Number(productoDelRenglon.Stock) || 0;
       const clave = claveDeItem(nuevo);
       const idx = prev.findIndex((it) => claveDeItem(it) === clave);
@@ -1019,6 +1032,9 @@ function CatalogoDeProductos() {
           'Este catálogo ya no está disponible, así que tu pedido no quedó anotado.' +
             (yaSalioWhatsApp ? ' Si ya mandaste el mensaje de WhatsApp, ponte de acuerdo ahí mismo con quien te atiende.' : '')
         );
+      } else if (datos.variasSucursales) {
+        setTipoErrorRegistro('existencia');
+        setErrorRegistroPedido(`${err.message} Revisa tu pedido: deja solo los productos de una sucursal.`);
       } else if (datos.sinExistencia) {
         // Catálogo de sucursal: alguien más se llevó piezas mientras tanto.
         // No se registró nada. Se ajusta el pedido a lo que de verdad queda
@@ -1134,6 +1150,46 @@ function CatalogoDeProductos() {
       </div>
     </div>
   ) : null;
+  // Aviso al querer agregar algo de otra sucursal.
+  const avisoDeOtraSucursal = avisoOtraSucursal && sucursalDelCarrito ? (
+    <div className="modal-overlay" onClick={() => setAvisoOtraSucursal(null)}>
+      <div className="modal-box aviso-otra-sucursal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()} data-aviso-otra-sucursal>
+        <p className="modal-check" aria-hidden="true">🏪</p>
+        <h3>Tu pedido es de la sucursal {sucursalDelCarrito.nombre}</h3>
+        <p>
+          Un pedido es de una sola sucursal. Para pedir <strong>{avisoOtraSucursal.producto.Nombre}</strong> de{' '}
+          <strong>{avisoOtraSucursal.sucursalElegida.nombre}</strong>, primero manda tu pedido de {sucursalDelCarrito.nombre} y
+          luego haz otro con {avisoOtraSucursal.sucursalElegida.nombre}.
+        </p>
+        <div className="aviso-envio-botones">
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => { setAvisoOtraSucursal(null); setCarritoAbierto(true); }}
+            data-aviso-ver-pedido
+          >
+            🛒 Ver y mandar mi pedido
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => {
+              const a = avisoOtraSucursal;
+              setAvisoOtraSucursal(null);
+              handleAgregarCarrito(a.producto, a.cantidad, a.sucursalElegida, true);
+            }}
+            data-aviso-empezar-otro
+          >
+            Vaciar mi pedido y empezar uno de {avisoOtraSucursal.sucursalElegida.nombre}
+          </button>
+          <button type="button" className="link-button" onClick={() => setAvisoOtraSucursal(null)}>
+            Cancelar
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
   const avisoEnvio = envioPedido ? (
     <div
       className="modal-overlay"
@@ -1354,6 +1410,7 @@ function CatalogoDeProductos() {
         producto={p}
         onAgregarCarrito={handleAgregarCarrito}
         escogerSucursal={eligeSucursal}
+        sucursalPreferida={sucursalDelCarrito ? sucursalDelCarrito.id : ''}
       />
     ));
   }
@@ -1593,12 +1650,14 @@ function CatalogoDeProductos() {
           "reabrir" — y evita que alguien le dé doble clic por accidente
           mientras espera. */}
       {avisoEnvio}
+      {avisoDeOtraSucursal}
 
       {/* El botón del carrito se esconde mientras se envía y mientras el
           aviso central está abierto (flota por encima de todo y estorbaba). */}
       {totalProductosEnCarrito > 0 && !registrandoPedido && !envioPedido && (
         <button type="button" className="carrito-flotante" onClick={() => setCarritoAbierto(true)}>
-          🛒 {totalProductosEnCarrito} producto{totalProductosEnCarrito === 1 ? '' : 's'} — Ver pedido
+          🛒 {totalProductosEnCarrito} producto{totalProductosEnCarrito === 1 ? '' : 's'}
+          {sucursalDelCarrito ? ` de ${sucursalDelCarrito.nombre}` : ''} — Ver pedido
         </button>
       )}
 
